@@ -220,14 +220,33 @@ function describeFirestoreError(err){
 }
 
 async function initializeAdmin(){
-  // Carrega primeiro as configurações, porque os demais módulos usam timezone,
-  // permissões e preferências da loja.
   await loadSettings();
-  await Promise.all([loadCategories(),loadProducts()]);
-  if(isMaster()) await loadUsers();
+
+  const tasks=[];
+  const role=currentProfile?.role||'operator';
+
+  if(['master','manager'].includes(role)){
+    tasks.push(loadCategories(),loadProducts());
+  }
+
+  if(['master','manager','cashier'].includes(role)){
+    tasks.push(loadCustomers());
+  }
+
+  if(isMaster()) tasks.push(loadUsers());
+
+  await Promise.all(tasks);
   listenOrders();
-  renderSchedules();
-  renderSettings();
+
+  if(['master','manager'].includes(role)){
+    renderSchedules();
+    renderSettings();
+  }
+
+  if(['master','manager','cashier'].includes(role)){
+    loadPrintSettingsUI();
+    checkPrintAgent();
+  }
 }
 
 async function loadSettings(){
@@ -302,13 +321,16 @@ $('#soundBtn').onclick=async()=>{
 
 $$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
 
-function applyRoleUI(){
+function allowedViews(){
   const role=currentProfile?.role||'operator';
-  const allowed=role==='master'
-    ?['orders','products','categories','users','settings']
-    :role==='manager'
-      ?['orders','products','categories','settings']
-      :['orders'];
+  if(role==='master') return ['orders','products','categories','customers','printing','users','settings'];
+  if(role==='manager') return ['orders','products','categories','customers','printing','settings'];
+  if(role==='cashier') return ['orders','customers','printing'];
+  return ['orders'];
+}
+
+function applyRoleUI(){
+  const allowed=allowedViews();
   $$('.nav-item').forEach(item=>item.classList.toggle('hidden',!allowed.includes(item.dataset.view)));
   if(!allowed.includes(document.querySelector('.admin-view.active')?.id?.replace('view-',''))){
     switchView('orders');
@@ -316,24 +338,26 @@ function applyRoleUI(){
 }
 
 function switchView(v){
-  const role=currentProfile?.role||'operator';
-  const allowed=role==='master'
-    ?['orders','products','categories','users','settings']
-    :role==='manager'
-      ?['orders','products','categories','settings']
-      :['orders'];
+  const allowed=allowedViews();
   if(!allowed.includes(v)) return;
+
   $$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   $$('.admin-view').forEach(x=>x.classList.toggle('active',x.id===`view-${v}`));
+
   const titles={
     orders:['OPERAÇÃO','Pedidos'],
     products:['CARDÁPIO','Produtos'],
     categories:['CARDÁPIO','Categorias'],
+    customers:['CLIENTES','Clientes'],
+    printing:['ESTAÇÃO','Impressão'],
     users:['SEGURANÇA','Usuários'],
     settings:['SISTEMA','Configurações']
   };
+
   $('#viewEyebrow').textContent=titles[v][0];
   $('#viewTitle').textContent=titles[v][1];
+
+  if(v==='printing') checkPrintAgent();
 }
 
 function renderStats(){
@@ -343,8 +367,8 @@ function renderStats(){
     return d&&new Intl.DateTimeFormat('en-CA',{timeZone:settings.timezone||'America/Porto_Velho'}).format(d)===today;
   };
   $('#statPending').textContent=orders.filter(o=>o.status==='pending').length;
+  $('#statAccepted').textContent=orders.filter(o=>o.status==='accepted').length;
   $('#statPreparing').textContent=orders.filter(o=>o.status==='preparing').length;
-  $('#statDelivery').textContent=orders.filter(o=>o.status==='out_for_delivery').length;
   $('#statToday').textContent=orders.filter(sameDay).length;
   const p=orders.filter(o=>o.status==='pending').length;
   $('#pendingBadge').textContent=p;
