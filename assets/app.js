@@ -1,6 +1,6 @@
 import {
   auth, db, watchCustomer, loginWithGoogle, loginWithEmail, registerWithEmail,
-  resetCustomerPassword, friendlyAuthError, getCustomerProfile, getAddresses,
+  resetCustomerPassword, friendlyAuthError, getCustomerProfile, saveCustomerProfile, getAddresses,
   saveAddress, setDefaultAddress, getFavorites, setFavorite
 } from './customer-auth.js';
 import {
@@ -604,6 +604,7 @@ function openCheckout(){
   if(!customer) return;
   if(!cart.length) return;
   renderCheckoutAddress();
+  $('#checkoutPhone').value=customerProfile?.phone||activeAddress()?.phone||'';
   renderPaymentOptions();
   renderCart();
   $('#checkoutError').classList.add('hidden');
@@ -693,10 +694,15 @@ $('#checkoutForm').addEventListener('submit',async e=>{
   try{
     const autoAccepted=settings.autoAcceptOrders===true;
     const profileName=customerProfile?.name||customer.displayName||'Cliente';
-    const profilePhone=customerProfile?.phone||address?.phone||'';
+    const profilePhone=$('#checkoutPhone').value.trim();
 
     if(!profilePhone){
-      return showCheckoutError('Informe um telefone de contato na sua conta ou no endereço.');
+      return showCheckoutError('Informe um telefone de contato.');
+    }
+
+    if(profilePhone!==customerProfile?.phone){
+      await saveCustomerProfile(customer.uid,{name:profileName,phone:profilePhone});
+      customerProfile={...customerProfile,name:profileName,phone:profilePhone};
     }
 
     let orderNumber=0;
