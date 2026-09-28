@@ -63,7 +63,10 @@ async function loadStore(){
       getDoc(doc(db,'settings','store'))
     ]);
     categories=catSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.active!==false).sort((a,b)=>(a.order||0)-(b.order||0));
-    products=prodSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.active!==false).sort((a,b)=>(a.order||0)-(b.order||0));
+    const activeCategoryIds=new Set(categories.map(x=>x.id));
+    products=prodSnap.docs.map(d=>({id:d.id,...d.data()}))
+      .filter(x=>x.active!==false&&activeCategoryIds.has(x.categoryId))
+      .sort((a,b)=>(a.order||0)-(b.order||0));
     settings=setSnap.exists()?{...defaultSettings,...setSnap.data()}:defaultSettings;
     renderStore();
     const productId=new URLSearchParams(location.search).get('product');
