@@ -40,6 +40,30 @@ jobs:
       - name: Validate manifest JSON
         run: node -e "JSON.parse(require('fs').readFileSync('manifest.webmanifest','utf8')); console.log('manifest OK')"
 
+      - name: Check JavaScript id references
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          pairs = [
+              (Path('assets/app.js'), Path('index.html')),
+              (Path('account/account.js'), Path('account/index.html')),
+              (Path('admin/admin.js'), Path('admin/index.html')),
+              (Path('admin/print.js'), Path('admin/print.html')),
+          ]
+
+          for js_path, html_path in pairs:
+              js = js_path.read_text(encoding='utf-8')
+              html = html_path.read_text(encoding='utf-8')
+              ids = set(re.findall(r'id=["\']([^"\']+)["\']', html))
+              refs = set(re.findall(r"\$\('#([A-Za-z0-9_-]+)'\)", js))
+              missing = sorted(refs - ids)
+              if missing:
+                  raise SystemExit(f'{js_path}: IDs ausentes em {html_path}: {missing}')
+              print(f'{js_path}: referências de ID OK ({len(refs)})')
+          PY
+
       - name: Check duplicate HTML ids
         run: |
           python - <<'PY'
