@@ -475,6 +475,40 @@ function renderStats(){
   $('#pendingBadge').classList.toggle('hidden',p===0);
 }
 
+function quickTransition(order){
+  const candidates={
+    pending:{status:'accepted',label:'Aceitar'},
+    accepted:{status:'preparing',label:'Iniciar preparo'},
+    preparing:{status:'ready',label:'Marcar pronto'},
+    ready:order.fulfillment==='pickup'
+      ?{status:'completed',label:'Concluir retirada'}
+      :{status:'out_for_delivery',label:'Saiu p/ entrega'},
+    out_for_delivery:{status:'completed',label:'Concluir entrega'}
+  };
+  const next=candidates[order.status];
+  if(!next) return null;
+  return allowedStatusTargets(order).includes(next.status)?next:null;
+}
+
+async function updateOrderStatus(order,status){
+  if(!order||status===order.status) return;
+  if(status==='accepted'){
+    const pricing=verifyOrderPricing(order);
+    if(!pricing.valid){
+      const proceed=confirm('Os valores deste pedido divergem do cardápio atual. Deseja aceitar mesmo assim?\n\n'+pricing.issues.join('\n'));
+      if(!proceed) return;
+    }
+  }
+  const patch={status,updatedAt:serverTimestamp()};
+  if(status==='accepted') patch.acceptedAt=serverTimestamp();
+  if(status==='completed') patch.completedAt=serverTimestamp();
+  if(status==='cancelled') patch.cancelledAt=serverTimestamp();
+  await updateDoc(doc(db,'orders',order.id),patch);
+  if(status==='accepted'&&printConfig.autoPrint){
+    await printOrder({...order,status:'accepted'},true);
+  }
+}
+
 function renderOrders(){
   const f=$('#orderStatusFilter').value;
   const term=$('#orderSearch').value.trim().toLowerCase();
@@ -490,12 +524,36 @@ function renderOrders(){
 
   $('#ordersList').innerHTML=list.length?list.map(o=>{
     const pricing=verifyOrderPricing(o);
-    return `<button class="order-row" data-id="${o.id}" style="border-left:0;border-right:0;border-top:0;background:#fff;text-align:left;width:100%"><span class="order-number">#${String(o.orderNumber||0).padStart(4,'0')}</span><span class="order-meta"><strong>${esc(o.customer?.name||'Cliente')}</strong><small>${esc(o.customer?.phone||'')} • ${formatDate(o.createdAt)}${pricing.valid?'':' • ⚠ valores divergentes'}</small></span><span class="status-pill status-${o.status}">${statusLabels[o.status]||o.status}</span><strong>${money(o.total)}</strong></button>`;
+    const quick=quickTransition(o);
+    return `<article class="order-row order-row-modern" data-id="${o.id}">
+      <button class="order-main-hit" data-open-order="${o.id}" type="button" aria-label="Abrir pedido #${o.orderNumber}">
+        <span class="order-number">#${String(o.orderNumber||0).padStart(4,'0')}</span>
+        <span class="order-meta"><strong>${esc(o.customer?.name||'Cliente')}</strong><small>${esc(o.customer?.phone||'')} • ${formatDate(o.createdAt)}${pricing.valid?'':' • ⚠ valores divergentes'}</small></span>
+        <span class="status-pill status-${o.status}">${statusLabels[o.status]||o.status}</span>
+        <strong class="order-total">${money(o.total)}</strong>
+      </button>
+      <div class="order-row-actions">
+        ${quick?`<button class="btn btn-primary quick-order-action" data-id="${o.id}" data-status="${quick.status}" type="button">${quick.label}</button>`:''}
+        <button class="btn btn-secondary order-details-action" data-id="${o.id}" type="button">Detalhes</button>
+      </div>
+    </article>`;
   }).join(''):'<div class="empty-state">Nenhum pedido encontrado.</div>';
 
-  $$('.order-row').forEach(r=>r.onclick=()=>openOrder(r.dataset.id));
+  $$('[data-open-order]').forEach(b=>b.onclick=()=>openOrder(b.dataset.openOrder));
+  $$('.order-details-action').forEach(b=>b.onclick=()=>openOrder(b.dataset.id));
+  $$('.quick-order-action').forEach(b=>b.onclick=async()=>{
+    b.disabled=true;
+    try{
+      const order=orders.find(o=>o.id===b.dataset.id);
+      await updateOrderStatus(order,b.dataset.status);
+    }catch(err){
+      console.error(err);
+      alert('Não foi possível atualizar o pedido.');
+    }finally{
+      b.disabled=false;
+    }
+  });
 }
-
 $('#orderStatusFilter').onchange=renderOrders;
 $('#orderSearch').oninput=renderOrders;
 
@@ -604,25 +662,7 @@ function openOrder(id){
   `;
 
   async function changeStatus(status){
-    if(status===o.status) return;
-    if(status==='accepted'){
-      const pricing=verifyOrderPricing(o);
-      if(!pricing.valid){
-        const proceed=confirm('Os valores deste pedido divergem do cardápio atual. Deseja aceitar mesmo assim?\n\n'+pricing.issues.join('\n'));
-        if(!proceed) return;
-      }
-    }
-    const patch={status,updatedAt:serverTimestamp()};
-    if(status==='accepted') patch.acceptedAt=serverTimestamp();
-    if(status==='completed') patch.completedAt=serverTimestamp();
-    if(status==='cancelled') patch.cancelledAt=serverTimestamp();
-
-    await updateDoc(doc(db,'orders',o.id),patch);
-
-    if(status==='accepted'&&printConfig.autoPrint){
-      await printOrder({...o,status:'accepted'},true);
-    }
-
+    await updateOrderStatus(o,status);
     $('#orderDialog').close();
   }
 
@@ -1194,52 +1234,62 @@ $('#settingsForm').onsubmit=async e=>{
 
 $('#seedBtn').onclick=async()=>{
   if(categories.length||products.length){
-    if(!confirm('Já existem itens no cardápio. Continuar e adicionar exemplos?')) return;
+    if(!confirm('Já existem itens no cardápio. Continuar e adicionar o cardápio demonstrativo completo?')) return;
   }
 
   const batch=writeBatch(db);
   const catRefs={
-    pizzas:doc(collection(db,'categories')),
-    bebidas:doc(collection(db,'categories'))
+    savory:doc(collection(db,'categories')),
+    sweet:doc(collection(db,'categories')),
+    drinks:doc(collection(db,'categories')),
+    combos:doc(collection(db,'categories'))
   };
 
-  batch.set(catRefs.pizzas,{name:'Pizzas',order:1,active:true,createdAt:serverTimestamp()});
-  batch.set(catRefs.bebidas,{name:'Bebidas',order:2,active:true,createdAt:serverTimestamp()});
+  batch.set(catRefs.savory,{name:'Pizzas Salgadas',order:1,active:true,createdAt:serverTimestamp()});
+  batch.set(catRefs.sweet,{name:'Pizzas Doces',order:2,active:true,createdAt:serverTimestamp()});
+  batch.set(catRefs.drinks,{name:'Bebidas',order:3,active:true,createdAt:serverTimestamp()});
+  batch.set(catRefs.combos,{name:'Combos',order:4,active:true,createdAt:serverTimestamp()});
+
+  const sizes=(p,m,g)=>[{name:'Pequena',price:p},{name:'Média',price:m},{name:'Grande',price:g}];
+  const savoryExtras=[
+    {name:'Borda de catupiry',price:8},
+    {name:'Borda de cheddar',price:8},
+    {name:'Borda de cream cheese',price:10},
+    {name:'Bacon extra',price:6},
+    {name:'Queijo extra',price:6}
+  ];
+  const image='assets/products/placeholder.svg';
 
   const samples=[
-    {
-      name:'Pizza Calabresa',
-      categoryId:catRefs.pizzas.id,
-      description:'Molho de tomate, muçarela, calabresa fatiada, cebola e orégano.',
-      image:'assets/products/placeholder.svg',
-      sizes:[{name:'Pequena',price:35},{name:'Média',price:45},{name:'Grande',price:55}],
-      extras:[{name:'Borda de catupiry',price:8},{name:'Bacon extra',price:6}],
-      price:0,order:1,active:true,featured:true,isPizza:true,allowHalfHalf:true
-    },
-    {
-      name:'Pizza Frango com Catupiry',
-      categoryId:catRefs.pizzas.id,
-      description:'Frango desfiado, catupiry, muçarela e orégano.',
-      image:'assets/products/placeholder.svg',
-      sizes:[{name:'Pequena',price:38},{name:'Média',price:48},{name:'Grande',price:58}],
-      extras:[{name:'Borda de catupiry',price:8}],
-      price:0,order:2,active:true,isPizza:true,allowHalfHalf:true
-    },
-    {
-      name:'Coca-Cola 2L',
-      categoryId:catRefs.bebidas.id,
-      description:'Refrigerante Coca-Cola 2 litros.',
-      image:'assets/products/placeholder.svg',
-      sizes:[],extras:[],price:14,order:1,active:true
-    },
-    {
-      name:'Guaraná 2L',
-      categoryId:catRefs.bebidas.id,
-      description:'Refrigerante Guaraná 2 litros.',
-      image:'assets/products/placeholder.svg',
-      sizes:[],extras:[],price:12,order:2,active:true
-    }
-  ];
+    {name:'Pizza Calabresa',categoryId:catRefs.savory.id,description:'Molho, muçarela, calabresa, cebola e orégano.',sizes:sizes(35,45,55),extras:savoryExtras,order:1,featured:true,isPizza:true,allowHalfHalf:true},
+    {name:'Pizza Frango com Catupiry',categoryId:catRefs.savory.id,description:'Frango desfiado, catupiry, muçarela e orégano.',sizes:sizes(38,48,58),extras:savoryExtras,order:2,featured:true,isPizza:true,allowHalfHalf:true},
+    {name:'Pizza Portuguesa',categoryId:catRefs.savory.id,description:'Presunto, ovos, cebola, ervilha, muçarela e orégano.',sizes:sizes(39,49,59),extras:savoryExtras,order:3,isPizza:true,allowHalfHalf:true},
+    {name:'Pizza Quatro Queijos',categoryId:catRefs.savory.id,description:'Muçarela, provolone, parmesão e catupiry.',sizes:sizes(40,50,62),extras:savoryExtras,order:4,isPizza:true,allowHalfHalf:true},
+    {name:'Pizza Bacon',categoryId:catRefs.savory.id,description:'Muçarela, bacon crocante, tomate e orégano.',sizes:sizes(39,49,60),extras:savoryExtras,order:5,isPizza:true,allowHalfHalf:true},
+    {name:'Pizza Marguerita',categoryId:catRefs.savory.id,description:'Muçarela, tomate, manjericão e molho de tomate.',sizes:sizes(34,44,54),extras:savoryExtras,order:6,isPizza:true,allowHalfHalf:true},
+    {name:'Pizza Carne Seca',categoryId:catRefs.savory.id,description:'Carne seca desfiada, cebola roxa, muçarela e catupiry.',sizes:sizes(44,56,68),extras:savoryExtras,order:7,isPizza:true,allowHalfHalf:true},
+    {name:'Pizza Pepperoni',categoryId:catRefs.savory.id,description:'Muçarela, pepperoni e molho especial.',sizes:sizes(42,54,65),extras:savoryExtras,order:8,isPizza:true,allowHalfHalf:true},
+    {name:'Pizza Vegetariana',categoryId:catRefs.savory.id,description:'Milho, palmito, tomate, cebola, azeitona e muçarela.',sizes:sizes(37,47,57),extras:savoryExtras,order:9,isPizza:true,allowHalfHalf:true},
+    {name:'Pizza Moda da Casa',categoryId:catRefs.savory.id,description:'Calabresa, frango, bacon, muçarela e molho da casa.',sizes:sizes(45,57,69),extras:savoryExtras,order:10,featured:true,isPizza:true,allowHalfHalf:true},
+
+    {name:'Pizza Chocolate',categoryId:catRefs.sweet.id,description:'Chocolate ao leite e granulado.',sizes:sizes(36,46,56),extras:[],order:1,isPizza:true,allowHalfHalf:false},
+    {name:'Pizza Chocolate com Morango',categoryId:catRefs.sweet.id,description:'Chocolate ao leite com morangos.',sizes:sizes(40,50,62),extras:[],order:2,featured:true,isPizza:true,allowHalfHalf:false},
+    {name:'Pizza Prestígio',categoryId:catRefs.sweet.id,description:'Chocolate, coco ralado e leite condensado.',sizes:sizes(39,49,59),extras:[],order:3,isPizza:true,allowHalfHalf:false},
+    {name:'Pizza Romeu e Julieta',categoryId:catRefs.sweet.id,description:'Muçarela com goiabada.',sizes:sizes(37,47,57),extras:[],order:4,isPizza:true,allowHalfHalf:false},
+
+    {name:'Coca-Cola 2L',categoryId:catRefs.drinks.id,description:'Refrigerante Coca-Cola 2 litros.',sizes:[],extras:[],price:14,order:1,featured:true},
+    {name:'Coca-Cola 1L',categoryId:catRefs.drinks.id,description:'Refrigerante Coca-Cola 1 litro.',sizes:[],extras:[],price:10,order:2},
+    {name:'Coca-Cola 600ml',categoryId:catRefs.drinks.id,description:'Refrigerante Coca-Cola 600 ml.',sizes:[],extras:[],price:8,order:3},
+    {name:'Coca-Cola Lata 350ml',categoryId:catRefs.drinks.id,description:'Refrigerante Coca-Cola lata 350 ml.',sizes:[],extras:[],price:6,order:4},
+    {name:'Guaraná Antarctica 2L',categoryId:catRefs.drinks.id,description:'Refrigerante Guaraná Antarctica 2 litros.',sizes:[],extras:[],price:12,order:5},
+    {name:'Fanta Laranja 2L',categoryId:catRefs.drinks.id,description:'Refrigerante Fanta Laranja 2 litros.',sizes:[],extras:[],price:12,order:6},
+    {name:'Sprite 2L',categoryId:catRefs.drinks.id,description:'Refrigerante Sprite 2 litros.',sizes:[],extras:[],price:12,order:7},
+    {name:'Água Mineral 500ml',categoryId:catRefs.drinks.id,description:'Água mineral sem gás.',sizes:[],extras:[],price:4,order:8},
+
+    {name:'Combo Família',categoryId:catRefs.combos.id,description:'1 pizza grande salgada + 1 refrigerante 2L.',sizes:[],extras:[],price:64.90,order:1,featured:true},
+    {name:'Combo Casal',categoryId:catRefs.combos.id,description:'1 pizza média salgada + 2 refrigerantes lata.',sizes:[],extras:[],price:54.90,order:2},
+    {name:'Combo Doce',categoryId:catRefs.combos.id,description:'1 pizza grande salgada + 1 pizza doce pequena + 1 refrigerante 2L.',sizes:[],extras:[],price:89.90,order:3}
+  ].map(x=>({image,price:0,active:true,featured:false,isPizza:false,allowHalfHalf:false,...x}));
 
   for(const p of samples){
     batch.set(doc(collection(db,'products')),{...p,createdAt:serverTimestamp()});
@@ -1247,8 +1297,9 @@ $('#seedBtn').onclick=async()=>{
 
   await batch.commit();
   await Promise.all([loadCategories(),loadProducts()]);
-  alert('Cardápio de exemplo criado.');
+  alert(`Cardápio demonstrativo criado com ${samples.length} produtos.`);
 };
+
 
 function closeAdminDialog(dialog){
   if(dialog?.open) dialog.close();
