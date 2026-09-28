@@ -131,6 +131,8 @@ service cloud.firestore {
         ) &&
         request.resource.data.customer.name is string &&
         request.resource.data.customer.name.size() > 0 &&
+        request.resource.data.customer.phone is string &&
+        request.resource.data.customer.phone.size() > 0 &&
         request.resource.data.items is list &&
         request.resource.data.items.size() > 0 &&
         request.resource.data.subtotal is number &&
