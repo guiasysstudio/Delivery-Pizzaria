@@ -25,6 +25,8 @@ const defaultSettings={
   phone:'',
   storeAddress:'',
   deliveryFee:5,
+  deliveryZones:[],
+  restrictDeliveryZones:false,
   minimumOrder:0,
   allowPickup:true,
   openMode:'schedule',
@@ -388,10 +390,34 @@ function saveCart(){
 function fulfillment(){
   return document.querySelector('input[name=fulfillment]:checked')?.value||'delivery';
 }
+function normalizeZoneName(value){
+  return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+}
+
+function deliveryQuote(address=activeAddress()){
+  if(fulfillment()!=='delivery') return {supported:true,fee:0,zone:null};
+
+  const fallback=Number(settings?.deliveryFee||0);
+  const zones=Array.isArray(settings?.deliveryZones)?settings.deliveryZones:[];
+  const neighborhood=normalizeZoneName(address?.neighborhood);
+
+  if(neighborhood&&zones.length){
+    const zone=zones.find(z=>normalizeZoneName(z.neighborhood)===neighborhood);
+    if(zone) return {supported:true,fee:Number(zone.fee||0),zone};
+  }
+
+  if(address&&settings?.restrictDeliveryZones===true&&zones.length){
+    return {supported:false,fee:0,zone:null};
+  }
+
+  return {supported:true,fee:fallback,zone:null};
+}
+
 function cartTotals(){
   const subtotal=cart.reduce((a,x)=>a+Number(x.unitPrice)*Number(x.qty),0);
-  const fee=subtotal&&fulfillment()==='delivery'?Number(settings?.deliveryFee||0):0;
-  return {subtotal,fee,total:subtotal+fee};
+  const quote=deliveryQuote();
+  const fee=subtotal&&fulfillment()==='delivery'&&quote.supported?quote.fee:0;
+  return {subtotal,fee,total:subtotal+fee,deliverySupported:quote.supported,deliveryZone:quote.zone};
 }
 
 function renderCart(){
@@ -624,7 +650,14 @@ function renderCheckoutAddress(){
   $('#changeCheckoutAddressBtn').classList.toggle('hidden',!delivery);
   if(delivery){
     const a=activeAddress();
-    $('#checkoutAddressCard').innerHTML=a?`<strong>${esc(a.label||'Endereço')}</strong><span>${esc(a.street)}, ${esc(a.number)} • ${esc(a.neighborhood)}</span><small>${esc([a.complement,a.reference].filter(Boolean).join(' • '))}</small>`:'<span>Nenhum endereço selecionado.</span>';
+    if(a){
+      const quote=deliveryQuote(a);
+      const detail=[a.complement,a.reference].filter(Boolean).join(' • ');
+      const feeText=quote.supported?`Taxa de entrega: ${money(quote.fee)}`:'Fora da área de entrega configurada';
+      $('#checkoutAddressCard').innerHTML=`<strong>${esc(a.label||'Endereço')}</strong><span>${esc(a.street)}, ${esc(a.number)} • ${esc(a.neighborhood)}</span><small>${esc(detail)}</small><small class="${quote.supported?'':'danger-text'}">${esc(feeText)}</small>`;
+    }else{
+      $('#checkoutAddressCard').innerHTML='<span>Nenhum endereço selecionado.</span>';
+    }
   }
   $('#pickupOption').classList.toggle('hidden',settings?.allowPickup===false);
 }
@@ -684,6 +717,8 @@ $('#checkoutForm').addEventListener('submit',async e=>{
   const type=fulfillment();
   const address=activeAddress();
   if(type==='delivery'&&!address) return showCheckoutError('Selecione um endereço de entrega.');
+  const quote=deliveryQuote(address);
+  if(type==='delivery'&&!quote.supported) return showCheckoutError('Este endereço está fora da área de entrega da pizzaria.');
   if(!selectedPayment) return showCheckoutError('Escolha a forma de pagamento.');
 
   const {subtotal,fee,total}=cartTotals();
