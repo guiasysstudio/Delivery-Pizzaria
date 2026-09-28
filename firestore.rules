@@ -94,6 +94,17 @@ service cloud.firestore {
       }
     }
 
+    match /settings/store {
+      allow read: if true;
+      allow create, delete: if isMaster() || isManager();
+      allow update: if isMaster() || isManager() ||
+        (
+          isCashier() &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['autoAcceptOrders', 'updatedAt'])
+        );
+    }
+
     match /settings/{document=**} {
       allow read: if true;
       allow write: if isMaster() || isManager();
