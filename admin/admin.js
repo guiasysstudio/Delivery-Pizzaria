@@ -108,6 +108,20 @@ onAuthStateChanged(auth,async user=>{
             showLoginError('Este usuário está desativado.');
             return;
           }
+        }else{
+          try{
+            await setDoc(doc(db,'users',user.uid),{
+              username:'master',
+              displayName:'Administrador Master',
+              role:'master',
+              active:true,
+              createdAt:serverTimestamp(),
+              updatedAt:serverTimestamp()
+            });
+            currentProfile.bootstrap=false;
+          }catch(profileCreateError){
+            console.warn('Não foi possível registrar automaticamente o perfil Master ainda.',profileCreateError);
+          }
         }
       }catch(profileError){
         console.warn('Perfil Master ainda não disponível no Firestore.',profileError);
