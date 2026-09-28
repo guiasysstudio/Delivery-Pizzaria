@@ -1,16 +1,20 @@
 name: Validate Delivery Pizzaria
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
 permissions:
   contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Validate JavaScript syntax
         run: |
           node --check assets/app.js
@@ -18,6 +22,35 @@ jobs:
           node --check account/account.js
           node --check admin/admin.js
           node --check admin/print.js
+          node --check service-worker.js
+
+      - name: Validate manifest JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('manifest.webmanifest','utf8')); console.log('manifest OK')"
+
+      - name: Check duplicate HTML ids
+        run: |
+          python - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          class IdParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.ids = []
+              def handle_starttag(self, tag, attrs):
+                  for key, value in attrs:
+                      if key == 'id' and value:
+                          self.ids.append(value)
+
+          for path in [Path('index.html'), Path('account/index.html'), Path('admin/index.html'), Path('admin/print.html')]:
+              parser = IdParser()
+              parser.feed(path.read_text(encoding='utf-8'))
+              duplicates = sorted({x for x in parser.ids if parser.ids.count(x) > 1})
+              if duplicates:
+                  raise SystemExit(f'{path}: IDs duplicados: {duplicates}')
+              print(f'{path}: IDs OK ({len(parser.ids)})')
+          PY
+
       - name: Check required files
         run: |
           test -f index.html
@@ -25,3 +58,6 @@ jobs:
           test -f account/index.html
           test -f firebase-config.js
           test -f firestore.rules
+          test -f manifest.webmanifest
+          test -f service-worker.js
+          test -f print-agent/DeliveryPizzaria.PrintAgent.csproj
