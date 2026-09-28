@@ -761,7 +761,11 @@ function showCheckoutError(message){
 }
 $('#successClose').onclick=()=>$('#successDialog').close();
 
-loadStore();
+loadStore().then(()=>{
+  if(new URLSearchParams(location.search).get('login')==='1'){
+    openAuth();
+  }
+});
 setInterval(()=>{
   if(settings){
     const before=$('#storeStatus').textContent;
