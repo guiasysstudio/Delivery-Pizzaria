@@ -184,7 +184,7 @@ service cloud.firestore {
 
     match /coupons/{couponId} {
       allow get: if signedIn() || hasPermission('couponsManage');
-      allow list: if hasPermission('couponsManage');
+      allow list: if hasPermission('ordersView') || hasPermission('couponsManage');
       allow create, update, delete: if hasPermission('couponsManage');
     }
 
