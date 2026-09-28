@@ -1040,6 +1040,22 @@ function showCheckoutError(message){
 }
 $('#successClose').onclick=()=>$('#successDialog').close();
 
+function installDialogDismissal(){
+  $('dialog').forEach(dialog=>{
+    dialog.querySelectorAll('.dialog-close').forEach(btn=>{
+      btn.addEventListener('click',()=>{if(dialog.open) dialog.close();});
+    });
+    dialog.addEventListener('cancel',e=>{
+      e.preventDefault();
+      if(dialog.open) dialog.close();
+    });
+    dialog.addEventListener('click',e=>{
+      if(e.target===dialog&&dialog.open) dialog.close();
+    });
+  });
+}
+installDialogDismissal();
+
 loadStore().then(()=>{
   if(new URLSearchParams(location.search).get('login')==='1'){
     openAuth();
