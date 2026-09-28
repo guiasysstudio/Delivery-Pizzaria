@@ -1,11 +1,13 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, deleteUser } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, writeBatch } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig } from '../firebase-config.js';
 
 const app=initializeApp(firebaseConfig);
 const auth=getAuth(app);
 const db=getFirestore(app);
+const userCreatorApp=initializeApp(firebaseConfig,'delivery-user-creator');
+const userCreatorAuth=getAuth(userCreatorApp);
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
@@ -20,7 +22,7 @@ const statusLabels={
 };
 const dayNames=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 
-let categories=[],products=[],orders=[],settings={};
+let categories=[],products=[],orders=[],settings={},users=[],currentProfile=null;
 let unsubscribeOrders=null,soundEnabled=false,knownOrderIds=new Set();
 
 const defaults={
@@ -46,13 +48,32 @@ const defaults={
   }
 };
 
+function normalizeUsername(value){
+  return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9._-]/g,'');
+}
+function usernameEmail(username){
+  return `${normalizeUsername(username)}@delivery-pizzaria.local`;
+}
+function roleLabel(role){
+  return ({master:'Master',manager:'Gerente',operator:'Operador'})[role]||role;
+}
+function isMaster(){
+  return currentProfile?.role==='master';
+}
+
 $('#loginForm').onsubmit=async e=>{
   e.preventDefault();
   $('#loginError').classList.add('hidden');
+  const username=normalizeUsername($('#loginUsername').value);
+  if(!username){
+    $('#loginError').textContent='Informe o usuário.';
+    $('#loginError').classList.remove('hidden');
+    return;
+  }
   try{
-    await signInWithEmailAndPassword(auth,$('#loginEmail').value.trim(),$('#loginPassword').value);
+    await signInWithEmailAndPassword(auth,usernameEmail(username),$('#loginPassword').value);
   }catch(err){
-    $('#loginError').textContent='E-mail ou senha inválidos.';
+    $('#loginError').textContent='Usuário ou senha inválidos.';
     $('#loginError').classList.remove('hidden');
   }
 };
@@ -61,18 +82,50 @@ $('#logoutBtn').onclick=()=>signOut(auth);
 
 onAuthStateChanged(auth,async user=>{
   if(!user){
+    currentProfile=null;
     $('#loginView').classList.remove('hidden');
     $('#adminApp').classList.add('hidden');
     if(unsubscribeOrders) unsubscribeOrders();
     return;
   }
-  $('#loginView').classList.add('hidden');
-  $('#adminApp').classList.remove('hidden');
-  await initializeAdmin();
+  try{
+    const username=(user.email||'').split('@')[0];
+    const profileSnap=await getDoc(doc(db,'users',user.uid));
+    if(profileSnap.exists()){
+      currentProfile={uid:user.uid,...profileSnap.data()};
+      if(currentProfile.active===false){
+        await signOut(auth);
+        throw new Error('disabled');
+      }
+    }else if((user.email||'').toLowerCase()==='master@delivery-pizzaria.local'){
+      currentProfile={uid:user.uid,username:'master',displayName:'Administrador Master',role:'master',active:true,bootstrap:true};
+    }else{
+      await signOut(auth);
+      throw new Error('unauthorized');
+    }
+
+    $('#loginView').classList.add('hidden');
+    $('#adminApp').classList.remove('hidden');
+    $('#currentUserDisplay').textContent=`${currentProfile.displayName||currentProfile.username||username} • ${roleLabel(currentProfile.role)}`;
+    $('.master-only').forEach(el=>el.classList.toggle('hidden',!isMaster()));
+    await initializeAdmin();
+  }catch(err){
+    console.error(err);
+    $('#loginView').classList.remove('hidden');
+    $('#adminApp').classList.add('hidden');
+    if(err?.message==='disabled'){
+      $('#loginError').textContent='Este usuário está desativado.';
+    }else{
+      $('#loginError').textContent='Usuário sem permissão para acessar o painel.';
+    }
+    $('#loginError').classList.remove('hidden');
+  }
 });
 
 async function initializeAdmin(){
-  await Promise.all([loadSettings(),loadCategories(),loadProducts()]);
+  const tasks=[loadSettings(),loadCategories(),loadProducts()];
+  if(isMaster()) tasks.push(loadUsers());
+  await Promise.all(tasks);
   listenOrders();
   renderSchedules();
   renderSettings();
@@ -157,6 +210,7 @@ function switchView(v){
     orders:['OPERAÇÃO','Pedidos'],
     products:['CARDÁPIO','Produtos'],
     categories:['CARDÁPIO','Categorias'],
+    users:['SEGURANÇA','Usuários'],
     settings:['SISTEMA','Configurações']
   };
   $('#viewEyebrow').textContent=titles[v][0];
@@ -484,4 +538,135 @@ function formatDate(ts){
 
 function esc(v){
   return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+}
+
+
+async function loadUsers(){
+  if(!isMaster()) return;
+  const s=await getDocs(collection(db,'users'));
+  users=s.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(a.username||'').localeCompare(b.username||''));
+  if(!users.some(u=>u.uid===auth.currentUser?.uid) && currentProfile?.bootstrap){
+    users.unshift({...currentProfile});
+  }
+  renderUsers();
+}
+
+function renderUsers(){
+  if(!isMaster()) return;
+  $('#usersTable').innerHTML=users.length?users.map(u=>`
+    <div class="data-row">
+      <div class="data-main">
+        <strong>${esc(u.displayName||u.username||'Usuário')}</strong>
+        <small>@${esc(u.username||'')} • ${roleLabel(u.role)} • ${u.active===false?'Desativado':'Ativo'}${u.uid===auth.currentUser?.uid?' • Você':''}</small>
+      </div>
+      <span class="status-pill ${u.active===false?'status-cancelled':'status-completed'}">${u.active===false?'Desativado':'Ativo'}</span>
+      <div class="data-actions">
+        <button class="btn btn-secondary edit-user" data-uid="${u.uid}">${u.bootstrap?'Registrar perfil':'Editar'}</button>
+        ${u.uid!==auth.currentUser?.uid&&!u.bootstrap?`<button class="btn ${u.active===false?'btn-secondary':'btn-danger'} toggle-user" data-uid="${u.uid}">${u.active===false?'Ativar':'Desativar'}</button>`:''}
+      </div>
+    </div>`).join(''):'<div class="empty-state">Nenhum usuário cadastrado.</div>';
+
+  $$('.edit-user').forEach(b=>b.onclick=()=>editUser(b.dataset.uid));
+  $$('.toggle-user').forEach(b=>b.onclick=()=>toggleUser(b.dataset.uid));
+}
+
+$('#newUserBtn').onclick=()=>{
+  if(!isMaster()) return;
+  editUser(null);
+};
+
+function editUser(uid){
+  if(!isMaster()) return;
+  const u=users.find(x=>x.uid===uid);
+  const isExisting=!!u&&!u.bootstrap;
+  $('#userEditorTitle').textContent=u?(u.bootstrap?'Registrar Master':'Editar usuário'):'Novo usuário';
+  $('#userUid').value=u?.uid||'';
+  $('#userDisplayName').value=u?.displayName||'';
+  $('#userUsername').value=u?.username||'';
+  $('#userUsername').disabled=isExisting||u?.bootstrap;
+  $('#userPassword').value='';
+  $('#userPassword').required=!u;
+  $('#userPasswordField').classList.toggle('hidden',!!u);
+  $('#userRole').value=u?.role||'operator';
+  $('#userRole').disabled=u?.uid===auth.currentUser?.uid;
+  $('#userActive').checked=u?.active!==false;
+  $('#userActive').disabled=u?.uid===auth.currentUser?.uid;
+  $('#userEditorError').classList.add('hidden');
+  $('#userEditor').showModal();
+}
+
+$('#userEditorForm').onsubmit=async e=>{
+  e.preventDefault();
+  if(!isMaster()) return;
+  const existingUid=$('#userUid').value;
+  const username=normalizeUsername($('#userUsername').value);
+  const displayName=$('#userDisplayName').value.trim()||username;
+  const role=existingUid===auth.currentUser?.uid?'master':$('#userRole').value;
+  const active=existingUid===auth.currentUser?.uid?true:$('#userActive').checked;
+  $('#userEditorError').classList.add('hidden');
+
+  if(!username||username.length<3){
+    return userEditorError('O usuário precisa ter pelo menos 3 caracteres.');
+  }
+
+  try{
+    if(existingUid){
+      await setDoc(doc(db,'users',existingUid),{
+        username,
+        displayName,
+        role,
+        active,
+        updatedAt:serverTimestamp()
+      },{merge:true});
+      if(existingUid===auth.currentUser?.uid){
+        currentProfile={...currentProfile,username,displayName,role,active,bootstrap:false};
+      }
+    }else{
+      const password=$('#userPassword').value;
+      if(password.length<6) return userEditorError('A senha precisa ter pelo menos 6 caracteres.');
+      let credential=null;
+      try{
+        credential=await createUserWithEmailAndPassword(userCreatorAuth,usernameEmail(username),password);
+        await setDoc(doc(db,'users',credential.user.uid),{
+          username,
+          displayName,
+          role,
+          active,
+          createdBy:auth.currentUser.uid,
+          createdAt:serverTimestamp(),
+          updatedAt:serverTimestamp()
+        });
+      }catch(err){
+        if(credential?.user){
+          try{await deleteUser(credential.user);}catch{}
+        }
+        throw err;
+      }finally{
+        try{await signOut(userCreatorAuth);}catch{}
+      }
+    }
+    $('#userEditor').close();
+    await loadUsers();
+    $('#currentUserDisplay').textContent=`${currentProfile.displayName||currentProfile.username} • ${roleLabel(currentProfile.role)}`;
+  }catch(err){
+    console.error(err);
+    if(err?.code==='auth/email-already-in-use') return userEditorError('Esse nome de usuário já existe.');
+    if(err?.code==='auth/operation-not-allowed') return userEditorError('Ative E-mail/Senha no Firebase Authentication antes de criar usuários.');
+    userEditorError('Não foi possível salvar o usuário.');
+  }
+};
+
+function userEditorError(message){
+  $('#userEditorError').textContent=message;
+  $('#userEditorError').classList.remove('hidden');
+}
+
+async function toggleUser(uid){
+  if(!isMaster()||uid===auth.currentUser?.uid) return;
+  const u=users.find(x=>x.uid===uid);
+  if(!u) return;
+  const next=u.active===false;
+  if(!next&&!confirm(`Desativar o usuário “${u.username}”? Ele não conseguirá acessar o sistema.`)) return;
+  await updateDoc(doc(db,'users',uid),{active:next,updatedAt:serverTimestamp()});
+  await loadUsers();
 }
