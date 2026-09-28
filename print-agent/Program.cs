@@ -22,12 +22,16 @@ internal static class Program
 internal sealed class TrayContext : ApplicationContext
 {
     private const string StartupValueName = "DeliveryPizzariaPrintAgent";
+    private const string AppRegistryPath = @"Software\DeliveryPizzaria\PrintAgent";
     private readonly NotifyIcon _tray;
     private readonly LocalPrintServer _server;
     private readonly ToolStripMenuItem _startupItem;
+    private AgentSettingsForm? _settingsForm;
 
     public TrayContext()
     {
+        EnsureFirstRunStartup();
+
         _server = new LocalPrintServer();
         _server.Start();
 
@@ -36,19 +40,15 @@ internal sealed class TrayContext : ApplicationContext
             Checked = IsStartupEnabled(),
             CheckOnClick = true
         };
-        _startupItem.CheckedChanged += (_, _) => SetStartup(_startupItem.Checked);
+        _startupItem.CheckedChanged += (_, _) =>
+        {
+            SetStartup(_startupItem.Checked);
+            _settingsForm?.SyncStartupState(_startupItem.Checked);
+        };
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Status", null, (_, _) =>
-        {
-            MessageBox.Show(
-                "Delivery Pizzaria Print Agent está ativo.\n\n" +
-                "Endereço local: http://127.0.0.1:17329\n" +
-                "O painel administrativo pode listar e usar as impressoras instaladas no Windows.",
-                "Delivery Pizzaria Print Agent",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-        });
+        menu.Items.Add("Abrir configurações", null, (_, _) => ShowSettings());
+        menu.Items.Add("Status", null, (_, _) => ShowStatus());
         menu.Items.Add(_startupItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Sair", null, (_, _) => ExitThread());
@@ -61,19 +61,82 @@ internal sealed class TrayContext : ApplicationContext
             ContextMenuStrip = menu
         };
 
+        _tray.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                ShowSettings();
+            }
+        };
+        _tray.DoubleClick += (_, _) => ShowSettings();
+
         _tray.ShowBalloonTip(
-            2000,
+            2500,
             "Print Agent ativo",
-            "O painel da pizzaria já pode usar as impressoras deste computador.",
+            "Clique no ícone para configurar impressoras e inicialização com o Windows.",
             ToolTipIcon.Info);
+    }
+
+    private void ShowSettings()
+    {
+        if (_settingsForm is null || _settingsForm.IsDisposed)
+        {
+            _settingsForm = new AgentSettingsForm(
+                IsStartupEnabled,
+                enabled =>
+                {
+                    SetStartup(enabled);
+                    _startupItem.Checked = enabled;
+                });
+            _settingsForm.FormClosed += (_, _) => _settingsForm = null;
+        }
+
+        if (!_settingsForm.Visible)
+            _settingsForm.Show();
+
+        if (_settingsForm.WindowState == FormWindowState.Minimized)
+            _settingsForm.WindowState = FormWindowState.Normal;
+
+        _settingsForm.RefreshPrinters();
+        _settingsForm.BringToFront();
+        _settingsForm.Activate();
+    }
+
+    private static void ShowStatus()
+    {
+        MessageBox.Show(
+            "Delivery Pizzaria Print Agent está ativo.\n\n" +
+            "Endereço local: http://127.0.0.1:17329\n" +
+            "O painel da pizzaria pode listar e usar qualquer impressora instalada no Windows.",
+            "Delivery Pizzaria Print Agent",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
     }
 
     protected override void ExitThreadCore()
     {
+        _settingsForm?.Close();
         _server.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         base.ExitThreadCore();
+    }
+
+    private static void EnsureFirstRunStartup()
+    {
+        using var appKey = Registry.CurrentUser.CreateSubKey(AppRegistryPath);
+        var configured = appKey.GetValue("StartupConfigured") is int value && value == 1;
+
+        if (!configured)
+        {
+            SetStartup(true);
+            appKey.SetValue("StartupConfigured", 1, RegistryValueKind.DWord);
+        }
+        else if (IsStartupEnabled())
+        {
+            // Regrava o caminho caso o executável tenha sido atualizado/movido.
+            SetStartup(true);
+        }
     }
 
     private static bool IsStartupEnabled()
@@ -94,6 +157,170 @@ internal sealed class TrayContext : ApplicationContext
         {
             key.DeleteValue(StartupValueName, false);
         }
+    }
+}
+
+internal sealed class AgentSettingsForm : Form
+{
+    private readonly Func<bool> _getStartup;
+    private readonly Action<bool> _setStartup;
+    private readonly CheckBox _startupCheck;
+    private readonly ComboBox _printers;
+    private readonly Label _statusLabel;
+
+    public AgentSettingsForm(Func<bool> getStartup, Action<bool> setStartup)
+    {
+        _getStartup = getStartup;
+        _setStartup = setStartup;
+
+        Text = "Delivery Pizzaria • Print Agent";
+        StartPosition = FormStartPosition.CenterScreen;
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = false;
+        MinimizeBox = true;
+        Width = 520;
+        Height = 410;
+        BackColor = Color.White;
+        Font = new Font("Segoe UI", 9F);
+
+        var title = new Label
+        {
+            Text = "🍕  Delivery Pizzaria Print Agent",
+            Font = new Font("Segoe UI", 16F, FontStyle.Bold),
+            AutoSize = true,
+            Left = 22,
+            Top = 22
+        };
+
+        var subtitle = new Label
+        {
+            Text = "Conecta o painel web às impressoras instaladas neste Windows.",
+            ForeColor = Color.DimGray,
+            AutoSize = true,
+            Left = 24,
+            Top = 62
+        };
+
+        _statusLabel = new Label
+        {
+            Text = "● Serviço local ativo em 127.0.0.1:17329",
+            ForeColor = Color.ForestGreen,
+            AutoSize = true,
+            Left = 24,
+            Top = 96
+        };
+
+        var printerLabel = new Label
+        {
+            Text = "Impressoras detectadas",
+            Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+            AutoSize = true,
+            Left = 24,
+            Top = 137
+        };
+
+        _printers = new ComboBox
+        {
+            Left = 24,
+            Top = 160,
+            Width = 455,
+            DropDownStyle = ComboBoxStyle.DropDownList
+        };
+
+        var refresh = new Button
+        {
+            Text = "Atualizar impressoras",
+            Left = 24,
+            Top = 202,
+            Width = 150,
+            Height = 34
+        };
+        refresh.Click += (_, _) => RefreshPrinters();
+
+        _startupCheck = new CheckBox
+        {
+            Text = "Iniciar automaticamente com o Windows",
+            Checked = _getStartup(),
+            AutoSize = true,
+            Left = 24,
+            Top = 258
+        };
+        _startupCheck.CheckedChanged += (_, _) => _setStartup(_startupCheck.Checked);
+
+        var adminButton = new Button
+        {
+            Text = "Abrir painel da pizzaria",
+            Left = 24,
+            Top = 302,
+            Width = 180,
+            Height = 36
+        };
+        adminButton.Click += (_, _) =>
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "https://guiasysstudio.github.io/Delivery-Pizzaria/admin/",
+                UseShellExecute = true
+            });
+        };
+
+        var closeButton = new Button
+        {
+            Text = "Fechar",
+            Left = 379,
+            Top = 302,
+            Width = 100,
+            Height = 36
+        };
+        closeButton.Click += (_, _) => Hide();
+
+        Controls.AddRange([
+            title, subtitle, _statusLabel, printerLabel, _printers,
+            refresh, _startupCheck, adminButton, closeButton
+        ]);
+
+        FormClosing += (_, e) =>
+        {
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                Hide();
+            }
+        };
+
+        RefreshPrinters();
+    }
+
+    public void SyncStartupState(bool enabled)
+    {
+        if (_startupCheck.Checked != enabled)
+            _startupCheck.Checked = enabled;
+    }
+
+    public void RefreshPrinters()
+    {
+        var selected = _printers.SelectedItem?.ToString();
+        var printers = PrinterSettings.InstalledPrinters.Cast<string>()
+            .OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
+
+        _printers.Items.Clear();
+        _printers.Items.AddRange(printers);
+
+        if (printers.Length == 0)
+        {
+            _statusLabel.Text = "● Serviço ativo • nenhuma impressora instalada foi encontrada";
+            _statusLabel.ForeColor = Color.DarkOrange;
+            return;
+        }
+
+        _statusLabel.Text = $"● Serviço ativo • {printers.Length} impressora(s) detectada(s)";
+        _statusLabel.ForeColor = Color.ForestGreen;
+
+        if (!string.IsNullOrWhiteSpace(selected) && printers.Contains(selected))
+            _printers.SelectedItem = selected;
+        else
+            _printers.SelectedIndex = 0;
     }
 }
 
@@ -147,14 +374,14 @@ internal sealed class LocalPrintServer : IDisposable
         {
             ok = true,
             name = "Delivery Pizzaria Print Agent",
-            version = "1.1.0"
+            version = "1.2.0"
         }));
 
         _app.MapGet("/health", () => Results.Json(new
         {
             ok = true,
             name = "Delivery Pizzaria Print Agent",
-            version = "1.1.0"
+            version = "1.2.0"
         }));
 
         _app.MapGet("/printers", () =>
