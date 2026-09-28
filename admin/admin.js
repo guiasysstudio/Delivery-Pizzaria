@@ -1851,22 +1851,27 @@ $('#settingsForm').onsubmit=async e=>{
 };
 
 $('#seedBtn').onclick=async()=>{
-  if(categories.length||products.length){
-    if(!confirm('Já existem itens no cardápio. Continuar e adicionar o cardápio demonstrativo completo?')) return;
-  }
-
   const batch=writeBatch(db);
+
+  const existingCategory=(...names)=>categories.find(c=>names.some(n=>normalizePriceKey(c.name)===normalizePriceKey(n)));
+  const categoryRef=(existing,...args)=>existing?doc(db,'categories',existing.id):doc(collection(db,'categories'));
+
+  const existingSavory=existingCategory('Pizzas Salgadas','Pizzas');
+  const existingSweet=existingCategory('Pizzas Doces');
+  const existingDrinks=existingCategory('Bebidas');
+  const existingCombos=existingCategory('Combos');
+
   const catRefs={
-    savory:doc(collection(db,'categories')),
-    sweet:doc(collection(db,'categories')),
-    drinks:doc(collection(db,'categories')),
-    combos:doc(collection(db,'categories'))
+    savory:categoryRef(existingSavory),
+    sweet:categoryRef(existingSweet),
+    drinks:categoryRef(existingDrinks),
+    combos:categoryRef(existingCombos)
   };
 
-  batch.set(catRefs.savory,{name:'Pizzas Salgadas',order:1,active:true,createdAt:serverTimestamp()});
-  batch.set(catRefs.sweet,{name:'Pizzas Doces',order:2,active:true,createdAt:serverTimestamp()});
-  batch.set(catRefs.drinks,{name:'Bebidas',order:3,active:true,createdAt:serverTimestamp()});
-  batch.set(catRefs.combos,{name:'Combos',order:4,active:true,createdAt:serverTimestamp()});
+  if(!existingSavory) batch.set(catRefs.savory,{name:'Pizzas Salgadas',order:1,active:true,createdAt:serverTimestamp()});
+  if(!existingSweet) batch.set(catRefs.sweet,{name:'Pizzas Doces',order:2,active:true,createdAt:serverTimestamp()});
+  if(!existingDrinks) batch.set(catRefs.drinks,{name:'Bebidas',order:3,active:true,createdAt:serverTimestamp()});
+  if(!existingCombos) batch.set(catRefs.combos,{name:'Combos',order:4,active:true,createdAt:serverTimestamp()});
 
   const sizes=(p,m,g)=>[{name:'Pequena',price:p},{name:'Média',price:m},{name:'Grande',price:g}];
   const savoryExtras=[
@@ -1909,13 +1914,18 @@ $('#seedBtn').onclick=async()=>{
     {name:'Combo Doce',categoryId:catRefs.combos.id,description:'1 pizza grande salgada + 1 pizza doce pequena + 1 refrigerante 2L.',sizes:[],extras:[],price:89.90,order:3}
   ].map(x=>({image,price:0,active:true,featured:false,isPizza:false,allowHalfHalf:false,...x}));
 
-  for(const p of samples){
+  const existingNames=new Set(products.map(p=>normalizePriceKey(p.name)));
+  const missing=samples.filter(p=>!existingNames.has(normalizePriceKey(p.name)));
+
+  for(const p of missing){
     batch.set(doc(collection(db,'products')),{...p,createdAt:serverTimestamp()});
   }
 
   await batch.commit();
   await Promise.all([loadCategories(),loadProducts()]);
-  alert(`Cardápio demonstrativo criado com ${samples.length} produtos.`);
+  alert(missing.length
+    ?`Cardápio demonstrativo atualizado: ${missing.length} item(ns) adicionado(s).`
+    :'O cardápio demonstrativo já está completo.');
 };
 
 
