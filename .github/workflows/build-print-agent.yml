@@ -9,7 +9,7 @@ on:
       - ".github/workflows/build-print-agent.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -24,9 +24,24 @@ jobs:
       - name: Publish Windows x64
         run: dotnet publish print-agent/DeliveryPizzaria.PrintAgent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o print-agent/publish
 
-      - name: Upload Print Agent
+      - name: Package Print Agent
+        shell: pwsh
+        run: Compress-Archive -Path print-agent/publish/* -DestinationPath print-agent/DeliveryPizzaria-PrintAgent-win-x64.zip -Force
+
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: DeliveryPizzaria-PrintAgent-win-x64
           path: print-agent/publish/
           if-no-files-found: error
+
+      - name: Publish stable download release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view print-agent-latest *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create print-agent-latest --title "Delivery Pizzaria Print Agent" --notes "Build automático do agente local de impressão para Windows x64." --prerelease --target "${{ github.sha }}"
+          }
+          gh release upload print-agent-latest print-agent/DeliveryPizzaria-PrintAgent-win-x64.zip --clobber
