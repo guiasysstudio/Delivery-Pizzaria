@@ -370,6 +370,7 @@ $('#productForm').addEventListener('submit',e=>{
   cart.push({
     lineId:crypto.randomUUID(),
     productId:currentProduct.id,
+    flavorProductIds:half&&second?[currentProduct.id,second.id]:[currentProduct.id],
     name:half&&second?`${currentProduct.name} / ${second.name}`:currentProduct.name,
     flavors:half&&second?[currentProduct.name,second.name]:[currentProduct.name],
     size,
