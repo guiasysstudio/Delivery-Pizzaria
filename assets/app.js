@@ -62,7 +62,7 @@ async function loadStore(){
     const [catSnap,prodSnap,promoSnap,setSnap]=await Promise.all([
       getDocs(collection(db,'categories')),
       getDocs(collection(db,'products')),
-      getDocs(collection(db,'promotions')),
+      getDocs(collection(db,'promotions')).catch(err=>{console.warn('Promoções ainda não liberadas pelas regras.',err);return null;}),
       getDoc(doc(db,'settings','store'))
     ]);
     categories=catSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.active!==false).sort((a,b)=>(a.order||0)-(b.order||0));
@@ -70,7 +70,7 @@ async function loadStore(){
     products=prodSnap.docs.map(d=>({id:d.id,...d.data()}))
       .filter(x=>x.active!==false&&activeCategoryIds.has(x.categoryId))
       .sort((a,b)=>(a.order||0)-(b.order||0));
-    promotions=promoSnap.docs.map(d=>({id:d.id,...d.data()}));
+    promotions=promoSnap?.docs?.map(d=>({id:d.id,...d.data()}))||[];
     settings=setSnap.exists()?{...defaultSettings,...setSnap.data()}:defaultSettings;
     renderStore();
     const productId=new URLSearchParams(location.search).get('product');
