@@ -6,11 +6,6 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function bootstrapMaster() {
-      return signedIn() &&
-        request.auth.token.email == 'master@delivery-pizzaria.local';
-    }
-
     function hasStaffProfile() {
       return signedIn() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid));
@@ -21,43 +16,41 @@ service cloud.firestore {
     }
 
     function activeStaff() {
-      return bootstrapMaster() ||
-        (hasStaffProfile() && staff().active == true);
+      return hasStaffProfile() && staff().active == true;
     }
 
     function isMaster() {
-      return bootstrapMaster() ||
-        (activeStaff() && staff().role == 'master');
+      return activeStaff() && staff().role == 'master';
     }
 
     function isManager() {
       return activeStaff() &&
-        (isMaster() || staff().role == 'manager');
+        (staff().role == 'master' || staff().role == 'manager');
     }
 
     function isCashier() {
       return activeStaff() &&
-        (isManager() || staff().role == 'cashier');
+        (staff().role == 'master' || staff().role == 'manager' || staff().role == 'cashier');
     }
 
     function isKitchen() {
       return activeStaff() &&
-        (isManager() || staff().role == 'kitchen');
+        (staff().role == 'master' || staff().role == 'manager' || staff().role == 'kitchen');
     }
 
     function isOperator() {
       return activeStaff() &&
-        (isManager() || staff().role == 'operator');
+        (staff().role == 'master' || staff().role == 'manager' || staff().role == 'operator');
     }
 
     function isDelivery() {
       return activeStaff() &&
-        (isManager() || staff().role == 'delivery');
+        (staff().role == 'master' || staff().role == 'manager' || staff().role == 'delivery');
     }
 
     function canReadOrders() {
       return activeStaff() &&
-        (isMaster() || isManager() || isCashier() || isKitchen() || isOperator() || isDelivery());
+        (staff().role in ['master','manager','cashier','kitchen','operator','delivery']);
     }
 
     function canUpdateOrders() {
@@ -70,6 +63,13 @@ service cloud.firestore {
 
     function isOwnCustomer(uid) {
       return signedIn() && request.auth.uid == uid;
+    }
+
+    match /staffLogins/{username} {
+      // O e-mail interno não concede permissão por si só; ele serve apenas
+      // para traduzir o nome de usuário digitado no login.
+      allow read: if true;
+      allow create, update, delete: if isMaster();
     }
 
     match /users/{uid} {
