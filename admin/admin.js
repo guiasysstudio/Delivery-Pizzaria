@@ -31,6 +31,7 @@ let printConfig={
   printPending:localStorage.getItem('deliveryPrintPending')==='1'
 };
 const PRINT_AGENT='http://127.0.0.1:17329';
+const printedOrderIds=new Set(JSON.parse(sessionStorage.getItem('deliveryPrintedOrders')||'[]'));
 
 const defaults={
   storeName:'Delivery Pizzaria',
@@ -648,11 +649,17 @@ async function sendToPrintAgent(text){
 }
 
 async function printOrder(order,automatic=false){
+  if(automatic&&order?.id&&printedOrderIds.has(order.id)) return true;
+
   const connected=await checkPrintAgent();
 
   if(connected&&printConfig.printer){
     try{
       await sendToPrintAgent(receiptText(order));
+      if(order?.id){
+        printedOrderIds.add(order.id);
+        sessionStorage.setItem('deliveryPrintedOrders',JSON.stringify([...printedOrderIds]));
+      }
       return true;
     }catch(err){
       console.error('Falha no Print Agent:',err);
