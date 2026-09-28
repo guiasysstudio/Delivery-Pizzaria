@@ -1,0 +1,24 @@
+name: Validate Delivery Pizzaria
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate JavaScript syntax
+        run: |
+          node --check assets/app.js
+          node --check admin/admin.js
+          node --check admin/print.js
+      - name: Check required files
+        run: |
+          test -f index.html
+          test -f admin/index.html
+          test -f firebase-config.js
+          test -f firestore.rules
