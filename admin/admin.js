@@ -630,7 +630,9 @@ function renderStats(){
   $('#statPending').textContent=orders.filter(o=>o.status==='pending').length;
   $('#statAccepted').textContent=orders.filter(o=>o.status==='accepted').length;
   $('#statPreparing').textContent=orders.filter(o=>o.status==='preparing').length;
-  $('#statToday').textContent=orders.filter(sameDay).length;
+  const todayOrders=orders.filter(sameDay);
+  $('#statToday').textContent=todayOrders.length;
+  $('#statRevenueToday').textContent=money(todayOrders.filter(o=>o.status==='completed').reduce((sum,o)=>sum+Number(o.total||0),0));
   const p=orders.filter(o=>o.status==='pending').length;
   $('#pendingBadge').textContent=p;
   $('#pendingBadge').classList.toggle('hidden',p===0);
