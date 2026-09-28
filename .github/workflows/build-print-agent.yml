@@ -1,0 +1,32 @@
+name: Build Print Agent
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "print-agent/**"
+      - ".github/workflows/build-print-agent.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish Windows x64
+        run: dotnet publish print-agent/DeliveryPizzaria.PrintAgent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o print-agent/publish
+
+      - name: Upload Print Agent
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeliveryPizzaria-PrintAgent-win-x64
+          path: print-agent/publish/
+          if-no-files-found: error
