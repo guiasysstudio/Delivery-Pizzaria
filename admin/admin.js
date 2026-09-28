@@ -87,6 +87,7 @@ let printConfig={
   printPending:localStorage.getItem('deliveryPrintPending')==='1'
 };
 const PRINT_AGENT='http://127.0.0.1:17329';
+const IMAGE_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadProductImage';
 const printedOrderIds=new Set(JSON.parse(sessionStorage.getItem('deliveryPrintedOrders')||'[]'));
 
 const defaults={
@@ -1578,6 +1579,43 @@ productCanvas?.addEventListener('pointermove',e=>{
 });
 productCanvas?.addEventListener('pointerup',()=>{productImageDragging=false;});
 productCanvas?.addEventListener('pointercancel',()=>{productImageDragging=false;});
+
+$('#uploadProductImageBtn')?.addEventListener('click',async()=>{
+  if(!productImageSource) return alert('Selecione uma imagem primeiro.');
+  const button=$('#uploadProductImageBtn');
+  const status=$('#productImageUploadStatus');
+  const canvas=$('#productImageCanvas');
+  const name=($('#productName').value||'produto').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'produto';
+
+  button.disabled=true;
+  status.textContent='Enviando imagem ao GitHub...';
+  try{
+    const dataUrl=canvas.toDataURL('image/webp',.9);
+    const base64=dataUrl.split(',')[1];
+    const token=await auth.currentUser?.getIdToken();
+    if(!token) throw new Error('auth');
+
+    const response=await fetch(IMAGE_UPLOAD_ENDPOINT,{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':'Bearer '+token
+      },
+      body:JSON.stringify({fileName:name,base64})
+    });
+
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(result?.message||result?.error||'upload');
+
+    $('#productImage').value=result.path;
+    status.innerHTML='Imagem enviada com sucesso para <strong>'+esc(result.path)+'</strong>.';
+  }catch(err){
+    console.error(err);
+    status.textContent='O serviço seguro de imagens ainda não está ativado ou falhou. Você pode baixar a imagem recortada enquanto isso.';
+  }finally{
+    button.disabled=false;
+  }
+});
 
 $('#downloadPreparedImageBtn')?.addEventListener('click',()=>{
   if(!productImageSource) return alert('Selecione uma imagem primeiro.');
