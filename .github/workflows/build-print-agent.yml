@@ -24,6 +24,12 @@ jobs:
       - name: Publish Windows x64
         run: dotnet publish print-agent/DeliveryPizzaria.PrintAgent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o print-agent/publish
 
+      - name: Add installer scripts
+        shell: pwsh
+        run: |
+          Copy-Item print-agent/Instalar.cmd print-agent/publish/Instalar.cmd
+          Copy-Item print-agent/Desinstalar.cmd print-agent/publish/Desinstalar.cmd
+
       - name: Package Print Agent
         shell: pwsh
         run: Compress-Archive -Path print-agent/publish/* -DestinationPath print-agent/DeliveryPizzaria-PrintAgent-win-x64.zip -Force
