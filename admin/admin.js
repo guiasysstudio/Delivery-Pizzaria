@@ -855,6 +855,138 @@ function refreshCategorySelect(){
   $('#productCategory').innerHTML=categories.filter(c=>c.active!==false).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
 }
 
+let productImageSource=null;
+let productImageZoom=1;
+let productImageOffset={x:0,y:0};
+let productImageDragging=false;
+let productImageDragStart={x:0,y:0};
+
+function renderPriceRows(containerId,emptyId,rows=[]){
+  const container=$('#'+containerId);
+  container.innerHTML='';
+  for(const row of rows) addPriceRow(containerId,emptyId,row);
+  updatePriceRowsEmpty(containerId,emptyId);
+}
+
+function addPriceRow(containerId,emptyId,row={name:'',price:''}){
+  const container=$('#'+containerId);
+  const el=document.createElement('div');
+  el.className='repeat-row';
+  el.innerHTML=`
+    <label class="field repeat-field"><span>Nome</span><input class="repeat-name" maxlength="80" placeholder="Ex.: Grande" value="${esc(row.name||'')}"></label>
+    <label class="field repeat-price"><span>Preço (R$)</span><input class="repeat-value" type="number" min="0" step="0.01" placeholder="0,00" value="${Number.isFinite(Number(row.price))?Number(row.price):''}"></label>
+    <button class="repeat-remove" type="button" title="Remover" aria-label="Remover">×</button>`;
+  el.querySelector('.repeat-remove').onclick=()=>{el.remove();updatePriceRowsEmpty(containerId,emptyId);};
+  container.appendChild(el);
+  updatePriceRowsEmpty(containerId,emptyId);
+  el.querySelector('.repeat-name')?.focus();
+}
+
+function updatePriceRowsEmpty(containerId,emptyId){
+  $('#'+emptyId).classList.toggle('hidden',$('#'+containerId).children.length>0);
+}
+
+function collectPriceRows(containerId){
+  return [...$('#'+containerId).querySelectorAll('.repeat-row')].map(row=>({
+    name:row.querySelector('.repeat-name').value.trim(),
+    price:Number(row.querySelector('.repeat-value').value||0)
+  })).filter(x=>x.name);
+}
+
+$('#addProductSizeBtn')?.addEventListener('click',()=>addPriceRow('productSizesEditor','productSizesEmpty'));
+$('#addProductExtraBtn')?.addEventListener('click',()=>addPriceRow('productExtrasEditor','productExtrasEmpty'));
+
+function previewProductImagePath(value){
+  const src=String(value||'').trim();
+  if(!src) return '';
+  if(/^https?:\/\//i.test(src)) return src;
+  return '../'+src.replace(/^\.?\//,'').replace(/^\//,'');
+}
+
+function resetImageEditor(){
+  productImageSource=null;
+  productImageZoom=1;
+  productImageOffset={x:0,y:0};
+  if($('#productImageZoom')) $('#productImageZoom').value='1';
+  const canvas=$('#productImageCanvas');
+  const ctx=canvas?.getContext('2d');
+  if(ctx) ctx.clearRect(0,0,canvas.width,canvas.height);
+  $('#productImageEmpty')?.classList.remove('hidden');
+}
+
+function loadImageIntoEditor(src){
+  if(!src) return resetImageEditor();
+  const img=new Image();
+  img.crossOrigin='anonymous';
+  img.onload=()=>{
+    productImageSource=img;
+    productImageZoom=1;
+    productImageOffset={x:0,y:0};
+    $('#productImageZoom').value='1';
+    $('#productImageEmpty').classList.add('hidden');
+    drawProductImage();
+  };
+  img.onerror=()=>resetImageEditor();
+  img.src=src;
+}
+
+function drawProductImage(){
+  const canvas=$('#productImageCanvas');
+  if(!canvas||!productImageSource) return;
+  const ctx=canvas.getContext('2d');
+  const iw=productImageSource.naturalWidth||productImageSource.width;
+  const ih=productImageSource.naturalHeight||productImageSource.height;
+  const base=Math.max(canvas.width/iw,canvas.height/ih);
+  const scale=base*productImageZoom;
+  const w=iw*scale,h=ih*scale;
+  const x=(canvas.width-w)/2+productImageOffset.x;
+  const y=(canvas.height-h)/2+productImageOffset.y;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(productImageSource,x,y,w,h);
+}
+
+$('#productImageFile')?.addEventListener('change',e=>{
+  const file=e.target.files?.[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=()=>loadImageIntoEditor(String(reader.result||''));
+  reader.readAsDataURL(file);
+});
+
+$('#productImageZoom')?.addEventListener('input',e=>{
+  productImageZoom=Number(e.target.value||1);
+  drawProductImage();
+});
+
+const productCanvas=$('#productImageCanvas');
+productCanvas?.addEventListener('pointerdown',e=>{
+  if(!productImageSource) return;
+  productImageDragging=true;
+  productCanvas.setPointerCapture(e.pointerId);
+  productImageDragStart={x:e.clientX-productImageOffset.x,y:e.clientY-productImageOffset.y};
+});
+productCanvas?.addEventListener('pointermove',e=>{
+  if(!productImageDragging) return;
+  productImageOffset={x:e.clientX-productImageDragStart.x,y:e.clientY-productImageDragStart.y};
+  drawProductImage();
+});
+productCanvas?.addEventListener('pointerup',()=>{productImageDragging=false;});
+productCanvas?.addEventListener('pointercancel',()=>{productImageDragging=false;});
+
+$('#downloadPreparedImageBtn')?.addEventListener('click',()=>{
+  if(!productImageSource) return alert('Selecione uma imagem primeiro.');
+  const canvas=$('#productImageCanvas');
+  canvas.toBlob(blob=>{
+    if(!blob) return;
+    const name=($('#productName').value||'produto').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'produto';
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=name+'.webp';
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  },'image/webp',.9);
+});
+
 function editProduct(id){
   const p=products.find(x=>x.id===id);
   $('#productEditorTitle').textContent=p?'Editar produto':'Novo produto';
@@ -865,18 +997,22 @@ function editProduct(id){
   $('#productPrice').value=p?.price??'';
   $('#productOrder').value=p?.order??0;
   $('#productImage').value=p?.image||'';
-  $('#productSizes').value=(p?.sizes||[]).map(x=>`${x.name}|${x.price}`).join('\n');
-  $('#productExtras').value=(p?.extras||[]).map(x=>`${x.name}|${x.price}`).join('\n');
+  renderPriceRows('productSizesEditor','productSizesEmpty',p?.sizes||[]);
+  renderPriceRows('productExtrasEditor','productExtrasEmpty',p?.extras||[]);
   const inferredPizza=p?.isPizza??/pizza/i.test(categories.find(cat=>cat.id===(p?.categoryId||$('#productCategory').value))?.name||'');
   $('#productIsPizza').checked=!!inferredPizza;
   $('#productHalfHalf').checked=p?.allowHalfHalf!==false;
   $('#productActive').checked=p?.active!==false;
   $('#productFeatured').checked=!!p?.featured;
+  $('#productEditorError').classList.add('hidden');
+  const preview=previewProductImagePath(p?.image);
+  if(preview) loadImageIntoEditor(preview); else resetImageEditor();
   $('#productEditor').showModal();
 }
 
 $('#productEditorForm').onsubmit=async e=>{
   e.preventDefault();
+  $('#productEditorError').classList.add('hidden');
   const id=$('#productId').value;
   const data={
     name:$('#productName').value.trim(),
@@ -884,20 +1020,40 @@ $('#productEditorForm').onsubmit=async e=>{
     description:$('#productDescription').value.trim(),
     price:Number($('#productPrice').value||0),
     order:Number($('#productOrder').value||0),
-    image:$('#productImage').value.trim(),
-    sizes:parsePriceLines($('#productSizes').value),
-    extras:parsePriceLines($('#productExtras').value),
+    image:$('#productImage').value.trim()||'assets/products/placeholder.svg',
+    sizes:collectPriceRows('productSizesEditor'),
+    extras:collectPriceRows('productExtrasEditor'),
     isPizza:$('#productIsPizza').checked,
     allowHalfHalf:$('#productIsPizza').checked&&$('#productHalfHalf').checked,
     active:$('#productActive').checked,
     featured:$('#productFeatured').checked,
     updatedAt:serverTimestamp()
   };
-  if(!data.name||!data.categoryId) return;
-  if(id) await updateDoc(doc(db,'products',id),data);
-  else await addDoc(collection(db,'products'),{...data,createdAt:serverTimestamp()});
-  $('#productEditor').close();
-  await loadProducts();
+  if(!data.name){
+    $('#productEditorError').textContent='Informe o nome do produto.';
+    $('#productEditorError').classList.remove('hidden');
+    return;
+  }
+  if(!data.categoryId){
+    $('#productEditorError').textContent='Escolha uma categoria.';
+    $('#productEditorError').classList.remove('hidden');
+    return;
+  }
+  if(!data.sizes.length&&data.price<=0){
+    $('#productEditorError').textContent='Informe um preço base ou cadastre pelo menos um tamanho com preço.';
+    $('#productEditorError').classList.remove('hidden');
+    return;
+  }
+  try{
+    if(id) await updateDoc(doc(db,'products',id),data);
+    else await addDoc(collection(db,'products'),{...data,createdAt:serverTimestamp()});
+    $('#productEditor').close();
+    await loadProducts();
+  }catch(err){
+    console.error(err);
+    $('#productEditorError').textContent='Não foi possível salvar o produto.';
+    $('#productEditorError').classList.remove('hidden');
+  }
 };
 
 async function deleteProduct(id){
@@ -929,6 +1085,7 @@ function editCategory(id){
 
 $('#categoryEditorForm').onsubmit=async e=>{
   e.preventDefault();
+  $('#categoryEditorError').classList.add('hidden');
   const id=$('#categoryId').value;
   const data={
     name:$('#categoryName').value.trim(),
@@ -936,11 +1093,21 @@ $('#categoryEditorForm').onsubmit=async e=>{
     active:$('#categoryActive').checked,
     updatedAt:serverTimestamp()
   };
-  if(!data.name) return;
-  if(id) await updateDoc(doc(db,'categories',id),data);
-  else await addDoc(collection(db,'categories'),{...data,createdAt:serverTimestamp()});
-  $('#categoryEditor').close();
-  await loadCategories();
+  if(!data.name){
+    $('#categoryEditorError').textContent='Informe o nome da categoria.';
+    $('#categoryEditorError').classList.remove('hidden');
+    return;
+  }
+  try{
+    if(id) await updateDoc(doc(db,'categories',id),data);
+    else await addDoc(collection(db,'categories'),{...data,createdAt:serverTimestamp()});
+    $('#categoryEditor').close();
+    await loadCategories();
+  }catch(err){
+    console.error(err);
+    $('#categoryEditorError').textContent='Não foi possível salvar a categoria.';
+    $('#categoryEditorError').classList.remove('hidden');
+  }
 };
 
 async function deleteCategory(id){
@@ -952,13 +1119,6 @@ async function deleteCategory(id){
     await deleteDoc(doc(db,'categories',id));
     await loadCategories();
   }
-}
-
-function parsePriceLines(v){
-  return v.split('\n').map(x=>x.trim()).filter(Boolean).map(line=>{
-    const [name,price]=line.split('|');
-    return {name:(name||'').trim(),price:Number(String(price||0).replace(',','.'))};
-  }).filter(x=>x.name);
 }
 
 function parseDeliveryZones(value){
@@ -1089,6 +1249,21 @@ $('#seedBtn').onclick=async()=>{
   await Promise.all([loadCategories(),loadProducts()]);
   alert('Cardápio de exemplo criado.');
 };
+
+function closeAdminDialog(dialog){
+  if(dialog?.open) dialog.close();
+}
+
+$('dialog').forEach(dialog=>{
+  dialog.querySelectorAll('.dialog-close').forEach(btn=>btn.addEventListener('click',()=>closeAdminDialog(dialog)));
+  dialog.addEventListener('cancel',e=>{
+    e.preventDefault();
+    closeAdminDialog(dialog);
+  });
+  dialog.addEventListener('click',e=>{
+    if(e.target===dialog) closeAdminDialog(dialog);
+  });
+});
 
 function formatDate(ts){
   try{
