@@ -603,11 +603,6 @@ $('#checkoutBtn').onclick=()=>{
 function openCheckout(){
   if(!customer) return;
   if(!cart.length) return;
-  if(fulfillment()==='delivery'&&!activeAddress()){
-    afterAuthAction='checkout';
-    openAddressEditor();
-    return;
-  }
   renderCheckoutAddress();
   renderPaymentOptions();
   renderCart();
