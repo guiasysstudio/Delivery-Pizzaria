@@ -81,6 +81,8 @@ $('#loginForm').onsubmit=async e=>{
 $('#logoutBtn').onclick=()=>signOut(auth);
 
 onAuthStateChanged(auth,async user=>{
+  $('#loginError').classList.add('hidden');
+
   if(!user){
     currentProfile=null;
     $('#loginView').classList.remove('hidden');
@@ -88,58 +90,113 @@ onAuthStateChanged(auth,async user=>{
     if(unsubscribeOrders) unsubscribeOrders();
     return;
   }
+
+  const username=(user.email||'').split('@')[0];
+
   try{
-    const username=(user.email||'').split('@')[0];
     if((user.email||'').toLowerCase()==='master@delivery-pizzaria.local'){
       currentProfile={uid:user.uid,username:'master',displayName:'Administrador Master',role:'master',active:true,bootstrap:true};
+
+      // O primeiro Master pode entrar mesmo antes de existir um documento /users.
+      // Se o Firestore já estiver pronto, aproveitamos o perfil salvo.
       try{
         const profileSnap=await getDoc(doc(db,'users',user.uid));
         if(profileSnap.exists()){
           currentProfile={uid:user.uid,...profileSnap.data(),bootstrap:false};
           if(currentProfile.active===false){
             await signOut(auth);
-            throw new Error('disabled');
+            showLoginError('Este usuário está desativado.');
+            return;
           }
         }
       }catch(profileError){
-        console.warn('Perfil Master ainda não registrado nas regras atuais.',profileError);
+        console.warn('Perfil Master ainda não disponível no Firestore.',profileError);
       }
     }else{
-      const profileSnap=await getDoc(doc(db,'users',user.uid));
-      if(profileSnap.exists()){
-        currentProfile={uid:user.uid,...profileSnap.data()};
-        if(currentProfile.active===false){
-          await signOut(auth);
-          throw new Error('disabled');
-        }
-      }else{
+      let profileSnap;
+      try{
+        profileSnap=await getDoc(doc(db,'users',user.uid));
+      }catch(profileError){
+        console.error(profileError);
         await signOut(auth);
-        throw new Error('unauthorized');
+        showLoginError('Não foi possível validar este usuário no banco de dados.');
+        return;
+      }
+
+      if(!profileSnap.exists()){
+        await signOut(auth);
+        showLoginError('Usuário sem permissão para acessar o painel.');
+        return;
+      }
+
+      currentProfile={uid:user.uid,...profileSnap.data()};
+      if(currentProfile.active===false){
+        await signOut(auth);
+        showLoginError('Este usuário está desativado.');
+        return;
       }
     }
 
+    // A autenticação terminou com sucesso. O painel não volta para a tela
+    // de login por causa de uma falha posterior do Firestore.
     $('#loginView').classList.add('hidden');
     $('#adminApp').classList.remove('hidden');
     $('#currentUserDisplay').textContent=`${currentProfile.displayName||currentProfile.username||username} • ${roleLabel(currentProfile.role)}`;
     $$('.master-only').forEach(el=>el.classList.toggle('hidden',!isMaster()));
-    await initializeAdmin();
+    applyRoleUI();
+
+    try{
+      await initializeAdmin();
+      clearSystemAlert();
+    }catch(initError){
+      console.error('Falha ao iniciar painel:',initError);
+      showSystemAlert(describeFirestoreError(initError));
+    }
   }catch(err){
     console.error(err);
-    $('#loginView').classList.remove('hidden');
-    $('#adminApp').classList.add('hidden');
-    if(err?.message==='disabled'){
-      $('#loginError').textContent='Este usuário está desativado.';
-    }else{
-      $('#loginError').textContent='Usuário sem permissão para acessar o painel.';
-    }
-    $('#loginError').classList.remove('hidden');
+    await signOut(auth).catch(()=>{});
+    showLoginError('Não foi possível concluir o acesso ao painel.');
   }
 });
 
+function showLoginError(message){
+  $('#loginView').classList.remove('hidden');
+  $('#adminApp').classList.add('hidden');
+  $('#loginError').textContent=message;
+  $('#loginError').classList.remove('hidden');
+}
+
+function showSystemAlert(message){
+  const el=$('#adminSystemAlert');
+  el.textContent=message;
+  el.classList.remove('hidden');
+}
+
+function clearSystemAlert(){
+  $('#adminSystemAlert').classList.add('hidden');
+  $('#adminSystemAlert').textContent='';
+}
+
+function describeFirestoreError(err){
+  const code=String(err?.code||'');
+  if(code.includes('permission-denied')){
+    return 'Login realizado. O Firestore recusou o acesso aos dados administrativos. É necessário publicar as regras de segurança do projeto.';
+  }
+  if(code.includes('failed-precondition')||code.includes('not-found')){
+    return 'Login realizado. O Cloud Firestore ainda não está disponível para este projeto. Crie/ative o banco Firestore e tente novamente.';
+  }
+  if(code.includes('unavailable')){
+    return 'Login realizado, mas o Firebase está temporariamente indisponível. Tente novamente em instantes.';
+  }
+  return 'Login realizado, mas houve uma falha ao carregar os dados do sistema. Código: '+(code||'desconhecido');
+}
+
 async function initializeAdmin(){
-  const tasks=[loadSettings(),loadCategories(),loadProducts()];
-  if(isMaster()) tasks.push(loadUsers());
-  await Promise.all(tasks);
+  // Carrega primeiro as configurações, porque os demais módulos usam timezone,
+  // permissões e preferências da loja.
+  await loadSettings();
+  await Promise.all([loadCategories(),loadProducts()]);
+  if(isMaster()) await loadUsers();
   listenOrders();
   renderSchedules();
   renderSettings();
