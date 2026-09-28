@@ -1,30 +1,70 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isAdmin() {
+    function signedIn() {
       return request.auth != null;
+    }
+
+    function bootstrapMaster() {
+      return signedIn() &&
+        request.auth.token.email == 'master@delivery-pizzaria.local';
+    }
+
+    function hasProfile() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function activeStaff() {
+      return bootstrapMaster() ||
+        (hasProfile() && profile().active == true);
+    }
+
+    function isMaster() {
+      return bootstrapMaster() ||
+        (activeStaff() && profile().role == 'master');
+    }
+
+    function isManager() {
+      return activeStaff() &&
+        (isMaster() || profile().role == 'manager');
+    }
+
+    function isOperator() {
+      return activeStaff() &&
+        (isManager() || profile().role == 'operator');
+    }
+
+    match /users/{uid} {
+      allow get: if isMaster() || (signedIn() && request.auth.uid == uid);
+      allow list: if isMaster();
+      allow create, update, delete: if isMaster();
     }
 
     match /settings/{document=**} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isManager();
     }
 
     match /categories/{categoryId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isManager();
     }
 
     match /products/{productId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isManager();
     }
 
     match /counters/orders {
       allow read: if true;
       allow create: if request.resource.data.value == 1;
       allow update: if request.resource.data.value == resource.data.value + 1;
-      allow delete: if isAdmin();
+      allow delete: if isMaster();
     }
 
     match /orders/{orderId} {
@@ -41,7 +81,8 @@ service cloud.firestore {
         request.resource.data.subtotal is number &&
         request.resource.data.total is number &&
         request.resource.data.total >= 0;
-      allow read, update, delete: if isAdmin();
+      allow read, update: if isOperator();
+      allow delete: if isMaster();
     }
 
     match /{document=**} {
