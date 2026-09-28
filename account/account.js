@@ -3,7 +3,7 @@ import {
   getAddresses, saveAddress, deleteAddress, setDefaultAddress, getFavorites, setFavorite
 } from '../assets/customer-auth.js';
 import {
-  collection, doc, getDoc, getDocs, query, where
+  collection, doc, getDoc, getDocs, query, where, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 
 const $=s=>document.querySelector(s);
@@ -13,6 +13,7 @@ const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const placeholder='../assets/products/placeholder.svg';
 
 let user=null,profile=null,addresses=[],orders=[],favorites=new Set(),products=[],settings={};
+let unsubscribeOrders=null;
 
 const statusLabels={
   pending:'Aguardando confirmação',
@@ -28,6 +29,7 @@ watchCustomer(async current=>{
   user=current;
   $('#accountLoading').classList.add('hidden');
   if(!current){
+    if(unsubscribeOrders){unsubscribeOrders();unsubscribeOrders=null;}
     $('#accountGuest').classList.remove('hidden');
     $$('.account-section').forEach(s=>s.classList.add('hidden'));
     return;
@@ -42,6 +44,7 @@ watchCustomer(async current=>{
     renderAddresses();
     renderOrders();
     renderFavorites();
+    listenCustomerOrders();
     openSection(location.hash.replace('#','')||'profile');
   }catch(err){
     console.error(err);
@@ -231,6 +234,20 @@ $('#accountAddressForm').onsubmit=async e=>{
     $('#accountAddressError').classList.remove('hidden');
   }
 };
+
+function listenCustomerOrders(){
+  if(unsubscribeOrders) unsubscribeOrders();
+
+  const q=query(collection(db,'orders'),where('customerId','==',user.uid));
+  unsubscribeOrders=onSnapshot(q,snap=>{
+    orders=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
+      const ad=a.createdAt?.toMillis?.()||0;
+      const bd=b.createdAt?.toMillis?.()||0;
+      return bd-ad;
+    });
+    renderOrders();
+  },err=>console.error('Falha ao acompanhar pedidos:',err));
+}
 
 function formatDate(ts){
   try{
