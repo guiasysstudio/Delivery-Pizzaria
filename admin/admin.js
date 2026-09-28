@@ -23,7 +23,63 @@ const statusLabels={
 };
 const dayNames=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 
-let categories=[],products=[],orders=[],settings={},users=[],customers=[],currentProfile=null;
+const permissionDefinitions=[
+  ['ordersView','Pedidos','Visualizar pedidos'],
+  ['ordersAccept','Pedidos','Aceitar pedidos'],
+  ['ordersPrepare','Pedidos','Alterar preparo e marcar como pronto'],
+  ['ordersDispatch','Pedidos','Marcar saída para entrega'],
+  ['ordersComplete','Pedidos','Concluir pedidos/entregas'],
+  ['ordersCancel','Pedidos','Cancelar/recusar pedidos'],
+  ['productsView','Cardápio','Visualizar produtos'],
+  ['productsCreate','Cardápio','Cadastrar produtos'],
+  ['productsEdit','Cardápio','Editar produtos'],
+  ['productsDelete','Cardápio','Excluir produtos'],
+  ['categoriesManage','Cardápio','Gerenciar categorias'],
+  ['promotionsManage','Comercial','Gerenciar promoções'],
+  ['couponsManage','Comercial','Gerenciar cupons'],
+  ['customersView','Clientes','Visualizar clientes'],
+  ['printingManage','Operação','Configurar impressão'],
+  ['cashView','Financeiro','Visualizar caixa e financeiro'],
+  ['cashOperate','Financeiro','Abrir e fechar caixa'],
+  ['settingsManage','Sistema','Alterar configurações da pizzaria'],
+  ['usersManage','Sistema','Criar e editar usuários'],
+  ['rolesManage','Sistema','Criar e editar perfis de acesso']
+];
+
+const defaultRoleTemplates={
+  manager:{name:'Gerente',permissions:{
+    ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true,
+    productsView:true,productsCreate:true,productsEdit:true,productsDelete:true,categoriesManage:true,
+    promotionsManage:true,couponsManage:true,customersView:true,printingManage:true,cashView:true,cashOperate:true,
+    settingsManage:true,usersManage:false,rolesManage:false
+  }},
+  cashier:{name:'Caixa',permissions:{
+    ordersView:true,ordersAccept:true,ordersPrepare:false,ordersDispatch:false,ordersComplete:false,ordersCancel:true,
+    productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
+    promotionsManage:false,couponsManage:false,customersView:true,printingManage:true,cashView:true,cashOperate:true,
+    settingsManage:false,usersManage:false,rolesManage:false
+  }},
+  kitchen:{name:'Cozinha',permissions:{
+    ordersView:true,ordersAccept:false,ordersPrepare:true,ordersDispatch:false,ordersComplete:false,ordersCancel:false,
+    productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
+    promotionsManage:false,couponsManage:false,customersView:false,printingManage:false,cashView:false,cashOperate:false,
+    settingsManage:false,usersManage:false,rolesManage:false
+  }},
+  delivery:{name:'Entrega',permissions:{
+    ordersView:true,ordersAccept:false,ordersPrepare:false,ordersDispatch:true,ordersComplete:true,ordersCancel:false,
+    productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
+    promotionsManage:false,couponsManage:false,customersView:false,printingManage:false,cashView:false,cashOperate:false,
+    settingsManage:false,usersManage:false,rolesManage:false
+  }},
+  operator:{name:'Operador',permissions:{
+    ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true,
+    productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
+    promotionsManage:false,couponsManage:false,customersView:false,printingManage:false,cashView:false,cashOperate:false,
+    settingsManage:false,usersManage:false,rolesManage:false
+  }}
+};
+
+let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=[],promotions=[],coupons=[],cashSessions=[],currentCashSession=null,currentProfile=null;
 let unsubscribeOrders=null,soundEnabled=false,knownOrderIds=new Set();
 let printConfig={
   printer:localStorage.getItem('deliveryPrinter')||'',
@@ -79,17 +135,20 @@ async function resolveStaffEmail(username){
   return legacyUsernameEmail(normalized);
 }
 function roleLabel(role){
-  return ({
-    master:'Master',
-    manager:'Gerente',
-    cashier:'Caixa',
-    kitchen:'Cozinha',
-    delivery:'Entrega',
-    operator:'Operador'
-  })[role]||role;
+  if(role==='master') return 'Master';
+  return roles.find(r=>r.id===role)?.name||defaultRoleTemplates[role]?.name||role||'Sem perfil';
 }
 function isMaster(){
   return currentProfile?.role==='master';
+}
+function rolePermissions(role=currentProfile?.role){
+  if(role==='master'){
+    return Object.fromEntries(permissionDefinitions.map(([key])=>[key,true]));
+  }
+  return roles.find(r=>r.id===role)?.permissions||defaultRoleTemplates[role]?.permissions||{};
+}
+function hasPermission(key){
+  return isMaster()||rolePermissions()[key]===true;
 }
 
 $('#loginForm').onsubmit=async e=>{
@@ -217,33 +276,78 @@ function describeFirestoreError(err){
 }
 
 async function initializeAdmin(){
+  await loadRoles();
+  applyRoleUI();
+  $('#currentUserDisplay').textContent=`${currentProfile.displayName||currentProfile.username||'Usuário'} • ${roleLabel(currentProfile.role)}`;
+
   await loadSettings();
 
   const tasks=[];
-  const role=currentProfile?.role||'operator';
 
-  if(['master','manager'].includes(role)){
+  // Produtos também são carregados para quem trabalha com pedidos, pois o
+  // painel confere os preços antes de aceitar/imprimir.
+  if(hasPermission('ordersView')||hasPermission('productsView')||hasPermission('productsCreate')||hasPermission('productsEdit')||hasPermission('promotionsManage')){
     tasks.push(loadCategories(),loadProducts());
   }
 
-  if(['master','manager','cashier'].includes(role)){
-    tasks.push(loadCustomers());
-  }
-
-  if(isMaster()) tasks.push(loadUsers());
+  if(hasPermission('customersView')) tasks.push(loadCustomers());
+  if(hasPermission('usersManage')) tasks.push(loadUsers());
+  if(hasPermission('promotionsManage')) tasks.push(loadPromotions());
+  if(hasPermission('couponsManage')) tasks.push(loadCoupons());
+  if(hasPermission('cashView')) tasks.push(loadCashSessions());
 
   await Promise.all(tasks);
-  listenOrders();
 
-  if(['master','manager'].includes(role)){
+  if(hasPermission('ordersView')||hasPermission('cashView')) listenOrders();
+
+  if(hasPermission('settingsManage')){
     renderSchedules();
     renderSettings();
   }
 
-  if(['master','manager','cashier'].includes(role)){
+  if(hasPermission('printingManage')){
     loadPrintSettingsUI();
     checkPrintAgent();
   }
+
+  if(hasPermission('cashView')) renderCash();
+}
+async function loadRoles(){
+  try{
+    const snap=await getDocs(collection(db,'roles'));
+    roles=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+
+    if(!roles.length&&isMaster()){
+      const batch=writeBatch(db);
+      for(const [id,template] of Object.entries(defaultRoleTemplates)){
+        batch.set(doc(db,'roles',id),{
+          name:template.name,
+          permissions:template.permissions,
+          system:true,
+          active:true,
+          createdAt:serverTimestamp(),
+          updatedAt:serverTimestamp()
+        });
+      }
+      await batch.commit();
+      const seeded=await getDocs(collection(db,'roles'));
+      roles=seeded.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+    }
+  }catch(err){
+    console.warn('Perfis personalizados ainda não disponíveis. Usando perfis padrão.',err);
+    roles=Object.entries(defaultRoleTemplates).map(([id,v])=>({id,name:v.name,permissions:v.permissions,system:true,active:true}));
+  }
+  refreshUserRoleSelect();
+  renderRoles();
+}
+
+function refreshUserRoleSelect(){
+  const select=$('#userRole');
+  if(!select) return;
+  const current=select.value;
+  const opts=roles.filter(r=>r.active!==false).map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('');
+  select.innerHTML=opts+`<option value="master">Master</option>`;
+  if([...select.options].some(o=>o.value===current)) select.value=current;
 }
 
 async function loadSettings(){
@@ -342,16 +446,27 @@ $('#soundBtn').onclick=async()=>{
 $$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
 
 function allowedViews(){
-  const role=currentProfile?.role||'operator';
-  if(role==='master') return ['orders','products','categories','customers','printing','users','settings'];
-  if(role==='manager') return ['orders','products','categories','customers','printing','settings'];
-  if(role==='cashier') return ['orders','customers','printing'];
-  return ['orders'];
+  const views=[];
+  if(hasPermission('ordersView')) views.push('orders');
+  if(hasPermission('cashView')) views.push('cash');
+  if(hasPermission('productsView')||hasPermission('productsCreate')||hasPermission('productsEdit')||hasPermission('productsDelete')) views.push('products');
+  if(hasPermission('categoriesManage')) views.push('categories');
+  if(hasPermission('promotionsManage')) views.push('promotions');
+  if(hasPermission('couponsManage')) views.push('coupons');
+  if(hasPermission('customersView')) views.push('customers');
+  if(hasPermission('printingManage')) views.push('printing');
+  if(hasPermission('usersManage')) views.push('users');
+  if(hasPermission('rolesManage')) views.push('roles');
+  if(hasPermission('settingsManage')) views.push('settings');
+  return views.length?views:['orders'];
 }
-
 function applyRoleUI(){
   const allowed=allowedViews();
-  $$('.nav-item').forEach(item=>item.classList.toggle('hidden',!allowed.includes(item.dataset.view)));
+  $('.nav-item').forEach(item=>item.classList.toggle('hidden',!allowed.includes(item.dataset.view)));
+  $('.master-only').forEach(el=>{
+    const view=el.dataset.view;
+    if(view) el.classList.toggle('hidden',!allowed.includes(view));
+  });
   if(!allowed.includes(document.querySelector('.admin-view.active')?.id?.replace('view-',''))){
     switchView('orders');
   }
@@ -366,11 +481,15 @@ function switchView(v){
 
   const titles={
     orders:['OPERAÇÃO','Pedidos'],
+    cash:['FINANCEIRO','Caixa'],
     products:['CARDÁPIO','Produtos'],
     categories:['CARDÁPIO','Categorias'],
+    promotions:['COMERCIAL','Promoções'],
+    coupons:['COMERCIAL','Cupons'],
     customers:['CLIENTES','Clientes'],
     printing:['ESTAÇÃO','Impressão'],
     users:['SEGURANÇA','Usuários'],
+    roles:['SEGURANÇA','Perfis de acesso'],
     settings:['SISTEMA','Configurações']
   };
 
@@ -378,6 +497,8 @@ function switchView(v){
   $('#viewTitle').textContent=titles[v][1];
 
   if(v==='printing') checkPrintAgent();
+  if(v==='cash') renderCash();
+  if(v==='roles') renderRoles();
 }
 
 function normalizePriceKey(value){
@@ -512,10 +633,7 @@ async function updateOrderStatus(order,status){
 function renderOrders(){
   const f=$('#orderStatusFilter').value;
   const term=$('#orderSearch').value.trim().toLowerCase();
-  const role=currentProfile?.role||'operator';
   const list=orders.filter(o=>{
-    if(role==='kitchen'&&!['accepted','preparing','ready'].includes(o.status)) return false;
-    if(role==='delivery'&&!['ready','out_for_delivery','completed'].includes(o.status)) return false;
     if(f==='active'&&['completed','cancelled'].includes(o.status)) return false;
     if(f!=='all'&&f!=='active'&&o.status!==f) return false;
     const text=`${o.orderNumber} ${o.customer?.name||''} ${o.customer?.phone||''}`.toLowerCase();
@@ -558,34 +676,23 @@ $('#orderStatusFilter').onchange=renderOrders;
 $('#orderSearch').oninput=renderOrders;
 
 function allowedStatusTargets(order){
-  const role=currentProfile?.role||'operator';
   const current=order.status;
+  const targets=[current];
 
-  if(['master','manager','operator'].includes(role)){
-    return ['pending','accepted','preparing','ready','out_for_delivery','completed','cancelled'];
+  if(current==='pending'&&hasPermission('ordersAccept')) targets.push('accepted');
+  if(current==='pending'&&hasPermission('ordersCancel')) targets.push('cancelled');
+  if(current==='accepted'&&hasPermission('ordersPrepare')) targets.push('preparing');
+  if(current==='accepted'&&hasPermission('ordersCancel')) targets.push('cancelled');
+  if(current==='preparing'&&hasPermission('ordersPrepare')) targets.push('ready');
+  if(current==='ready'&&order.fulfillment==='pickup'&&hasPermission('ordersComplete')) targets.push('completed');
+  if(current==='ready'&&order.fulfillment!=='pickup'&&hasPermission('ordersDispatch')) targets.push('out_for_delivery');
+  if(current==='out_for_delivery'&&hasPermission('ordersComplete')) targets.push('completed');
+
+  if(hasPermission('ordersCancel')&&!['completed','cancelled'].includes(current)&&!targets.includes('cancelled')){
+    targets.push('cancelled');
   }
-
-  if(role==='cashier'){
-    if(current==='pending') return ['pending','accepted','cancelled'];
-    if(current==='accepted') return ['accepted','cancelled'];
-    return [current];
-  }
-
-  if(role==='kitchen'){
-    if(current==='accepted') return ['accepted','preparing'];
-    if(current==='preparing') return ['preparing','ready'];
-    return [current];
-  }
-
-  if(role==='delivery'){
-    if(current==='ready') return ['ready','out_for_delivery'];
-    if(current==='out_for_delivery') return ['out_for_delivery','completed'];
-    return [current];
-  }
-
-  return [current];
+  return [...new Set(targets)];
 }
-
 function orderAddressText(o){
   if(o.fulfillment==='pickup') return 'Retirada no local';
 
@@ -606,7 +713,7 @@ function openOrder(id){
     ?`<p><strong>Troco para:</strong> ${money(o.payment.changeFor)}</p><p><strong>Levar de troco:</strong> ${money(o.payment.changeAmount)}</p>`
     :'';
 
-  const canAccept=['master','manager','cashier','operator'].includes(currentProfile?.role);
+  const canAccept=hasPermission('ordersAccept');
   const acceptBanner=o.status==='pending'&&canAccept
     ?`<div class="order-accept-banner"><div><strong>Este pedido aguarda confirmação</strong><div class="muted">Confirme antes de enviar para produção.</div></div><div class="data-actions"><button class="btn btn-primary quick-status" data-status="accepted">Aceitar pedido</button><button class="btn btn-danger quick-status" data-status="cancelled">Recusar</button></div></div>`
     :'';
@@ -1370,7 +1477,7 @@ $('#customerSearch')?.addEventListener('input',renderCustomers);
 
 
 async function loadUsers(){
-  if(!isMaster()) return;
+  if(!hasPermission('usersManage')) return;
   try{
     const s=await getDocs(collection(db,'users'));
     users=s.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(a.username||'').localeCompare(b.username||''));
@@ -1385,7 +1492,7 @@ async function loadUsers(){
 }
 
 function renderUsers(){
-  if(!isMaster()) return;
+  if(!hasPermission('usersManage')) return;
   $('#usersTable').innerHTML=users.length?users.map(u=>`
     <div class="data-row">
       <div class="data-main">
@@ -1404,12 +1511,12 @@ function renderUsers(){
 }
 
 $('#newUserBtn').onclick=()=>{
-  if(!isMaster()) return;
+  if(!hasPermission('usersManage')) return;
   editUser(null);
 };
 
 function editUser(uid){
-  if(!isMaster()) return;
+  if(!hasPermission('usersManage')) return;
   const u=users.find(x=>x.uid===uid);
   const isExisting=!!u&&!u.bootstrap;
   $('#userEditorTitle').textContent=u?(u.bootstrap?'Registrar Master':'Editar usuário'):'Novo usuário';
@@ -1430,7 +1537,7 @@ function editUser(uid){
 
 $('#userEditorForm').onsubmit=async e=>{
   e.preventDefault();
-  if(!isMaster()) return;
+  if(!hasPermission('usersManage')) return;
   const existingUid=$('#userUid').value;
   const username=normalizeUsername($('#userUsername').value);
   const displayName=$('#userDisplayName').value.trim()||username;
@@ -1504,7 +1611,7 @@ function userEditorError(message){
 }
 
 async function toggleUser(uid){
-  if(!isMaster()||uid===auth.currentUser?.uid) return;
+  if(!hasPermission('usersManage')||uid===auth.currentUser?.uid) return;
   const u=users.find(x=>x.uid===uid);
   if(!u) return;
   const next=u.active===false;
