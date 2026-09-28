@@ -37,7 +37,7 @@ service cloud.firestore {
       return isMaster() ||
         (
           roleExists() &&
-          roleData().get(['permissions', key], false) == true
+          roleData().get('permissions', {}).get(key, false) == true
         );
     }
 
