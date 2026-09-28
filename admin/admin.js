@@ -273,24 +273,37 @@ function listenOrders(){
   if(unsubscribeOrders) unsubscribeOrders();
   const q=query(collection(db,'orders'),orderBy('createdAt','desc'));
   let first=true;
+
   unsubscribeOrders=onSnapshot(q,snap=>{
     const incoming=[];
+
     snap.docChanges().forEach(ch=>{
       if(ch.type==='added'&&!first&&!knownOrderIds.has(ch.doc.id)){
         incoming.push({id:ch.doc.id,...ch.doc.data()});
       }
     });
+
     orders=snap.docs.map(d=>({id:d.id,...d.data()}));
     knownOrderIds=new Set(orders.map(o=>o.id));
+
     renderOrders();
     renderStats();
+
     if(!first&&incoming.length){
       for(const o of incoming){
         notifyNewOrder(o);
-        if(settings.autoPrint) autoPrint(o.id);
+
+        if(printConfig.autoPrint){
+          const shouldPrint=o.status==='accepted'||(o.status==='pending'&&printConfig.printPending);
+          if(shouldPrint) printOrder(o,true);
+        }
       }
     }
+
     first=false;
+  },err=>{
+    console.error('Falha no acompanhamento de pedidos:',err);
+    showSystemAlert('Não foi possível acompanhar os pedidos em tempo real. Verifique as regras do Firestore.');
   });
 }
 
@@ -393,41 +406,113 @@ function renderOrders(){
 $('#orderStatusFilter').onchange=renderOrders;
 $('#orderSearch').oninput=renderOrders;
 
+function allowedStatusTargets(order){
+  const role=currentProfile?.role||'operator';
+
+  if(['master','manager','cashier','operator'].includes(role)){
+    return ['pending','accepted','preparing','ready','out_for_delivery','completed','cancelled'];
+  }
+
+  if(role==='kitchen'){
+    return ['accepted','preparing','ready'];
+  }
+
+  if(role==='delivery'){
+    return ['ready','out_for_delivery','completed'];
+  }
+
+  return [order.status];
+}
+
+function orderAddressText(o){
+  if(o.fulfillment==='pickup') return 'Retirada no local';
+
+  const a=o.address||{};
+  if(a.street){
+    return `${a.street}, ${a.number||''} — ${a.neighborhood||''}${a.complement?` • ${a.complement}`:''}${a.reference?` • Ref.: ${a.reference}`:''}${a.city?` • ${a.city}/${a.state||''}`:''}`;
+  }
+
+  return `${o.customer?.address||''}, ${o.customer?.number||''} — ${o.customer?.neighborhood||''}`;
+}
+
 function openOrder(id){
   const o=orders.find(x=>x.id===id);
   if(!o) return;
 
-  const address=o.fulfillment==='pickup'
-    ?'Retirada no local'
-    :`${o.customer?.address||''}, ${o.customer?.number||''} — ${o.customer?.neighborhood||''}${o.customer?.complement?` • ${o.customer.complement}`:''}${o.customer?.reference?` • Ref.: ${o.customer.reference}`:''}`;
+  const address=orderAddressText(o);
+  const changeInfo=o.payment?.needsChange
+    ?`<p><strong>Troco para:</strong> ${money(o.payment.changeFor)}</p><p><strong>Levar de troco:</strong> ${money(o.payment.changeAmount)}</p>`
+    :'';
+
+  const canAccept=['master','manager','cashier','operator'].includes(currentProfile?.role);
+  const acceptBanner=o.status==='pending'&&canAccept
+    ?`<div class="order-accept-banner"><div><strong>Este pedido aguarda confirmação</strong><div class="muted">Confirme antes de enviar para produção.</div></div><div class="data-actions"><button class="btn btn-primary quick-status" data-status="accepted">Aceitar pedido</button><button class="btn btn-danger quick-status" data-status="cancelled">Recusar</button></div></div>`
+    :'';
+
+  const targets=allowedStatusTargets(o);
 
   $('#orderDetail').innerHTML=`
     <div class="order-detail-head">
       <div><span class="eyebrow">PEDIDO</span><h2>#${String(o.orderNumber||0).padStart(4,'0')}</h2><p class="muted">${formatDate(o.createdAt)}</p></div>
       <span class="status-pill status-${o.status}">${statusLabels[o.status]||o.status}</span>
     </div>
+
+    ${acceptBanner}
+
     <div class="order-detail-grid">
-      <div class="detail-card"><h3>Cliente</h3><p><strong>${esc(o.customer?.name||'')}</strong></p><p>${esc(o.customer?.phone||'')}</p><p>${esc(address)}</p></div>
-      <div class="detail-card"><h3>Pagamento</h3><p>${esc(o.payment?.method||'')}</p>${o.payment?.changeFor?`<p>Troco para: ${esc(o.payment.changeFor)}</p>`:''}<p><strong>${money(o.total)}</strong></p></div>
+      <div class="detail-card">
+        <h3>Cliente</h3>
+        <p><strong>${esc(o.customer?.name||'')}</strong></p>
+        <p>${esc(o.customer?.phone||'')}</p>
+        <p>${esc(o.customer?.email||'')}</p>
+        <p>${esc(address)}</p>
+      </div>
+
+      <div class="detail-card">
+        <h3>Pagamento</h3>
+        <p><strong>${esc(o.payment?.method||'')}</strong></p>
+        ${changeInfo}
+        <p>Total: <strong>${money(o.total)}</strong></p>
+      </div>
     </div>
+
     <div class="order-items-detail">
       ${(o.items||[]).map(i=>`<div class="order-line"><div><strong>${i.qty}× ${esc(i.name)}</strong><small class="muted" style="display:block">${[i.size?.name,...(i.extras||[]).map(e=>e.name)].filter(Boolean).map(esc).join(' • ')}${i.note?` • Obs.: ${esc(i.note)}`:''}</small></div><strong>${money(Number(i.unitPrice)*Number(i.qty))}</strong></div>`).join('')}
       <div class="order-line"><span>Subtotal</span><strong>${money(o.subtotal)}</strong></div>
       <div class="order-line"><span>Entrega</span><strong>${money(o.deliveryFee)}</strong></div>
       <div class="order-line"><strong>Total</strong><strong>${money(o.total)}</strong></div>
     </div>
+
     ${o.note?`<div class="detail-card"><h3>Observações</h3><p>${esc(o.note)}</p></div>`:''}
-    <h3>Atualizar status</h3>
-    <div class="status-actions">${Object.entries(statusLabels).map(([k,v])=>`<button class="btn ${k===o.status?'btn-primary':'btn-secondary'} status-change" data-status="${k}">${v}</button>`).join('')}</div>
-    <div class="section-actions" style="margin-top:16px"><button class="btn btn-secondary" id="printOrderBtn">🖨️ Imprimir comanda</button></div>
+
+    <h3>Andamento do pedido</h3>
+    <div class="status-actions">
+      ${targets.map(k=>`<button class="btn ${k===o.status?'btn-primary':'btn-secondary'} status-change" data-status="${k}">${statusLabels[k]||k}</button>`).join('')}
+    </div>
+
+    <div class="section-actions" style="margin-top:16px">
+      <button class="btn btn-secondary" id="printOrderBtn">🖨️ Imprimir comanda</button>
+    </div>
   `;
 
-  $$('.status-change').forEach(b=>b.onclick=async()=>{
-    await updateDoc(doc(db,'orders',o.id),{status:b.dataset.status,updatedAt:serverTimestamp()});
-    $('#orderDialog').close();
-  });
+  async function changeStatus(status){
+    const patch={status,updatedAt:serverTimestamp()};
+    if(status==='accepted') patch.acceptedAt=serverTimestamp();
+    if(status==='completed') patch.completedAt=serverTimestamp();
+    if(status==='cancelled') patch.cancelledAt=serverTimestamp();
 
-  $('#printOrderBtn').onclick=()=>window.open(`./print.html?id=${encodeURIComponent(o.id)}`,'_blank');
+    await updateDoc(doc(db,'orders',o.id),patch);
+
+    if(status==='accepted'&&printConfig.autoPrint){
+      await printOrder({...o,status:'accepted'},true);
+    }
+
+    $('#orderDialog').close();
+  }
+
+  $$('.quick-status').forEach(b=>b.onclick=()=>changeStatus(b.dataset.status));
+  $$('.status-change').forEach(b=>b.onclick=()=>changeStatus(b.dataset.status));
+  $('#printOrderBtn').onclick=()=>printOrder(o,false);
   $('#orderDialog').showModal();
 }
 
