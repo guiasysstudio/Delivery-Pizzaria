@@ -58,7 +58,13 @@ export async function loginWithEmail(email,password){
 }
 
 export async function registerWithEmail({name,email,password,phone='' }){
-  const result=await createUserWithEmailAndPassword(auth,email.trim(),password);
+  const normalizedEmail=email.trim().toLowerCase();
+  if(normalizedEmail.endsWith('@delivery-pizzaria.local')){
+    const err=new Error('reserved-domain');
+    err.code='auth/reserved-domain';
+    throw err;
+  }
+  const result=await createUserWithEmailAndPassword(auth,normalizedEmail,password);
   await updateProfile(result.user,{displayName:name.trim()});
   try{await ensureCustomerProfile(result.user,{name:name.trim(),phone:phone.trim()});}catch(err){console.error(err);}
   return result.user;
