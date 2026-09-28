@@ -295,7 +295,7 @@ function applyRoleUI(){
     :role==='manager'
       ?['orders','products','categories','settings']
       :['orders'];
-  $('.nav-item').forEach(item=>item.classList.toggle('hidden',!allowed.includes(item.dataset.view)));
+  $$('.nav-item').forEach(item=>item.classList.toggle('hidden',!allowed.includes(item.dataset.view)));
   if(!allowed.includes(document.querySelector('.admin-view.active')?.id?.replace('view-',''))){
     switchView('orders');
   }
@@ -309,7 +309,7 @@ function switchView(v){
       ?['orders','products','categories','settings']
       :['orders'];
   if(!allowed.includes(v)) return;
-  $('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
+  $$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   $$('.admin-view').forEach(x=>x.classList.toggle('active',x.id===`view-${v}`));
   const titles={
     orders:['OPERAÇÃO','Pedidos'],
