@@ -16,3 +16,18 @@
 
 @media(max-width:1000px){.public-header-row{grid-template-columns:auto 1fr}.public-header-actions{grid-column:1/-1;justify-content:flex-end;display:none}.location-button{justify-self:end;max-width:480px}.public-content{grid-template-columns:1fr}.cart-panel-desktop{position:fixed;inset:auto 10px 10px 10px;z-index:35;display:none;max-height:82vh;overflow:auto}.cart-panel-desktop.open{display:block}.product-modal-grid{grid-template-columns:1fr}.product-modal-grid .modal-product-image{position:static;aspect-ratio:16/8}.account-layout{grid-template-columns:190px minmax(0,1fr)}}
 @media(max-width:720px){.public-header-row{grid-template-columns:1fr;gap:8px;padding:8px 0}.public-brand{display:none}.location-button{justify-self:stretch;max-width:none}.public-hero-grid{grid-template-columns:1fr;min-height:auto}.public-hero-copy{padding:34px 0}.hero-pizza-art{display:none}.public-content{padding-top:16px}.catalog-toolbar{top:64px}.payment-options{grid-template-columns:1fr}.success-actions{grid-template-columns:1fr}.footer-grid{display:grid}.footer-right{text-align:left}.account-layout{grid-template-columns:1fr}.account-sidebar{position:static}.account-profile-summary{display:none}.account-nav{display:flex;overflow:auto}.account-nav-item{white-space:nowrap}.account-card-grid{grid-template-columns:1fr}.section-heading{align-items:flex-start}.account-order-footer{align-items:flex-start;flex-direction:column}.public-header .header-action-copy{display:block}.public-header-actions{display:none}}
+
+
+/* Mobile account access must remain visible */
+@media(max-width:720px){
+  .public-header-row{grid-template-columns:minmax(0,1fr) auto;display:grid;align-items:center}
+  .public-header-actions{display:flex!important;grid-column:auto;justify-content:flex-end}
+  .public-header-actions .cart-head-button{display:none}
+  .public-header-actions .header-action-copy{display:none}
+  .public-header-actions .header-action{padding:8px}
+  .account-body .public-header-row{grid-template-columns:1fr auto}
+  .account-body .public-brand{display:flex}
+  .account-body .public-header-actions{display:flex!important}
+  .account-body .public-header-actions .header-action{min-width:40px;justify-content:center}
+  .account-body .public-header-actions .header-action-copy{display:none}
+}
