@@ -749,7 +749,8 @@ function editProduct(id){
   $('#productImage').value=p?.image||'';
   $('#productSizes').value=(p?.sizes||[]).map(x=>`${x.name}|${x.price}`).join('\n');
   $('#productExtras').value=(p?.extras||[]).map(x=>`${x.name}|${x.price}`).join('\n');
-  $('#productIsPizza').checked=!!p?.isPizza;
+  const inferredPizza=p?.isPizza??/pizza/i.test(categories.find(cat=>cat.id===(p?.categoryId||$('#productCategory').value))?.name||'');
+  $('#productIsPizza').checked=!!inferredPizza;
   $('#productHalfHalf').checked=p?.allowHalfHalf!==false;
   $('#productActive').checked=p?.active!==false;
   $('#productFeatured').checked=!!p?.featured;
