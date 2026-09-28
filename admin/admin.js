@@ -518,13 +518,187 @@ function openOrder(id){
 
 $('#closeOrderDialog').onclick=()=>$('#orderDialog').close();
 
-function autoPrint(id){
-  const frame=document.createElement('iframe');
-  frame.style='position:fixed;width:1px;height:1px;opacity:0;pointer-events:none';
-  frame.src=`./print.html?id=${encodeURIComponent(id)}&autoprint=1`;
-  document.body.appendChild(frame);
-  setTimeout(()=>frame.remove(),20000);
+function loadPrintSettingsUI(){
+  if(!$('#localAutoPrint')) return;
+  $('#localAutoPrint').checked=printConfig.autoPrint;
+  $('#localPrintPending').checked=printConfig.printPending;
 }
+
+function savePrintSettings(){
+  if(!$('#localPrinterSelect')) return;
+  printConfig={
+    printer:$('#localPrinterSelect').value,
+    autoPrint:$('#localAutoPrint').checked,
+    printPending:$('#localPrintPending').checked
+  };
+
+  localStorage.setItem('deliveryPrinter',printConfig.printer);
+  localStorage.setItem('deliveryAutoPrint',printConfig.autoPrint?'1':'0');
+  localStorage.setItem('deliveryPrintPending',printConfig.printPending?'1':'0');
+}
+
+async function checkPrintAgent(){
+  const status=$('#printerAgentStatus');
+  const select=$('#localPrinterSelect');
+  if(!status||!select) return false;
+
+  try{
+    const response=await fetch(PRINT_AGENT+'/printers',{cache:'no-store'});
+    if(!response.ok) throw new Error('agent');
+
+    const data=await response.json();
+    const printers=Array.isArray(data.printers)?data.printers:[];
+
+    select.innerHTML='<option value="">Selecione...</option>'+
+      printers.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
+
+    if(printConfig.printer&&printers.includes(printConfig.printer)){
+      select.value=printConfig.printer;
+    }
+
+    status.textContent='● Print Agent conectado • '+printers.length+' impressora(s)';
+    status.classList.add('ok');
+    status.classList.remove('off');
+    return true;
+  }catch(err){
+    status.textContent='● Print Agent desconectado';
+    status.classList.add('off');
+    status.classList.remove('ok');
+    select.innerHTML='<option value="">Print Agent não encontrado</option>';
+    return false;
+  }
+}
+
+function centerText(text,width=42){
+  text=String(text||'');
+  if(text.length>=width) return text;
+  const left=Math.floor((width-text.length)/2);
+  return ' '.repeat(left)+text;
+}
+
+function receiptText(o){
+  const width=42;
+  const divider='-'.repeat(width);
+  const lines=[];
+
+  lines.push(centerText(settings.storeName||'PIZZARIA',width));
+  if(settings.phone) lines.push(centerText(settings.phone,width));
+  lines.push(divider);
+  lines.push(centerText('PEDIDO #'+String(o.orderNumber||0).padStart(4,'0'),width));
+  lines.push(formatDate(o.createdAt));
+  lines.push('STATUS: '+(statusLabels[o.status]||o.status));
+  lines.push(divider);
+  lines.push('CLIENTE: '+(o.customer?.name||''));
+  lines.push('FONE: '+(o.customer?.phone||''));
+  lines.push(o.fulfillment==='pickup'?'RETIRADA NO LOCAL':'ENTREGA: '+orderAddressText(o));
+  lines.push(divider);
+  lines.push('ITENS');
+
+  for(const item of (o.items||[])){
+    lines.push(String(item.qty)+'x '+String(item.name||''));
+    if(item.size?.name) lines.push('  Tamanho: '+item.size.name);
+    if(item.extras?.length) lines.push('  Adic.: '+item.extras.map(x=>x.name).join(', '));
+    if(item.note) lines.push('  OBS: '+item.note);
+    lines.push('  '+money(Number(item.unitPrice||0)*Number(item.qty||0)));
+  }
+
+  lines.push(divider);
+  lines.push('Subtotal: '+money(o.subtotal));
+  lines.push('Entrega:  '+money(o.deliveryFee));
+  lines.push('TOTAL:    '+money(o.total));
+  lines.push(divider);
+  lines.push('PAGAMENTO: '+(o.payment?.method||''));
+
+  if(o.payment?.needsChange){
+    lines.push('TROCO PARA: '+money(o.payment.changeFor));
+    lines.push('LEVAR TROCO: '+money(o.payment.changeAmount));
+  }
+
+  if(o.note){
+    lines.push(divider);
+    lines.push('OBSERVACOES:');
+    lines.push(o.note);
+  }
+
+  lines.push(divider);
+  lines.push(centerText('*** FIM DA COMANDA ***',width));
+  lines.push('');
+  lines.push('');
+  return lines.join('\n');
+}
+
+async function sendToPrintAgent(text){
+  if(!printConfig.printer) throw new Error('printer-not-selected');
+
+  const response=await fetch(PRINT_AGENT+'/print',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      printer:printConfig.printer,
+      text,
+      copies:1
+    })
+  });
+
+  if(!response.ok){
+    const message=await response.text().catch(()=>'');
+    throw new Error(message||'print-failed');
+  }
+}
+
+async function printOrder(order,automatic=false){
+  const connected=await checkPrintAgent();
+
+  if(connected&&printConfig.printer){
+    try{
+      await sendToPrintAgent(receiptText(order));
+      return true;
+    }catch(err){
+      console.error('Falha no Print Agent:',err);
+    }
+  }
+
+  if(automatic){
+    showSystemAlert('Pedido recebido, mas a impressão automática não foi realizada. Abra “Impressão” e verifique o Print Agent e a impressora selecionada.');
+    return false;
+  }
+
+  window.open(`./print.html?id=${encodeURIComponent(order.id)}`,'_blank');
+  return false;
+}
+
+$('#refreshPrintersBtn')?.addEventListener('click',checkPrintAgent);
+
+$('#savePrintSettingsBtn')?.addEventListener('click',()=>{
+  savePrintSettings();
+  checkPrintAgent();
+  alert('Configuração desta estação salva.');
+});
+
+$('#testPrintBtn')?.addEventListener('click',async()=>{
+  savePrintSettings();
+  try{
+    const text=[
+      centerText(settings.storeName||'DELIVERY PIZZARIA'),
+      '------------------------------------------',
+      centerText('TESTE DE IMPRESSAO'),
+      '',
+      'Impressora: '+(printConfig.printer||''),
+      'Data: '+new Date().toLocaleString('pt-BR'),
+      '',
+      centerText('Print Agent funcionando'),
+      '',
+      ''
+    ].join('\n');
+
+    await sendToPrintAgent(text);
+    alert('Teste enviado para a impressora.');
+  }catch(err){
+    console.error(err);
+    alert('Não foi possível imprimir. Verifique se o Print Agent está aberto e se uma impressora foi selecionada.');
+  }
+});
+
 
 function renderProducts(){
   $('#productsTable').innerHTML=products.length?products.map(p=>`<div class="data-row"><div class="data-main"><strong>${esc(p.name)}</strong><small>${esc(categories.find(c=>c.id===p.categoryId)?.name||'Sem categoria')} • ${p.active===false?'Indisponível':'Disponível'} • ${p.sizes?.length?`${p.sizes.length} tamanhos`:money(p.price)}</small></div><span>${p.featured?'Destaque':''}</span><div class="data-actions"><button class="btn btn-secondary edit-product" data-id="${p.id}">Editar</button><button class="btn btn-danger delete-product" data-id="${p.id}">Excluir</button></div></div>`).join(''):'<div class="empty-state">Nenhum produto cadastrado.</div>';
