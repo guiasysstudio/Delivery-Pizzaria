@@ -169,6 +169,22 @@ export async function setFavorite(uid,productId,active){
   }
 }
 
+export async function lookupBrazilianZip(zip){
+  const digits=String(zip||'').replace(/\D/g,'');
+  if(digits.length!==8) return null;
+  const response=await fetch(`https://viacep.com.br/ws/${digits}/json/`,{cache:'no-store'});
+  if(!response.ok) throw new Error('cep-unavailable');
+  const data=await response.json();
+  if(data?.erro) return null;
+  return {
+    zip:digits.replace(/^(\d{5})(\d{3})$/,'$1-$2'),
+    street:data.logradouro||'',
+    neighborhood:data.bairro||'',
+    city:data.localidade||'',
+    state:data.uf||''
+  };
+}
+
 export function friendlyAuthError(err){
   const code=String(err?.code||'');
   if(code.includes('popup-closed')) return 'Login cancelado.';
