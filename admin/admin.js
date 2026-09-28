@@ -59,8 +59,22 @@ const defaults={
 function normalizeUsername(value){
   return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9._-]/g,'');
 }
-function usernameEmail(username){
+function legacyUsernameEmail(username){
   return `${normalizeUsername(username)}@delivery-pizzaria.local`;
+}
+function randomStaffEmail(username){
+  const token=crypto.randomUUID().replace(/-/g,'').slice(0,18);
+  return `staff.${normalizeUsername(username)}.${token}@delivery-pizzaria.local`;
+}
+async function resolveStaffEmail(username){
+  const normalized=normalizeUsername(username);
+  try{
+    const snap=await getDoc(doc(db,'staffLogins',normalized));
+    if(snap.exists()&&snap.data()?.email) return String(snap.data().email);
+  }catch(err){
+    console.warn('Não foi possível consultar o mapa de login administrativo.',err);
+  }
+  return legacyUsernameEmail(normalized);
 }
 function roleLabel(role){
   return ({
@@ -86,7 +100,8 @@ $('#loginForm').onsubmit=async e=>{
     return;
   }
   try{
-    await signInWithEmailAndPassword(auth,usernameEmail(username),$('#loginPassword').value);
+    const email=await resolveStaffEmail(username);
+    await signInWithEmailAndPassword(auth,email,$('#loginPassword').value);
   }catch(err){
     $('#loginError').textContent='Usuário ou senha inválidos.';
     $('#loginError').classList.remove('hidden');
@@ -109,61 +124,40 @@ onAuthStateChanged(auth,async user=>{
   const username=(user.email||'').split('@')[0];
 
   try{
-    if((user.email||'').toLowerCase()==='master@delivery-pizzaria.local'){
-      currentProfile={uid:user.uid,username:'master',displayName:'Administrador Master',role:'master',active:true,bootstrap:true};
+    let profileSnap;
+    try{
+      profileSnap=await getDoc(doc(db,'users',user.uid));
+    }catch(profileError){
+      console.error(profileError);
+      await signOut(auth);
+      showLoginError('Não foi possível validar este usuário no banco de dados.');
+      return;
+    }
 
-      // O primeiro Master pode entrar mesmo antes de existir um documento /users.
-      // Se o Firestore já estiver pronto, aproveitamos o perfil salvo.
-      try{
-        const profileSnap=await getDoc(doc(db,'users',user.uid));
-        if(profileSnap.exists()){
-          currentProfile={uid:user.uid,...profileSnap.data(),bootstrap:false};
-          if(currentProfile.active===false){
-            await signOut(auth);
-            showLoginError('Este usuário está desativado.');
-            return;
-          }
-        }else{
-          try{
-            await setDoc(doc(db,'users',user.uid),{
-              username:'master',
-              displayName:'Administrador Master',
-              role:'master',
-              active:true,
-              createdAt:serverTimestamp(),
-              updatedAt:serverTimestamp()
-            });
-            currentProfile.bootstrap=false;
-          }catch(profileCreateError){
-            console.warn('Não foi possível registrar automaticamente o perfil Master ainda.',profileCreateError);
-          }
-        }
-      }catch(profileError){
-        console.warn('Perfil Master ainda não disponível no Firestore.',profileError);
-      }
-    }else{
-      let profileSnap;
-      try{
-        profileSnap=await getDoc(doc(db,'users',user.uid));
-      }catch(profileError){
-        console.error(profileError);
-        await signOut(auth);
-        showLoginError('Não foi possível validar este usuário no banco de dados.');
-        return;
-      }
+    if(!profileSnap.exists()){
+      await signOut(auth);
+      showLoginError('Usuário sem perfil administrativo. Entre com uma conta criada pelo Master.');
+      return;
+    }
 
-      if(!profileSnap.exists()){
-        await signOut(auth);
-        showLoginError('Usuário sem permissão para acessar o painel.');
-        return;
-      }
+    currentProfile={uid:user.uid,...profileSnap.data()};
+    if(currentProfile.active===false){
+      await signOut(auth);
+      showLoginError('Este usuário está desativado.');
+      return;
+    }
 
-      currentProfile={uid:user.uid,...profileSnap.data()};
-      if(currentProfile.active===false){
-        await signOut(auth);
-        showLoginError('Este usuário está desativado.');
-        return;
-      }
+    // Garante que logins antigos (inclusive o Master inicial) ganhem o novo
+    // mapeamento username -> e-mail sem expor isso na interface.
+    const normalized=currentProfile.username||username;
+    try{
+      await setDoc(doc(db,'staffLogins',normalizeUsername(normalized)),{
+        uid:user.uid,
+        email:user.email||'',
+        updatedAt:serverTimestamp()
+      },{merge:true});
+    }catch(mappingError){
+      console.warn('Não foi possível atualizar o mapa de login.',mappingError);
     }
 
     // A autenticação terminou com sucesso. O painel não volta para a tela
@@ -1104,8 +1098,10 @@ $('#userEditorForm').onsubmit=async e=>{
       if(password.length<6) return userEditorError('A senha precisa ter pelo menos 6 caracteres.');
       let credential=null;
       try{
-        credential=await createUserWithEmailAndPassword(userCreatorAuth,usernameEmail(username),password);
-        await setDoc(doc(db,'users',credential.user.uid),{
+        const internalEmail=randomStaffEmail(username);
+        credential=await createUserWithEmailAndPassword(userCreatorAuth,internalEmail,password);
+        const batch=writeBatch(db);
+        batch.set(doc(db,'users',credential.user.uid),{
           username,
           displayName,
           role,
@@ -1114,6 +1110,13 @@ $('#userEditorForm').onsubmit=async e=>{
           createdAt:serverTimestamp(),
           updatedAt:serverTimestamp()
         });
+        batch.set(doc(db,'staffLogins',username),{
+          uid:credential.user.uid,
+          email:internalEmail,
+          createdAt:serverTimestamp(),
+          updatedAt:serverTimestamp()
+        });
+        await batch.commit();
       }catch(err){
         if(credential?.user){
           try{await deleteUser(credential.user);}catch{}
