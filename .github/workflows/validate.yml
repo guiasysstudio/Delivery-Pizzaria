@@ -23,6 +23,7 @@ jobs:
           node --check admin/admin.js
           node --check admin/print.js
           node --check service-worker.js
+          node --check functions/index.js
 
       - name: Detect common selector mistakes
         run: |
@@ -98,3 +99,5 @@ jobs:
           test -f manifest.webmanifest
           test -f service-worker.js
           test -f print-agent/DeliveryPizzaria.PrintAgent.csproj
+          test -f functions/package.json
+          test -f functions/index.js
