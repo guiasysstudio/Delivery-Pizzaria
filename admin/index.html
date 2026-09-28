@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#111827" />
+  <title>Admin • Delivery Pizzaria</title>
+  <link rel="stylesheet" href="../assets/styles.css" />
+</head>
+<body class="admin-body">
+  <section id="loginView" class="login-screen">
+    <form id="loginForm" class="login-card">
+      <span class="eyebrow">PAINEL ADMINISTRATIVO</span><h1>Entrar</h1>
+      <p class="muted">Use o usuário criado no Firebase Authentication.</p>
+      <label class="field"><span>E-mail</span><input id="loginEmail" type="email" required autocomplete="username" /></label>
+      <label class="field"><span>Senha</span><input id="loginPassword" type="password" required autocomplete="current-password" /></label>
+      <div id="loginError" class="alert alert-error hidden"></div>
+      <button class="btn btn-primary btn-block" type="submit">Entrar</button>
+    </form>
+  </section>
+
+  <div id="adminApp" class="admin-app hidden">
+    <aside class="admin-sidebar">
+      <div class="brand"><span class="brand-mark">🍕</span><div><strong id="adminStoreName">Pizzaria</strong><small>Painel de delivery</small></div></div>
+      <nav class="admin-nav">
+        <button class="nav-item active" data-view="orders">📋 <span>Pedidos</span><span id="pendingBadge" class="nav-badge hidden">0</span></button>
+        <button class="nav-item" data-view="products">🍕 <span>Produtos</span></button>
+        <button class="nav-item" data-view="categories">🗂️ <span>Categorias</span></button>
+        <button class="nav-item" data-view="settings">⚙️ <span>Configurações</span></button>
+      </nav>
+      <div class="sidebar-bottom"><a class="btn btn-secondary btn-block" href="../" target="_blank">Abrir cardápio</a><button id="logoutBtn" class="btn btn-ghost btn-block">Sair</button></div>
+    </aside>
+
+    <main class="admin-main">
+      <header class="admin-topbar"><div><span id="viewEyebrow" class="eyebrow">OPERAÇÃO</span><h1 id="viewTitle">Pedidos</h1></div><div class="topbar-actions"><button id="soundBtn" class="btn btn-secondary">🔔 Ativar som</button><span id="liveIndicator" class="live-indicator">● Tempo real</span></div></header>
+
+      <section id="view-orders" class="admin-view active">
+        <div class="stats-grid">
+          <div class="stat-card"><span>Novos</span><strong id="statPending">0</strong></div><div class="stat-card"><span>Em preparo</span><strong id="statPreparing">0</strong></div><div class="stat-card"><span>Em entrega</span><strong id="statDelivery">0</strong></div><div class="stat-card"><span>Hoje</span><strong id="statToday">0</strong></div>
+        </div>
+        <div class="panel"><div class="panel-head"><div class="filters"><select id="orderStatusFilter"><option value="active">Pedidos ativos</option><option value="all">Todos</option><option value="pending">Novos</option><option value="preparing">Em preparo</option><option value="ready">Prontos</option><option value="out_for_delivery">Saiu para entrega</option><option value="completed">Concluídos</option><option value="cancelled">Cancelados</option></select><input id="orderSearch" type="search" placeholder="Buscar nº, cliente ou telefone" /></div></div><div id="ordersList" class="orders-list"></div></div>
+      </section>
+
+      <section id="view-products" class="admin-view">
+        <div class="section-actions"><button id="newProductBtn" class="btn btn-primary">+ Novo produto</button><button id="seedBtn" class="btn btn-secondary">Criar cardápio de exemplo</button></div>
+        <div class="panel"><div id="productsTable" class="data-list"></div></div>
+      </section>
+
+      <section id="view-categories" class="admin-view">
+        <div class="section-actions"><button id="newCategoryBtn" class="btn btn-primary">+ Nova categoria</button></div>
+        <div class="panel"><div id="categoriesTable" class="data-list"></div></div>
+      </section>
+
+      <section id="view-settings" class="admin-view">
+        <form id="settingsForm" class="settings-grid">
+          <div class="panel settings-card"><h2>Dados da pizzaria</h2><label class="field"><span>Nome</span><input id="setStoreName" required /></label><label class="field"><span>Subtítulo</span><input id="setSubtitle" /></label><label class="field"><span>Telefone</span><input id="setPhone" /></label><label class="field"><span>Endereço da loja</span><input id="setStoreAddress" /></label></div>
+          <div class="panel settings-card"><h2>Operação</h2><label class="field"><span>Modo de funcionamento</span><select id="setOpenMode"><option value="schedule">Seguir horários</option><option value="open">Forçar aberto</option><option value="closed">Forçar fechado</option></select></label><label class="field"><span>Taxa de entrega (R$)</span><input id="setDeliveryFee" type="number" min="0" step="0.01" /></label><label class="field"><span>Pedido mínimo (R$)</span><input id="setMinimumOrder" type="number" min="0" step="0.01" /></label><label class="check-row"><input id="setAllowPickup" type="checkbox" /><span>Permitir retirada no local</span></label></div>
+          <div class="panel settings-card settings-wide"><h2>Horários</h2><p class="muted">Use HH:MM. Desmarque um dia para fechar.</p><div id="scheduleEditor" class="schedule-editor"></div></div>
+          <div class="panel settings-card"><h2>Pagamentos</h2><p class="muted">Um por linha.</p><label class="field"><textarea id="setPayments" rows="6" placeholder="Dinheiro&#10;PIX na entrega&#10;Cartão de débito&#10;Cartão de crédito"></textarea></label></div>
+          <div class="panel settings-card"><h2>Impressão</h2><label class="check-row"><input id="setAutoPrint" type="checkbox" /><span>Imprimir automaticamente novos pedidos</span></label><p class="muted">Para impressão realmente silenciosa, abra o navegador em modo kiosk-printing. O botão de impressão manual funciona normalmente.</p></div>
+          <div class="settings-footer"><button class="btn btn-primary" type="submit">Salvar configurações</button><span id="settingsSaved" class="saved-note hidden">Salvo ✓</span></div>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="productEditor" class="modal modal-wide"><form id="productEditorForm" method="dialog" class="modal-card"><button class="modal-close" value="cancel">×</button><span class="eyebrow">PRODUTO</span><h2 id="productEditorTitle">Novo produto</h2><input id="productId" type="hidden" /><div class="form-grid"><label class="field"><span>Nome *</span><input id="productName" required /></label><label class="field"><span>Categoria *</span><select id="productCategory" required></select></label></div><label class="field"><span>Descrição</span><textarea id="productDescription" rows="3"></textarea></label><div class="form-grid"><label class="field"><span>Preço base (R$)</span><input id="productPrice" type="number" min="0" step="0.01" /></label><label class="field"><span>Ordem</span><input id="productOrder" type="number" step="1" /></label></div><label class="field"><span>Imagem no GitHub</span><input id="productImage" placeholder="assets/products/calabresa.webp ou URL completa" /></label><small class="muted">As imagens ficam versionadas no repositório. Informe o caminho do arquivo que foi adicionado à pasta assets/products.</small><label class="field"><span>Tamanhos (um por linha: Nome|Preço)</span><textarea id="productSizes" rows="4" placeholder="Pequena|35.00&#10;Média|45.00&#10;Grande|55.00"></textarea></label><label class="field"><span>Adicionais (um por linha: Nome|Preço)</span><textarea id="productExtras" rows="4" placeholder="Borda de catupiry|8.00&#10;Bacon extra|6.00"></textarea></label><div class="form-grid"><label class="check-row"><input id="productActive" type="checkbox" checked /><span>Produto disponível</span></label><label class="check-row"><input id="productFeatured" type="checkbox" /><span>Destaque</span></label></div><button class="btn btn-primary btn-block" type="submit" value="default">Salvar produto</button></form></dialog>
+
+  <dialog id="categoryEditor" class="modal"><form id="categoryEditorForm" method="dialog" class="modal-card"><button class="modal-close" value="cancel">×</button><span class="eyebrow">CATEGORIA</span><h2 id="categoryEditorTitle">Nova categoria</h2><input id="categoryId" type="hidden" /><label class="field"><span>Nome *</span><input id="categoryName" required /></label><label class="field"><span>Ordem</span><input id="categoryOrder" type="number" step="1" value="0" /></label><label class="check-row"><input id="categoryActive" type="checkbox" checked /><span>Categoria ativa</span></label><button class="btn btn-primary btn-block" type="submit" value="default">Salvar categoria</button></form></dialog>
+
+  <dialog id="orderDialog" class="modal modal-wide"><div class="modal-card"><button id="closeOrderDialog" class="modal-close">×</button><div id="orderDetail"></div></div></dialog>
+
+  <script type="module" src="./admin.js"></script>
+</body>
+</html>
