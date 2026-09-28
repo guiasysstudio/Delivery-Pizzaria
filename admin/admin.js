@@ -121,7 +121,7 @@ onAuthStateChanged(auth,async user=>{
     $('#loginView').classList.add('hidden');
     $('#adminApp').classList.remove('hidden');
     $('#currentUserDisplay').textContent=`${currentProfile.displayName||currentProfile.username||username} • ${roleLabel(currentProfile.role)}`;
-    $('.master-only').forEach(el=>el.classList.toggle('hidden',!isMaster()));
+    $$('.master-only').forEach(el=>el.classList.toggle('hidden',!isMaster()));
     await initializeAdmin();
   }catch(err){
     console.error(err);
