@@ -47,20 +47,20 @@ export function watchCustomer(callback){
 
 export async function loginWithGoogle(){
   const result=await signInWithPopup(auth,googleProvider);
-  await ensureCustomerProfile(result.user);
+  try{await ensureCustomerProfile(result.user);}catch(err){console.error(err);}
   return result.user;
 }
 
 export async function loginWithEmail(email,password){
   const result=await signInWithEmailAndPassword(auth,email.trim(),password);
-  await ensureCustomerProfile(result.user);
+  try{await ensureCustomerProfile(result.user);}catch(err){console.error(err);}
   return result.user;
 }
 
 export async function registerWithEmail({name,email,password,phone='' }){
   const result=await createUserWithEmailAndPassword(auth,email.trim(),password);
   await updateProfile(result.user,{displayName:name.trim()});
-  await ensureCustomerProfile(result.user,{name:name.trim(),phone:phone.trim()});
+  try{await ensureCustomerProfile(result.user,{name:name.trim(),phone:phone.trim()});}catch(err){console.error(err);}
   return result.user;
 }
 
