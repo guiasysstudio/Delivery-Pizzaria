@@ -111,14 +111,93 @@
     </main>
   </div>
 
-  <dialog id="productEditor" class="modal modal-wide"><form id="productEditorForm" method="dialog" class="modal-card"><button class="modal-close" value="cancel">×</button><span class="eyebrow">PRODUTO</span><h2 id="productEditorTitle">Novo produto</h2><input id="productId" type="hidden" /><div class="form-grid"><label class="field"><span>Nome *</span><input id="productName" required /></label><label class="field"><span>Categoria *</span><select id="productCategory" required></select></label></div><label class="field"><span>Descrição</span><textarea id="productDescription" rows="3"></textarea></label><div class="form-grid"><label class="field"><span>Preço base (R$)</span><input id="productPrice" type="number" min="0" step="0.01" /></label><label class="field"><span>Ordem</span><input id="productOrder" type="number" step="1" /></label></div><label class="field"><span>Imagem no GitHub</span><input id="productImage" placeholder="assets/products/calabresa.webp ou URL completa" /></label><small class="muted">As imagens ficam versionadas no repositório. Informe o caminho do arquivo que foi adicionado à pasta assets/products.</small><label class="field"><span>Tamanhos (um por linha: Nome|Preço)</span><textarea id="productSizes" rows="4" placeholder="Pequena|35.00&#10;Média|45.00&#10;Grande|55.00"></textarea></label><label class="field"><span>Adicionais (um por linha: Nome|Preço)</span><textarea id="productExtras" rows="4" placeholder="Borda de catupiry|8.00&#10;Bacon extra|6.00"></textarea></label><div class="form-grid"><label class="check-row"><input id="productIsPizza" type="checkbox" /><span>Este produto é um sabor de pizza</span></label><label class="check-row"><input id="productHalfHalf" type="checkbox" checked /><span>Permitir meio a meio</span></label></div><div class="form-grid"><label class="check-row"><input id="productActive" type="checkbox" checked /><span>Produto disponível</span></label><label class="check-row"><input id="productFeatured" type="checkbox" /><span>Destaque</span></label></div><button class="btn btn-primary btn-block" type="submit" value="default">Salvar produto</button></form></dialog>
+  <dialog id="productEditor" class="modal modal-wide">
+    <form id="productEditorForm" class="modal-card" novalidate>
+      <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
+      <span class="eyebrow">PRODUTO</span>
+      <h2 id="productEditorTitle">Novo produto</h2>
+      <input id="productId" type="hidden" />
 
-  <dialog id="categoryEditor" class="modal"><form id="categoryEditorForm" method="dialog" class="modal-card"><button class="modal-close" value="cancel">×</button><span class="eyebrow">CATEGORIA</span><h2 id="categoryEditorTitle">Nova categoria</h2><input id="categoryId" type="hidden" /><label class="field"><span>Nome *</span><input id="categoryName" required /></label><label class="field"><span>Ordem</span><input id="categoryOrder" type="number" step="1" value="0" /></label><label class="check-row"><input id="categoryActive" type="checkbox" checked /><span>Categoria ativa</span></label><button class="btn btn-primary btn-block" type="submit" value="default">Salvar categoria</button></form></dialog>
+      <div class="form-grid">
+        <label class="field"><span>Nome *</span><input id="productName" required /></label>
+        <label class="field"><span>Categoria *</span><select id="productCategory" required></select></label>
+      </div>
+
+      <label class="field"><span>Descrição</span><textarea id="productDescription" rows="3" placeholder="Ingredientes, volume, detalhes do produto..."></textarea></label>
+
+      <div class="form-grid">
+        <label class="field"><span>Preço base (R$)</span><input id="productPrice" type="number" min="0" step="0.01" /></label>
+        <label class="field"><span>Ordem de exibição</span><input id="productOrder" type="number" step="1" /></label>
+      </div>
+      <p class="field-help">A ordem define a posição do produto no cardápio. Números menores aparecem primeiro.</p>
+
+      <section class="editor-section">
+        <div class="editor-section-head">
+          <div><h3>Imagem do produto</h3><p class="muted">Escolha uma imagem e ajuste o enquadramento antes de salvar.</p></div>
+        </div>
+        <div class="image-editor-grid">
+          <div class="image-preview-shell"><canvas id="productImageCanvas" width="720" height="540"></canvas><div id="productImageEmpty" class="image-preview-empty">Sem imagem selecionada</div></div>
+          <div class="image-editor-controls">
+            <label class="field"><span>Selecionar imagem</span><input id="productImageFile" type="file" accept="image/png,image/jpeg,image/webp" /></label>
+            <label class="field"><span>Zoom</span><input id="productImageZoom" type="range" min="1" max="3" step="0.05" value="1" /></label>
+            <p class="muted small-copy">Arraste a imagem dentro da prévia para reposicionar. O recorte é preparado em proporção 4:3.</p>
+            <label class="field"><span>Caminho atual no GitHub</span><input id="productImage" placeholder="assets/products/calabresa.webp" /></label>
+            <button id="downloadPreparedImageBtn" class="btn btn-secondary" type="button">Preparar/baixar imagem recortada</button>
+            <p class="muted small-copy">O envio automático ao GitHub será ligado pelo serviço seguro de imagens; nenhum token do GitHub será colocado no navegador.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="editor-section">
+        <div class="editor-section-head">
+          <div><h3>Tamanhos</h3><p class="muted">Cadastre nome e preço separadamente. Ex.: Pequena — R$ 35,00.</p></div>
+          <button id="addProductSizeBtn" class="btn btn-secondary" type="button">+ Adicionar tamanho</button>
+        </div>
+        <div id="productSizesEditor" class="repeat-editor"></div>
+        <div id="productSizesEmpty" class="repeat-empty">Nenhum tamanho cadastrado. Use o preço base para produtos sem variação de tamanho.</div>
+      </section>
+
+      <section class="editor-section">
+        <div class="editor-section-head">
+          <div><h3>Adicionais e bordas</h3><p class="muted">Cada adicional tem nome e preço próprios.</p></div>
+          <button id="addProductExtraBtn" class="btn btn-secondary" type="button">+ Adicionar adicional</button>
+        </div>
+        <div id="productExtrasEditor" class="repeat-editor"></div>
+        <div id="productExtrasEmpty" class="repeat-empty">Nenhum adicional cadastrado.</div>
+      </section>
+
+      <div class="form-grid">
+        <label class="check-row"><input id="productIsPizza" type="checkbox" /><span>Este produto é um sabor de pizza</span></label>
+        <label class="check-row"><input id="productHalfHalf" type="checkbox" checked /><span>Permitir meio a meio</span></label>
+      </div>
+      <div class="form-grid">
+        <label class="check-row"><input id="productActive" type="checkbox" checked /><span>Produto disponível</span></label>
+        <label class="check-row"><input id="productFeatured" type="checkbox" /><span>Exibir como destaque</span></label>
+      </div>
+
+      <div id="productEditorError" class="alert alert-error hidden"></div>
+      <button class="btn btn-primary btn-block" type="submit">Salvar produto</button>
+    </form>
+  </dialog>
+
+  <dialog id="categoryEditor" class="modal">
+    <form id="categoryEditorForm" class="modal-card" novalidate>
+      <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
+      <span class="eyebrow">CATEGORIA</span><h2 id="categoryEditorTitle">Nova categoria</h2>
+      <input id="categoryId" type="hidden" />
+      <label class="field"><span>Nome *</span><input id="categoryName" required /></label>
+      <label class="field"><span>Ordem de exibição</span><input id="categoryOrder" type="number" step="1" value="0" /></label>
+      <p class="field-help">Números menores aparecem primeiro no cardápio.</p>
+      <label class="check-row"><input id="categoryActive" type="checkbox" checked /><span>Categoria ativa</span></label>
+      <div id="categoryEditorError" class="alert alert-error hidden"></div>
+      <button class="btn btn-primary btn-block" type="submit">Salvar categoria</button>
+    </form>
+  </dialog>
 
 
   <dialog id="userEditor" class="modal">
-    <form id="userEditorForm" method="dialog" class="modal-card">
-      <button class="modal-close" value="cancel">×</button>
+    <form id="userEditorForm" class="modal-card" novalidate>
+      <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
       <span class="eyebrow">ACESSO</span><h2 id="userEditorTitle">Novo usuário</h2>
       <input id="userUid" type="hidden" />
       <label class="field"><span>Nome</span><input id="userDisplayName" maxlength="80" placeholder="Ex.: Caixa noite" /></label>
@@ -132,7 +211,7 @@
     </form>
   </dialog>
 
-  <dialog id="orderDialog" class="modal modal-wide"><div class="modal-card"><button id="closeOrderDialog" class="modal-close">×</button><div id="orderDetail"></div></div></dialog>
+  <dialog id="orderDialog" class="modal modal-wide"><div class="modal-card"><button id="closeOrderDialog" class="modal-close dialog-close" type="button" aria-label="Fechar">×</button><div id="orderDetail"></div></div></dialog>
 
   <script type="module" src="./admin.js"></script>
 </body>
