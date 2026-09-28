@@ -1,4 +1,4 @@
-const CACHE_NAME='delivery-pizzaria-v3';
+const CACHE_NAME='delivery-pizzaria-v4';
 const SHELL=[
   './',
   './index.html',
@@ -30,6 +30,19 @@ self.addEventListener('activate',event=>{
   );
 });
 
+async function networkFirst(req,fallback){
+  try{
+    const response=await fetch(req);
+    if(response.ok){
+      const cache=await caches.open(CACHE_NAME);
+      cache.put(req,response.clone());
+    }
+    return response;
+  }catch{
+    return (await caches.match(req)) || (fallback?await caches.match(fallback):undefined) || Response.error();
+  }
+}
+
 self.addEventListener('fetch',event=>{
   const req=event.request;
   if(req.method!=='GET') return;
@@ -38,24 +51,22 @@ self.addEventListener('fetch',event=>{
   if(url.origin!==self.location.origin) return;
 
   if(req.mode==='navigate'){
-    event.respondWith(
-      fetch(req)
-        .then(response=>{
-          const copy=response.clone();
-          caches.open(CACHE_NAME).then(cache=>cache.put(req,copy));
-          return response;
-        })
-        .catch(()=>caches.match(req).then(hit=>hit||caches.match('./index.html')))
-    );
+    event.respondWith(networkFirst(req,'./index.html'));
+    return;
+  }
+
+  const destination=req.destination;
+  if(['script','style','worker','document'].includes(destination)){
+    event.respondWith(networkFirst(req));
     return;
   }
 
   event.respondWith(
     caches.match(req).then(cached=>{
-      const network=fetch(req).then(response=>{
+      const network=fetch(req).then(async response=>{
         if(response.ok){
-          const copy=response.clone();
-          caches.open(CACHE_NAME).then(cache=>cache.put(req,copy));
+          const cache=await caches.open(CACHE_NAME);
+          cache.put(req,response.clone());
         }
         return response;
       }).catch(()=>cached);
