@@ -124,7 +124,7 @@
 
   <dialog id="productDialog" class="modal modal-wide">
     <form method="dialog" class="modal-card product-modal-card" id="productForm">
-      <button class="modal-close" value="cancel" aria-label="Fechar">×</button>
+      <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
       <div class="product-modal-grid">
         <img id="modalImage" class="modal-product-image" alt="" />
         <div>
@@ -146,7 +146,7 @@
 
   <dialog id="authDialog" class="modal">
     <div class="modal-card auth-card">
-      <button class="modal-close" id="authCloseBtn" type="button">×</button>
+      <button class="modal-close dialog-close" id="authCloseBtn" type="button">×</button>
       <span class="eyebrow">SUA CONTA</span>
       <h2 id="authTitle">Entrar</h2>
       <p id="authSubtitle" class="muted">Entre para usar seus endereços e acompanhar pedidos.</p>
@@ -174,7 +174,7 @@
 
   <dialog id="addressSelectorDialog" class="modal">
     <div class="modal-card">
-      <button class="modal-close" id="addressSelectorClose" type="button">×</button>
+      <button class="modal-close dialog-close" id="addressSelectorClose" type="button">×</button>
       <span class="eyebrow">ENDEREÇO</span><h2>Onde devemos entregar?</h2>
       <div id="addressSelectorGuest" class="hidden">
         <p class="muted">Entre na sua conta para escolher entre seus endereços cadastrados.</p>
@@ -189,7 +189,7 @@
 
   <dialog id="addressEditorDialog" class="modal modal-wide">
     <form id="addressEditorForm" method="dialog" class="modal-card">
-      <button class="modal-close" value="cancel">×</button>
+      <button class="modal-close dialog-close" type="button">×</button>
       <span class="eyebrow">ENDEREÇO</span><h2 id="addressEditorTitle">Novo endereço</h2>
       <input id="addressId" type="hidden">
       <div class="form-grid">
@@ -221,7 +221,7 @@
 
   <dialog id="checkoutDialog" class="modal modal-wide">
     <form method="dialog" class="modal-card checkout-card" id="checkoutForm">
-      <button class="modal-close" value="cancel" aria-label="Fechar">×</button>
+      <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
       <span class="eyebrow">FINALIZAR PEDIDO</span><h2>Revise antes de enviar</h2>
 
       <section class="checkout-section">
