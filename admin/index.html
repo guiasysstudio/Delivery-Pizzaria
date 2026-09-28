@@ -191,8 +191,11 @@
             <label class="field"><span>Zoom</span><input id="productImageZoom" type="range" min="1" max="3" step="0.05" value="1" /></label>
             <p class="muted small-copy">Arraste a imagem dentro da prévia para reposicionar. O recorte é preparado em proporção 4:3.</p>
             <label class="field"><span>Caminho atual no GitHub</span><input id="productImage" placeholder="assets/products/calabresa.webp" /></label>
-            <button id="downloadPreparedImageBtn" class="btn btn-secondary" type="button">Preparar/baixar imagem recortada</button>
-            <p class="muted small-copy">O envio automático ao GitHub será ligado pelo serviço seguro de imagens; nenhum token do GitHub será colocado no navegador.</p>
+            <div class="section-actions image-upload-actions">
+              <button id="uploadProductImageBtn" class="btn btn-primary" type="button">Enviar imagem ao GitHub</button>
+              <button id="downloadPreparedImageBtn" class="btn btn-secondary" type="button">Baixar imagem recortada</button>
+            </div>
+            <div id="productImageUploadStatus" class="muted small-copy">A imagem será enviada em WebP para <strong>assets/products/</strong> por um serviço seguro. Nenhum token do GitHub fica no navegador.</div>
           </div>
         </div>
       </section>
