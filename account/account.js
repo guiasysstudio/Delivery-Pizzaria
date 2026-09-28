@@ -338,7 +338,7 @@ function renderFavorites(){
   });
 }
 
-$('dialog').forEach(dialog=>{
+$$('dialog').forEach(dialog=>{
   dialog.querySelectorAll('.dialog-close').forEach(btn=>btn.addEventListener('click',()=>{if(dialog.open) dialog.close();}));
   dialog.addEventListener('cancel',e=>{e.preventDefault();if(dialog.open) dialog.close();});
   dialog.addEventListener('click',e=>{if(e.target===dialog&&dialog.open) dialog.close();});
