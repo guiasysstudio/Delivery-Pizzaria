@@ -24,6 +24,19 @@ jobs:
           node --check admin/print.js
           node --check service-worker.js
 
+      - name: Detect common selector mistakes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          for path in [Path('assets/app.js'), Path('account/account.js'), Path('admin/admin.js')]:
+              text = path.read_text(encoding='utf-8')
+              bad = re.findall(r"(?<!\$)\$\([^\n;]+\)\.forEach\(", text)
+              if bad:
+                  raise SystemExit(f"{path}: possível uso de seletor único com forEach: {bad[:5]}")
+          print('selector checks OK')
+          PY
+
       - name: Validate manifest JSON
         run: node -e "JSON.parse(require('fs').readFileSync('manifest.webmanifest','utf8')); console.log('manifest OK')"
 
