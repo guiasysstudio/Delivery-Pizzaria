@@ -524,6 +524,39 @@ function openAddressEditor(address=null){
   $('#addressEditorDialog').showModal();
 }
 
+async function fillAddressFromCep(inputId,prefix){
+  const input=$(inputId);
+  if(!input) return;
+  const cep=String(input.value||'').replace(/\D/g,'');
+  if(cep.length!==8) return;
+
+  try{
+    const response=await fetch('https://viacep.com.br/ws/'+cep+'/json/');
+    if(!response.ok) return;
+    const data=await response.json();
+    if(data.erro) return;
+
+    const map={
+      street:data.logradouro||'',
+      neighborhood:data.bairro||'',
+      city:data.localidade||'',
+      state:data.uf||''
+    };
+
+    if(prefix==='public'){
+      if(map.street) $('#addressStreet').value=map.street;
+      if(map.neighborhood) $('#addressNeighborhood').value=map.neighborhood;
+      if(map.city) $('#addressCity').value=map.city;
+      if(map.state) $('#addressState').value=map.state;
+      $('#addressNumber').focus();
+    }
+  }catch(err){
+    console.warn('CEP não encontrado.',err);
+  }
+}
+
+$('#addressZip').addEventListener('blur',()=>fillAddressFromCep('#addressZip','public'));
+
 $('#addressEditorForm').onsubmit=async e=>{
   e.preventDefault();
   if(!customer) return;
