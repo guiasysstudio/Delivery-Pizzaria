@@ -19,41 +19,26 @@ service cloud.firestore {
       return hasStaffProfile() && staff().active == true;
     }
 
-    function roleIs(role) {
-      return activeStaff() && staff().role == role;
-    }
-
     function isMaster() {
-      return roleIs('master');
+      return activeStaff() && staff().role == 'master';
     }
 
-    function isManager() {
-      return activeStaff() && staff().role in ['master','manager'];
-    }
-
-    function isCashier() {
-      return roleIs('cashier');
-    }
-
-    function isKitchen() {
-      return roleIs('kitchen');
-    }
-
-    function isOperator() {
-      return roleIs('operator');
-    }
-
-    function isDelivery() {
-      return roleIs('delivery');
-    }
-
-    function canReadOrders() {
+    function roleExists() {
       return activeStaff() &&
-        staff().role in ['master','manager','cashier','kitchen','operator','delivery'];
+        staff().role != 'master' &&
+        exists(/databases/$(database)/documents/roles/$(staff().role));
     }
 
-    function canManageCatalog() {
-      return activeStaff() && staff().role in ['master','manager'];
+    function roleData() {
+      return get(/databases/$(database)/documents/roles/$(staff().role)).data;
+    }
+
+    function hasPermission(key) {
+      return isMaster() ||
+        (
+          roleExists() &&
+          roleData().get(['permissions', key], false) == true
+        );
     }
 
     function isOwnCustomer(uid) {
@@ -71,64 +56,91 @@ service cloud.firestore {
       ];
     }
 
-    function cashierTransition() {
-      return isCashier() && (
-        (resource.data.status == 'pending' &&
-          request.resource.data.status in ['accepted','cancelled']) ||
-        (resource.data.status == 'accepted' &&
-          request.resource.data.status == 'cancelled')
+    function acceptTransition() {
+      return hasPermission('ordersAccept') &&
+        resource.data.status == 'pending' &&
+        request.resource.data.status == 'accepted';
+    }
+
+    function prepareTransition() {
+      return hasPermission('ordersPrepare') && (
+        (
+          resource.data.status == 'accepted' &&
+          request.resource.data.status == 'preparing'
+        ) ||
+        (
+          resource.data.status == 'preparing' &&
+          request.resource.data.status == 'ready'
+        )
       );
     }
 
-    function kitchenTransition() {
-      return isKitchen() && (
-        (resource.data.status == 'accepted' &&
-          request.resource.data.status == 'preparing') ||
-        (resource.data.status == 'preparing' &&
-          request.resource.data.status == 'ready')
+    function dispatchTransition() {
+      return hasPermission('ordersDispatch') &&
+        resource.data.status == 'ready' &&
+        request.resource.data.status == 'out_for_delivery';
+    }
+
+    function completeTransition() {
+      return hasPermission('ordersComplete') && (
+        (
+          resource.data.status == 'out_for_delivery' &&
+          request.resource.data.status == 'completed'
+        ) ||
+        (
+          resource.data.status == 'ready' &&
+          resource.data.fulfillment == 'pickup' &&
+          request.resource.data.status == 'completed'
+        )
       );
     }
 
-    function deliveryTransition() {
-      return isDelivery() && (
-        (resource.data.status == 'ready' &&
-          request.resource.data.status == 'out_for_delivery') ||
-        (resource.data.status == 'out_for_delivery' &&
-          request.resource.data.status == 'completed')
-      );
+    function cancelTransition() {
+      return hasPermission('ordersCancel') &&
+        !(resource.data.status in ['completed','cancelled']) &&
+        request.resource.data.status == 'cancelled';
     }
 
     function canUpdateOrder() {
-      return orderStatusUpdateOnly() && knownOrderStatus() && (
-        isMaster() ||
-        isManager() ||
-        isOperator() ||
-        cashierTransition() ||
-        kitchenTransition() ||
-        deliveryTransition()
-      );
+      return orderStatusUpdateOnly() &&
+        knownOrderStatus() &&
+        (
+          acceptTransition() ||
+          prepareTransition() ||
+          dispatchTransition() ||
+          completeTransition() ||
+          cancelTransition()
+        );
     }
 
     match /staffLogins/{username} {
+      // O mapa serve somente para traduzir "usuário" em credencial interna.
+      // Ler o e-mail interno não concede acesso: toda autorização vem de /users e /roles.
       allow read: if true;
-      allow create, update, delete: if isMaster();
+      allow create, update, delete: if hasPermission('usersManage');
     }
 
     match /users/{uid} {
-      allow get: if isMaster() || (signedIn() && request.auth.uid == uid);
-      allow list: if isMaster();
-      allow create, update, delete: if isMaster();
+      allow get: if hasPermission('usersManage') ||
+        (signedIn() && request.auth.uid == uid);
+      allow list: if hasPermission('usersManage');
+      allow create, update, delete: if hasPermission('usersManage');
+    }
+
+    match /roles/{roleId} {
+      allow read: if activeStaff();
+      allow create, update, delete: if hasPermission('rolesManage');
     }
 
     match /customers/{uid} {
       allow create: if isOwnCustomer(uid);
-      allow read: if isOwnCustomer(uid) || isMaster() || isManager() || isCashier();
-      allow update: if isOwnCustomer(uid) || isMaster() || isManager();
+      allow read: if isOwnCustomer(uid) || hasPermission('customersView');
+      allow update: if isOwnCustomer(uid) || hasPermission('customersView');
       allow delete: if isMaster();
 
       match /addresses/{addressId} {
         allow read, create, update, delete: if isOwnCustomer(uid);
-        allow read: if isMaster() || isManager() || isCashier();
+        allow read: if hasPermission('customersView');
       }
 
       match /favorites/{productId} {
@@ -138,28 +150,48 @@ service cloud.firestore {
 
     match /settings/store {
       allow read: if true;
-      allow create, delete: if isMaster() || isManager();
-      allow update: if isMaster() || isManager() ||
+      allow create, delete: if hasPermission('settingsManage');
+      allow update: if
+        hasPermission('settingsManage') ||
         (
-          isCashier() &&
+          hasPermission('ordersAccept') &&
           request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['autoAcceptOrders', 'updatedAt'])
+            .hasOnly(['autoAcceptOrders','updatedAt'])
         );
     }
 
     match /settings/{document=**} {
       allow read: if true;
-      allow write: if isMaster() || isManager();
+      allow write: if hasPermission('settingsManage');
     }
 
     match /categories/{categoryId} {
       allow read: if true;
-      allow write: if canManageCatalog();
+      allow write: if hasPermission('categoriesManage');
     }
 
     match /products/{productId} {
       allow read: if true;
-      allow write: if canManageCatalog();
+      allow create: if hasPermission('productsCreate');
+      allow update: if hasPermission('productsEdit');
+      allow delete: if hasPermission('productsDelete');
+    }
+
+    match /promotions/{promotionId} {
+      allow read: if true;
+      allow create, update, delete: if hasPermission('promotionsManage');
+    }
+
+    match /coupons/{couponId} {
+      allow get: if signedIn() || hasPermission('couponsManage');
+      allow list: if hasPermission('couponsManage');
+      allow create, update, delete: if hasPermission('couponsManage');
+    }
+
+    match /cashSessions/{sessionId} {
+      allow read: if hasPermission('cashView');
+      allow create, update: if hasPermission('cashOperate');
+      allow delete: if isMaster();
     }
 
     match /counters/orders {
@@ -192,7 +224,7 @@ service cloud.firestore {
         request.resource.data.total is number &&
         request.resource.data.total >= 0;
 
-      allow read: if canReadOrders() ||
+      allow read: if hasPermission('ordersView') ||
         (signedIn() && resource.data.customerId == request.auth.uid);
 
       allow update: if canUpdateOrder();
