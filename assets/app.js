@@ -1,6 +1,6 @@
 import {
   auth, db, watchCustomer, loginWithGoogle, loginWithEmail, registerWithEmail,
-  resetCustomerPassword, friendlyAuthError, getCustomerProfile, saveCustomerProfile, getAddresses,
+  resetCustomerPassword, friendlyAuthError, lookupBrazilianZip, getCustomerProfile, saveCustomerProfile, getAddresses,
   saveAddress, setDefaultAddress, getFavorites, setFavorite
 } from './customer-auth.js';
 import {
@@ -589,6 +589,24 @@ async function fillAddressFromCep(inputId,prefix){
 }
 
 $('#addressZip').addEventListener('blur',()=>fillAddressFromCep('#addressZip','public'));
+
+$('#addressZip')?.addEventListener('blur',async()=>{
+  const input=$('#addressZip');
+  const digits=input.value.replace(/\D/g,'');
+  if(digits.length!==8) return;
+  try{
+    const data=await lookupBrazilianZip(digits);
+    if(!data) return;
+    input.value=data.zip;
+    if(data.street) $('#addressStreet').value=data.street;
+    if(data.neighborhood) $('#addressNeighborhood').value=data.neighborhood;
+    if(data.city) $('#addressCity').value=data.city;
+    if(data.state) $('#addressState').value=data.state;
+    $('#addressNumber').focus();
+  }catch(err){
+    console.warn('Consulta de CEP indisponível.',err);
+  }
+});
 
 $('#addressEditorForm').onsubmit=async e=>{
   e.preventDefault();
