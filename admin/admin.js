@@ -1725,14 +1725,68 @@ async function deleteCategory(id){
   }
 }
 
-function parseDeliveryZones(value){
-  return String(value||'').split('\n').map(line=>line.trim()).filter(Boolean).map(line=>{
-    const parts=line.split('|');
-    const neighborhood=(parts[0]||'').trim();
-    const fee=Number(String(parts[1]||0).trim().replace(',','.'));
-    return {neighborhood,fee:Number.isFinite(fee)?fee:0};
-  }).filter(x=>x.neighborhood);
+function renderDeliveryZonesEditor(rows=[]){
+  const host=$('#deliveryZonesEditor');
+  if(!host) return;
+  host.innerHTML='';
+  for(const row of rows) addDeliveryZoneRow(row);
+  updateDeliveryZoneEmpty();
 }
+
+function addDeliveryZoneRow(row={neighborhood:'',fee:''}){
+  const host=$('#deliveryZonesEditor');
+  const el=document.createElement('div');
+  el.className='repeat-row';
+  el.innerHTML=`
+    <label class="field repeat-field"><span>Bairro</span><input class="zone-name" maxlength="80" placeholder="Ex.: Centro" value="${esc(row.neighborhood||'')}"></label>
+    <label class="field repeat-price"><span>Taxa (R$)</span><input class="zone-fee" type="number" min="0" step="0.01" value="${Number.isFinite(Number(row.fee))?Number(row.fee):''}"></label>
+    <button class="repeat-remove" type="button" title="Remover">×</button>`;
+  el.querySelector('.repeat-remove').onclick=()=>{el.remove();updateDeliveryZoneEmpty();};
+  host.appendChild(el);
+  updateDeliveryZoneEmpty();
+}
+
+function updateDeliveryZoneEmpty(){
+  $('#deliveryZonesEmpty')?.classList.toggle('hidden',$('#deliveryZonesEditor')?.children.length>0);
+}
+
+function collectDeliveryZones(){
+  return [...$('#deliveryZonesEditor').querySelectorAll('.repeat-row')].map(row=>({
+    neighborhood:row.querySelector('.zone-name').value.trim(),
+    fee:Number(row.querySelector('.zone-fee').value||0)
+  })).filter(x=>x.neighborhood);
+}
+
+$('#addDeliveryZoneBtn')?.addEventListener('click',()=>addDeliveryZoneRow());
+
+function renderPaymentMethodsEditor(rows=[]){
+  const host=$('#paymentMethodsEditor');
+  if(!host) return;
+  host.innerHTML='';
+  for(const value of rows) addPaymentMethodRow(value);
+  updatePaymentMethodsEmpty();
+}
+
+function addPaymentMethodRow(value=''){
+  const host=$('#paymentMethodsEditor');
+  const el=document.createElement('div');
+  el.className='simple-repeat-row';
+  el.innerHTML=`<input class="payment-method-value" maxlength="60" placeholder="Ex.: Cartão de crédito" value="${esc(value)}"><button class="repeat-remove" type="button" title="Remover">×</button>`;
+  el.querySelector('.repeat-remove').onclick=()=>{el.remove();updatePaymentMethodsEmpty();};
+  host.appendChild(el);
+  updatePaymentMethodsEmpty();
+}
+
+function updatePaymentMethodsEmpty(){
+  $('#paymentMethodsEmpty')?.classList.toggle('hidden',$('#paymentMethodsEditor')?.children.length>0);
+}
+
+function collectPaymentMethods(){
+  return [...$('#paymentMethodsEditor').querySelectorAll('.payment-method-value')].map(x=>x.value.trim()).filter(Boolean);
+}
+
+$('#addPaymentMethodBtn')?.addEventListener('click',()=>addPaymentMethodRow());
+
 
 function renderSchedules(){
   $('#scheduleEditor').innerHTML=dayNames.map((n,i)=>`<div class="schedule-row"><strong>${n}</strong><label class="check-row"><input class="sch-enabled" data-day="${i}" type="checkbox"><span>Aberto</span></label><input class="sch-open" data-day="${i}" type="time"><input class="sch-close" data-day="${i}" type="time"></div>`).join('');
@@ -1745,12 +1799,12 @@ function renderSettings(){
   $('#setStoreAddress').value=settings.storeAddress||'';
   $('#setOpenMode').value=settings.openMode||'schedule';
   $('#setDeliveryFee').value=settings.deliveryFee??0;
-  $('#setDeliveryZones').value=(settings.deliveryZones||[]).map(z=>`${z.neighborhood}|${Number(z.fee||0).toFixed(2)}`).join('\n');
+  renderDeliveryZonesEditor(settings.deliveryZones||[]);
   $('#setRestrictDeliveryZones').checked=!!settings.restrictDeliveryZones;
   $('#setMinimumOrder').value=settings.minimumOrder??0;
   $('#setAllowPickup').checked=settings.allowPickup!==false;
   $('#setAutoAccept').checked=!!settings.autoAcceptOrders;
-  $('#setPayments').value=(settings.payments||[]).join('\n');
+  renderPaymentMethodsEditor(settings.payments||[]);
 
   for(let i=0;i<7;i++){
     const d=settings.schedule?.[i]||settings.schedule?.[String(i)]||defaults.schedule[i];
@@ -1779,12 +1833,12 @@ $('#settingsForm').onsubmit=async e=>{
     storeAddress:$('#setStoreAddress').value.trim(),
     openMode:$('#setOpenMode').value,
     deliveryFee:Number($('#setDeliveryFee').value||0),
-    deliveryZones:parseDeliveryZones($('#setDeliveryZones').value),
+    deliveryZones:collectDeliveryZones(),
     restrictDeliveryZones:$('#setRestrictDeliveryZones').checked,
     minimumOrder:Number($('#setMinimumOrder').value||0),
     allowPickup:$('#setAllowPickup').checked,
     autoAcceptOrders:$('#setAutoAccept').checked,
-    payments:$('#setPayments').value.split('\n').map(x=>x.trim()).filter(Boolean),
+    payments:collectPaymentMethods(),
     schedule,
     timezone:'America/Porto_Velho',
     updatedAt:serverTimestamp()
