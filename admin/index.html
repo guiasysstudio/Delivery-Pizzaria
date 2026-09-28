@@ -11,8 +11,8 @@
   <section id="loginView" class="login-screen">
     <form id="loginForm" class="login-card">
       <span class="eyebrow">PAINEL ADMINISTRATIVO</span><h1>Entrar</h1>
-      <p class="muted">Use o usuário criado no Firebase Authentication.</p>
-      <label class="field"><span>E-mail</span><input id="loginEmail" type="email" required autocomplete="username" /></label>
+      <p class="muted">Entre com seu usuário e senha da pizzaria.</p>
+      <label class="field"><span>Usuário</span><input id="loginUsername" required autocomplete="username" autocapitalize="none" spellcheck="false" /></label>
       <label class="field"><span>Senha</span><input id="loginPassword" type="password" required autocomplete="current-password" /></label>
       <div id="loginError" class="alert alert-error hidden"></div>
       <button class="btn btn-primary btn-block" type="submit">Entrar</button>
@@ -26,9 +26,10 @@
         <button class="nav-item active" data-view="orders">📋 <span>Pedidos</span><span id="pendingBadge" class="nav-badge hidden">0</span></button>
         <button class="nav-item" data-view="products">🍕 <span>Produtos</span></button>
         <button class="nav-item" data-view="categories">🗂️ <span>Categorias</span></button>
+        <button class="nav-item master-only hidden" data-view="users">👥 <span>Usuários</span></button>
         <button class="nav-item" data-view="settings">⚙️ <span>Configurações</span></button>
       </nav>
-      <div class="sidebar-bottom"><a class="btn btn-secondary btn-block" href="../" target="_blank">Abrir cardápio</a><button id="logoutBtn" class="btn btn-ghost btn-block">Sair</button></div>
+      <div class="sidebar-bottom"><small id="currentUserDisplay" class="muted" style="text-align:center"></small><a class="btn btn-secondary btn-block" href="../" target="_blank">Abrir cardápio</a><button id="logoutBtn" class="btn btn-ghost btn-block">Sair</button></div>
     </aside>
 
     <main class="admin-main">
@@ -51,6 +52,12 @@
         <div class="panel"><div id="categoriesTable" class="data-list"></div></div>
       </section>
 
+
+      <section id="view-users" class="admin-view">
+        <div class="section-actions"><button id="newUserBtn" class="btn btn-primary">+ Novo usuário</button></div>
+        <div class="panel"><div id="usersTable" class="data-list"></div></div>
+      </section>
+
       <section id="view-settings" class="admin-view">
         <form id="settingsForm" class="settings-grid">
           <div class="panel settings-card"><h2>Dados da pizzaria</h2><label class="field"><span>Nome</span><input id="setStoreName" required /></label><label class="field"><span>Subtítulo</span><input id="setSubtitle" /></label><label class="field"><span>Telefone</span><input id="setPhone" /></label><label class="field"><span>Endereço da loja</span><input id="setStoreAddress" /></label></div>
@@ -67,6 +74,23 @@
   <dialog id="productEditor" class="modal modal-wide"><form id="productEditorForm" method="dialog" class="modal-card"><button class="modal-close" value="cancel">×</button><span class="eyebrow">PRODUTO</span><h2 id="productEditorTitle">Novo produto</h2><input id="productId" type="hidden" /><div class="form-grid"><label class="field"><span>Nome *</span><input id="productName" required /></label><label class="field"><span>Categoria *</span><select id="productCategory" required></select></label></div><label class="field"><span>Descrição</span><textarea id="productDescription" rows="3"></textarea></label><div class="form-grid"><label class="field"><span>Preço base (R$)</span><input id="productPrice" type="number" min="0" step="0.01" /></label><label class="field"><span>Ordem</span><input id="productOrder" type="number" step="1" /></label></div><label class="field"><span>Imagem no GitHub</span><input id="productImage" placeholder="assets/products/calabresa.webp ou URL completa" /></label><small class="muted">As imagens ficam versionadas no repositório. Informe o caminho do arquivo que foi adicionado à pasta assets/products.</small><label class="field"><span>Tamanhos (um por linha: Nome|Preço)</span><textarea id="productSizes" rows="4" placeholder="Pequena|35.00&#10;Média|45.00&#10;Grande|55.00"></textarea></label><label class="field"><span>Adicionais (um por linha: Nome|Preço)</span><textarea id="productExtras" rows="4" placeholder="Borda de catupiry|8.00&#10;Bacon extra|6.00"></textarea></label><div class="form-grid"><label class="check-row"><input id="productActive" type="checkbox" checked /><span>Produto disponível</span></label><label class="check-row"><input id="productFeatured" type="checkbox" /><span>Destaque</span></label></div><button class="btn btn-primary btn-block" type="submit" value="default">Salvar produto</button></form></dialog>
 
   <dialog id="categoryEditor" class="modal"><form id="categoryEditorForm" method="dialog" class="modal-card"><button class="modal-close" value="cancel">×</button><span class="eyebrow">CATEGORIA</span><h2 id="categoryEditorTitle">Nova categoria</h2><input id="categoryId" type="hidden" /><label class="field"><span>Nome *</span><input id="categoryName" required /></label><label class="field"><span>Ordem</span><input id="categoryOrder" type="number" step="1" value="0" /></label><label class="check-row"><input id="categoryActive" type="checkbox" checked /><span>Categoria ativa</span></label><button class="btn btn-primary btn-block" type="submit" value="default">Salvar categoria</button></form></dialog>
+
+
+  <dialog id="userEditor" class="modal">
+    <form id="userEditorForm" method="dialog" class="modal-card">
+      <button class="modal-close" value="cancel">×</button>
+      <span class="eyebrow">ACESSO</span><h2 id="userEditorTitle">Novo usuário</h2>
+      <input id="userUid" type="hidden" />
+      <label class="field"><span>Nome</span><input id="userDisplayName" maxlength="80" placeholder="Ex.: Caixa noite" /></label>
+      <label class="field"><span>Usuário *</span><input id="userUsername" required maxlength="32" autocapitalize="none" spellcheck="false" placeholder="Ex.: caixa" /></label>
+      <label class="field" id="userPasswordField"><span>Senha *</span><input id="userPassword" type="password" minlength="6" autocomplete="new-password" /></label>
+      <label class="field"><span>Perfil</span><select id="userRole"><option value="operator">Operador</option><option value="manager">Gerente</option><option value="master">Master</option></select></label>
+      <label class="check-row"><input id="userActive" type="checkbox" checked /><span>Usuário ativo</span></label>
+      <p class="muted" id="userEditorHelp">A senha é definida somente na criação. O usuário poderá ser desativado depois pelo Master.</p>
+      <div id="userEditorError" class="alert alert-error hidden"></div>
+      <button class="btn btn-primary btn-block" type="submit" value="default">Salvar usuário</button>
+    </form>
+  </dialog>
 
   <dialog id="orderDialog" class="modal modal-wide"><div class="modal-card"><button id="closeOrderDialog" class="modal-close">×</button><div id="orderDetail"></div></div></dialog>
 
