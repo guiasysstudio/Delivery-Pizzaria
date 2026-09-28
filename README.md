@@ -21,6 +21,7 @@ Sistema completo de delivery para pizzaria, com site público, conta do cliente,
 - Entrega ou retirada.
 - Horário de funcionamento automático.
 - Pedido mínimo e taxa de entrega configuráveis.
+- Taxas por bairro e opção de restringir a área de entrega.
 - Cadastro/login do cliente por:
   - Google.
   - E-mail e senha.
@@ -36,6 +37,7 @@ Sistema completo de delivery para pizzaria, com site público, conta do cliente,
   - favoritos.
 - Endereço ativo exibido no topo do cardápio.
 - Troca de endereço no checkout.
+- Aplicável como PWA na tela inicial do celular.
 
 ## Pagamento
 
@@ -102,7 +104,13 @@ O Print Agent:
 
 ### Build do Print Agent
 
-O workflow **Build Print Agent** gera automaticamente um executável Windows x64 como artifact do GitHub Actions.
+O workflow **Build Print Agent** gera automaticamente o executável Windows x64 e mantém um pacote de download estável em:
+
+```text
+https://github.com/guiasysstudio/Delivery-Pizzaria/releases/download/print-agent-latest/DeliveryPizzaria-PrintAgent-win-x64.zip
+```
+
+O mesmo pacote continua disponível como artifact do GitHub Actions.
 
 Depois de abrir o Print Agent:
 
@@ -185,10 +193,11 @@ As regras separam:
 - dados privados do cliente;
 - endereços e favoritos do próprio cliente;
 - histórico de pedidos do próprio cliente;
-- permissões administrativas por perfil.
+- permissões administrativas por perfil;
+- mapa interno de login da equipe sem conceder permissão apenas pelo e-mail.
 
 ## Desenvolvimento e validação
 
-O workflow **Validate Delivery Pizzaria** verifica sintaxe dos módulos JavaScript do público, Minha Conta e ADM.
+O workflow **Validate Delivery Pizzaria** verifica sintaxe de todos os módulos JavaScript, service worker, manifesto PWA, arquivos obrigatórios e IDs HTML duplicados.
 
 O GitHub Pages publica automaticamente a branch \`main\`.
