@@ -392,6 +392,7 @@ function listenOrders(){
     renderOrders();
     renderStats();
     if(customers.length) renderCustomers();
+    if(hasPermission('cashView')) renderCash();
 
     if(!first&&incoming.length){
       for(const o of incoming){
@@ -985,6 +986,418 @@ $('#testPrintBtn')?.addEventListener('click',async()=>{
   }catch(err){
     console.error(err);
     alert('Não foi possível imprimir. Verifique se o Print Agent está aberto e se uma impressora foi selecionada.');
+  }
+});
+
+
+
+/* ===== Perfis de acesso ===== */
+function renderRoles(){
+  const table=$('#rolesTable');
+  if(!table) return;
+  const list=roles.filter(r=>r.id!=='master');
+  table.innerHTML=list.length?list.map(r=>{
+    const enabled=Object.values(r.permissions||{}).filter(Boolean).length;
+    const usersInRole=users.filter(u=>u.role===r.id).length;
+    return `<div class="data-row">
+      <div class="data-main"><strong>${esc(r.name||r.id)}</strong><small>${enabled} permissão(ões) • ${usersInRole} usuário(s)${r.system?' • Perfil padrão':''}</small></div>
+      <span class="status-pill ${r.active===false?'status-cancelled':'status-completed'}">${r.active===false?'Inativo':'Ativo'}</span>
+      <div class="data-actions">
+        <button class="btn btn-secondary edit-role" data-id="${r.id}" type="button">Editar</button>
+        ${r.system?'':`<button class="btn btn-danger delete-role" data-id="${r.id}" type="button">Excluir</button>`}
+      </div>
+    </div>`;
+  }).join(''):'<div class="empty-state">Nenhum perfil personalizado.</div>';
+
+  $('.edit-role').forEach(b=>b.onclick=()=>editRole(b.dataset.id));
+  $('.delete-role').forEach(b=>b.onclick=()=>deleteRole(b.dataset.id));
+}
+
+function renderPermissionEditor(selected={}){
+  const host=$('#rolePermissionsEditor');
+  if(!host) return;
+  const groups={};
+  for(const [key,group,label] of permissionDefinitions){
+    (groups[group]??=[]).push([key,label]);
+  }
+  host.innerHTML=Object.entries(groups).map(([group,items])=>`
+    <section class="permission-group">
+      <h3>${esc(group)}</h3>
+      ${items.map(([key,label])=>`<label class="permission-item"><input type="checkbox" data-permission="${key}" ${selected[key]?'checked':''}><span>${esc(label)}</span></label>`).join('')}
+    </section>
+  `).join('');
+}
+
+function editRole(id=null){
+  if(!hasPermission('rolesManage')) return;
+  const role=roles.find(r=>r.id===id);
+  $('#roleEditorTitle').textContent=role?'Editar perfil':'Novo perfil';
+  $('#roleId').value=role?.id||'';
+  $('#roleName').value=role?.name||'';
+  renderPermissionEditor(role?.permissions||{});
+  $('#roleEditorError').classList.add('hidden');
+  $('#roleEditor').showModal();
+}
+
+$('#newRoleBtn')?.addEventListener('click',()=>editRole());
+
+$('#roleEditorForm')?.addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(!hasPermission('rolesManage')) return;
+  const id=$('#roleId').value;
+  const name=$('#roleName').value.trim();
+  if(!name){
+    $('#roleEditorError').textContent='Informe o nome do perfil.';
+    $('#roleEditorError').classList.remove('hidden');
+    return;
+  }
+  const permissions={};
+  $('[data-permission]').forEach(input=>permissions[input.dataset.permission]=input.checked);
+  try{
+    if(id){
+      await updateDoc(doc(db,'roles',id),{name,permissions,active:true,updatedAt:serverTimestamp()});
+    }else{
+      await addDoc(collection(db,'roles'),{name,permissions,active:true,system:false,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
+    }
+    $('#roleEditor').close();
+    await loadRoles();
+    if(hasPermission('usersManage')) await loadUsers();
+  }catch(err){
+    console.error(err);
+    $('#roleEditorError').textContent='Não foi possível salvar o perfil.';
+    $('#roleEditorError').classList.remove('hidden');
+  }
+});
+
+async function deleteRole(id){
+  if(!hasPermission('rolesManage')) return;
+  if(users.some(u=>u.role===id)) return alert('Este perfil está sendo usado por um ou mais usuários. Troque o perfil desses usuários antes de excluir.');
+  const role=roles.find(r=>r.id===id);
+  if(!role||role.system) return;
+  if(!confirm(`Excluir o perfil “${role.name}”?`)) return;
+  await deleteDoc(doc(db,'roles',id));
+  await loadRoles();
+}
+
+/* ===== Promoções ===== */
+async function loadPromotions(){
+  try{
+    const snap=await getDocs(collection(db,'promotions'));
+    promotions=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  }catch(err){
+    console.warn('Promoções indisponíveis.',err);
+    promotions=[];
+  }
+  renderPromotions();
+}
+
+function promotionTargetLabel(p){
+  if(p.targetType==='all') return 'Todo o cardápio';
+  if(p.targetType==='category') return categories.find(c=>c.id===p.targetId)?.name||'Categoria';
+  return products.find(x=>x.id===p.targetId)?.name||'Produto';
+}
+
+function renderPromotions(){
+  const table=$('#promotionsTable');
+  if(!table) return;
+  table.innerHTML=promotions.length?promotions.map(p=>`
+    <div class="data-row">
+      <div class="data-main"><strong>${esc(p.name)}</strong><small>${esc(promotionTargetLabel(p))} • ${p.discountType==='percentage'?Number(p.discountValue||0)+'%':money(p.discountValue)} de desconto</small></div>
+      <span class="status-pill ${p.active===false?'status-cancelled':'status-completed'}">${p.active===false?'Inativa':'Ativa'}</span>
+      <div class="data-actions"><button class="btn btn-secondary edit-promotion" data-id="${p.id}" type="button">Editar</button><button class="btn btn-danger delete-promotion" data-id="${p.id}" type="button">Excluir</button></div>
+    </div>
+  `).join(''):'<div class="empty-state">Nenhuma promoção cadastrada.</div>';
+  $('.edit-promotion').forEach(b=>b.onclick=()=>editPromotion(b.dataset.id));
+  $('.delete-promotion').forEach(b=>b.onclick=()=>deletePromotion(b.dataset.id));
+}
+
+function refreshPromotionTarget(){
+  const type=$('#promotionTargetType').value;
+  const field=$('#promotionTargetField');
+  field.classList.toggle('hidden',type==='all');
+  const select=$('#promotionTargetId');
+  if(type==='category') select.innerHTML=categories.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  else if(type==='product') select.innerHTML=products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  else select.innerHTML='';
+}
+$('#promotionTargetType')?.addEventListener('change',refreshPromotionTarget);
+
+function editPromotion(id=null){
+  if(!hasPermission('promotionsManage')) return;
+  const p=promotions.find(x=>x.id===id);
+  $('#promotionEditorTitle').textContent=p?'Editar promoção':'Nova promoção';
+  $('#promotionId').value=p?.id||'';
+  $('#promotionName').value=p?.name||'';
+  $('#promotionDescription').value=p?.description||'';
+  $('#promotionDiscountType').value=p?.discountType||'percentage';
+  $('#promotionDiscountValue').value=p?.discountValue??'';
+  $('#promotionTargetType').value=p?.targetType||'all';
+  refreshPromotionTarget();
+  $('#promotionTargetId').value=p?.targetId||'';
+  $('#promotionStartsAt').value=p?.startsAt||'';
+  $('#promotionEndsAt').value=p?.endsAt||'';
+  $('#promotionActive').checked=p?.active!==false;
+  $('#promotionEditorError').classList.add('hidden');
+  $('#promotionEditor').showModal();
+}
+$('#newPromotionBtn')?.addEventListener('click',()=>editPromotion());
+
+$('#promotionEditorForm')?.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const id=$('#promotionId').value;
+  const data={
+    name:$('#promotionName').value.trim(),
+    description:$('#promotionDescription').value.trim(),
+    discountType:$('#promotionDiscountType').value,
+    discountValue:Number($('#promotionDiscountValue').value||0),
+    targetType:$('#promotionTargetType').value,
+    targetId:$('#promotionTargetType').value==='all'?'':$('#promotionTargetId').value,
+    startsAt:$('#promotionStartsAt').value,
+    endsAt:$('#promotionEndsAt').value,
+    active:$('#promotionActive').checked,
+    updatedAt:serverTimestamp()
+  };
+  if(!data.name||data.discountValue<=0){
+    $('#promotionEditorError').textContent='Informe nome e desconto válido.';
+    $('#promotionEditorError').classList.remove('hidden');
+    return;
+  }
+  try{
+    if(id) await updateDoc(doc(db,'promotions',id),data);
+    else await addDoc(collection(db,'promotions'),{...data,createdAt:serverTimestamp()});
+    $('#promotionEditor').close();
+    await loadPromotions();
+  }catch(err){
+    console.error(err);
+    $('#promotionEditorError').textContent='Não foi possível salvar a promoção.';
+    $('#promotionEditorError').classList.remove('hidden');
+  }
+});
+
+async function deletePromotion(id){
+  if(!hasPermission('promotionsManage')) return;
+  const p=promotions.find(x=>x.id===id);
+  if(!confirm(`Excluir a promoção “${p?.name||''}”?`)) return;
+  await deleteDoc(doc(db,'promotions',id));
+  await loadPromotions();
+}
+
+/* ===== Cupons ===== */
+async function loadCoupons(){
+  try{
+    const snap=await getDocs(collection(db,'coupons'));
+    coupons=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.code||'').localeCompare(b.code||''));
+  }catch(err){
+    console.warn('Cupons indisponíveis.',err);
+    coupons=[];
+  }
+  renderCoupons();
+}
+
+function renderCoupons(){
+  const table=$('#couponsTable');
+  if(!table) return;
+  table.innerHTML=coupons.length?coupons.map(cp=>`
+    <div class="data-row">
+      <div class="data-main"><strong>${esc(cp.code||cp.id)}</strong><small>${esc(cp.description||'')} • ${cp.type==='percentage'?Number(cp.value||0)+'%':money(cp.value)} de desconto</small></div>
+      <span class="status-pill ${cp.active===false?'status-cancelled':'status-completed'}">${cp.active===false?'Inativo':'Ativo'}</span>
+      <div class="data-actions"><button class="btn btn-secondary edit-coupon" data-id="${cp.id}" type="button">Editar</button><button class="btn btn-danger delete-coupon" data-id="${cp.id}" type="button">Excluir</button></div>
+    </div>
+  `).join(''):'<div class="empty-state">Nenhum cupom cadastrado.</div>';
+  $('.edit-coupon').forEach(b=>b.onclick=()=>editCoupon(b.dataset.id));
+  $('.delete-coupon').forEach(b=>b.onclick=()=>deleteCoupon(b.dataset.id));
+}
+
+function normalizeCouponCode(value){
+  return String(value||'').trim().toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9_-]/g,'');
+}
+
+function editCoupon(id=null){
+  if(!hasPermission('couponsManage')) return;
+  const cp=coupons.find(x=>x.id===id);
+  $('#couponEditorTitle').textContent=cp?'Editar cupom':'Novo cupom';
+  $('#couponId').value=cp?.id||'';
+  $('#couponCode').value=cp?.code||'';
+  $('#couponCode').disabled=!!cp;
+  $('#couponDescription').value=cp?.description||'';
+  $('#couponType').value=cp?.type||'percentage';
+  $('#couponValue').value=cp?.value??'';
+  $('#couponMinimumOrder').value=cp?.minimumOrder??0;
+  $('#couponMaxDiscount').value=cp?.maxDiscount??0;
+  $('#couponMinOrders').value=cp?.minOrders??0;
+  $('#couponMinSpent').value=cp?.minSpent??0;
+  $('#couponStartsAt').value=cp?.startsAt||'';
+  $('#couponEndsAt').value=cp?.endsAt||'';
+  $('#couponActive').checked=cp?.active!==false;
+  $('#couponEditorError').classList.add('hidden');
+  $('#couponEditor').showModal();
+}
+$('#newCouponBtn')?.addEventListener('click',()=>editCoupon());
+
+$('#couponEditorForm')?.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const existingId=$('#couponId').value;
+  const code=normalizeCouponCode($('#couponCode').value);
+  const data={
+    code,
+    description:$('#couponDescription').value.trim(),
+    type:$('#couponType').value,
+    value:Number($('#couponValue').value||0),
+    minimumOrder:Number($('#couponMinimumOrder').value||0),
+    maxDiscount:Number($('#couponMaxDiscount').value||0),
+    minOrders:Number($('#couponMinOrders').value||0),
+    minSpent:Number($('#couponMinSpent').value||0),
+    startsAt:$('#couponStartsAt').value,
+    endsAt:$('#couponEndsAt').value,
+    active:$('#couponActive').checked,
+    updatedAt:serverTimestamp()
+  };
+  if(!code||data.value<=0){
+    $('#couponEditorError').textContent='Informe um código e um desconto válido.';
+    $('#couponEditorError').classList.remove('hidden');
+    return;
+  }
+  try{
+    const ref=doc(db,'coupons',existingId||code);
+    if(existingId) await updateDoc(ref,data);
+    else await setDoc(ref,{...data,createdAt:serverTimestamp()});
+    $('#couponEditor').close();
+    await loadCoupons();
+  }catch(err){
+    console.error(err);
+    $('#couponEditorError').textContent='Não foi possível salvar o cupom. Verifique se o código já existe.';
+    $('#couponEditorError').classList.remove('hidden');
+  }
+});
+
+async function deleteCoupon(id){
+  if(!hasPermission('couponsManage')) return;
+  const cp=coupons.find(x=>x.id===id);
+  if(!confirm(`Excluir o cupom “${cp?.code||id}”?`)) return;
+  await deleteDoc(doc(db,'coupons',id));
+  await loadCoupons();
+}
+
+/* ===== Caixa financeiro ===== */
+async function loadCashSessions(){
+  try{
+    const snap=await getDocs(query(collection(db,'cashSessions'),orderBy('openedAt','desc')));
+    cashSessions=snap.docs.map(d=>({id:d.id,...d.data()}));
+    currentCashSession=cashSessions.find(s=>s.status==='open')||null;
+  }catch(err){
+    console.warn('Caixas indisponíveis.',err);
+    cashSessions=[];
+    currentCashSession=null;
+  }
+  renderCash();
+}
+
+function orderWithinCash(order,session){
+  if(!session||order.status!=='completed') return false;
+  const ts=order.completedAt?.toMillis?.()||order.createdAt?.toMillis?.()||0;
+  const start=session.openedAt?.toMillis?.()||0;
+  const end=session.closedAt?.toMillis?.()||Date.now();
+  return ts>=start&&ts<=end;
+}
+
+function cashSummary(session=currentCashSession){
+  const list=session?orders.filter(o=>orderWithinCash(o,session)):[];
+  const summary={count:list.length,gross:0,money:0,pix:0,debit:0,credit:0,other:0};
+  for(const o of list){
+    const value=Number(o.total||0);
+    summary.gross+=value;
+    const method=String(o.payment?.method||'').toLowerCase();
+    if(method.includes('dinheiro')) summary.money+=value;
+    else if(method.includes('pix')) summary.pix+=value;
+    else if(method.includes('débito')||method.includes('debito')) summary.debit+=value;
+    else if(method.includes('crédito')||method.includes('credito')) summary.credit+=value;
+    else summary.other+=value;
+  }
+  return summary;
+}
+
+function renderCash(){
+  if(!$('#cashClosedState')) return;
+  $('#cashClosedState').classList.toggle('hidden',!!currentCashSession);
+  $('#cashOpenState').classList.toggle('hidden',!currentCashSession);
+  const summary=cashSummary();
+
+  $('#cashOrderCount').textContent=summary.count;
+  $('#cashGrossTotal').textContent=money(summary.gross);
+  $('#cashMoneyTotal').textContent=money(summary.money);
+  $('#cashPixTotal').textContent=money(summary.pix);
+  $('#cashDebitTotal').textContent=money(summary.debit);
+  $('#cashCreditTotal').textContent=money(summary.credit);
+
+  if(currentCashSession){
+    $('#cashSessionMeta').innerHTML=`<p><strong>Aberto por:</strong> ${esc(currentCashSession.openedByName||'Usuário')}</p><p><strong>Valor inicial:</strong> ${money(currentCashSession.openingAmount)}</p><p><strong>Abertura:</strong> ${formatDate(currentCashSession.openedAt)}</p>`;
+  }
+
+  $('#cashHistory').innerHTML=cashSessions.length?cashSessions.slice(0,20).map(s=>{
+    const sum=s.summary||cashSummary(s);
+    return `<div class="data-row"><div class="data-main"><strong>${s.status==='open'?'Caixa aberto':'Caixa fechado'}</strong><small>${formatDate(s.openedAt)} • ${esc(s.openedByName||'')}</small></div><span>${Number(sum.count||0)} pedido(s)</span><div><strong>${money(sum.gross||0)}</strong>${s.difference!=null?`<small class="muted" style="display:block">Diferença: ${money(s.difference)}</small>`:''}</div></div>`;
+  }).join(''):'<div class="empty-state">Nenhum caixa registrado.</div>';
+}
+
+$('#openCashBtn')?.addEventListener('click',async()=>{
+  if(!hasPermission('cashOperate')||currentCashSession) return;
+  const openingAmount=Number($('#cashOpeningAmount').value||0);
+  const openingNote=$('#cashOpeningNote').value.trim();
+  try{
+    const ref=await addDoc(collection(db,'cashSessions'),{
+      status:'open',
+      openingAmount,
+      openingNote,
+      openedBy:auth.currentUser.uid,
+      openedByName:currentProfile.displayName||currentProfile.username||'Usuário',
+      openedAt:serverTimestamp(),
+      updatedAt:serverTimestamp()
+    });
+    await loadCashSessions();
+    currentCashSession=cashSessions.find(s=>s.id===ref.id)||currentCashSession;
+    renderCash();
+  }catch(err){
+    console.error(err);
+    alert('Não foi possível abrir o caixa.');
+  }
+});
+
+$('#closeCashBtn')?.addEventListener('click',()=>{
+  if(!hasPermission('cashOperate')||!currentCashSession) return;
+  const summary=cashSummary();
+  const expected=Number(currentCashSession.openingAmount||0)+summary.money;
+  $('#cashClosingAmount').value=expected.toFixed(2);
+  $('#cashClosingNote').value='';
+  $('#cashClosePreview').innerHTML=`<p>Dinheiro esperado: <strong>${money(expected)}</strong></p><p>Vendas totais do período: <strong>${money(summary.gross)}</strong></p>`;
+  $('#cashCloseError').classList.add('hidden');
+  $('#cashCloseDialog').showModal();
+});
+
+$('#cashCloseForm')?.addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(!currentCashSession) return;
+  const declared=Number($('#cashClosingAmount').value||0);
+  const summary=cashSummary();
+  const expected=Number(currentCashSession.openingAmount||0)+summary.money;
+  try{
+    await updateDoc(doc(db,'cashSessions',currentCashSession.id),{
+      status:'closed',
+      closingAmount:declared,
+      expectedCash:expected,
+      difference:declared-expected,
+      closingNote:$('#cashClosingNote').value.trim(),
+      closedBy:auth.currentUser.uid,
+      closedByName:currentProfile.displayName||currentProfile.username||'Usuário',
+      closedAt:serverTimestamp(),
+      summary,
+      updatedAt:serverTimestamp()
+    });
+    $('#cashCloseDialog').close();
+    await loadCashSessions();
+  }catch(err){
+    console.error(err);
+    $('#cashCloseError').textContent='Não foi possível fechar o caixa.';
+    $('#cashCloseError').classList.remove('hidden');
   }
 });
 
