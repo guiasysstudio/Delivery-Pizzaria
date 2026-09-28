@@ -292,8 +292,8 @@ async function initializeAdmin(){
 
   if(hasPermission('customersView')) tasks.push(loadCustomers());
   if(hasPermission('usersManage')) tasks.push(loadUsers());
-  if(hasPermission('promotionsManage')) tasks.push(loadPromotions());
-  if(hasPermission('couponsManage')) tasks.push(loadCoupons());
+  if(hasPermission('ordersView')||hasPermission('promotionsManage')) tasks.push(loadPromotions());
+  if(hasPermission('ordersView')||hasPermission('couponsManage')) tasks.push(loadCoupons());
   if(hasPermission('cashView')) tasks.push(loadCashSessions());
 
   await Promise.all(tasks);
@@ -515,6 +515,19 @@ function expectedDeliveryFee(order){
   return zone?Number(zone.fee||0):fallback;
 }
 
+function applyOrderPromotion(base,item){
+  if(!item?.promotion) return {ok:true,value:base};
+  const promo=promotions.find(p=>p.id===item.promotion.id);
+  if(!promo) return {ok:false,reason:`Promoção inválida em ${item.name}.`,value:base};
+  const sameType=promo.discountType===item.promotion.discountType;
+  const sameValue=Math.abs(Number(promo.discountValue||0)-Number(item.promotion.discountValue||0))<0.009;
+  if(!sameType||!sameValue) return {ok:false,reason:`Dados da promoção divergentes em ${item.name}.`,value:base};
+  const discounted=promo.discountType==='percentage'
+    ?Math.max(0,base-(base*Number(promo.discountValue||0)/100))
+    :Math.max(0,base-Number(promo.discountValue||0));
+  return {ok:true,value:discounted};
+}
+
 function expectedItemUnitPrice(item){
   const first=products.find(p=>p.id===item.productId);
   if(!first) return {ok:false,reason:'Produto não existe mais no cardápio.',value:0};
@@ -537,6 +550,10 @@ function expectedItemUnitPrice(item){
       base=Math.max(base,Number(size.price||0));
     }
   }
+
+  const promoted=applyOrderPromotion(base,item);
+  if(!promoted.ok) return promoted;
+  base=promoted.value;
 
   let extras=0;
   for(const extra of (item.extras||[])){
@@ -574,12 +591,34 @@ function verifyOrderPricing(order){
     issues.push(`Taxa de entrega divergente: pedido ${money(order.deliveryFee)}, atual ${money(expectedFee)}.`);
   }
 
-  const expectedTotal=expectedSubtotal+expectedFee;
+  let expectedDiscount=0;
+  if(order.coupon){
+    const coupon=coupons.find(cp=>cp.id===order.coupon.id||cp.code===order.coupon.code);
+    if(!coupon){
+      issues.push('Cupom do pedido não existe no cadastro atual.');
+    }else{
+      const sameType=coupon.type===order.coupon.type;
+      const sameValue=Math.abs(Number(coupon.value||0)-Number(order.coupon.value||0))<0.009;
+      if(!sameType||!sameValue){
+        issues.push('Dados do cupom divergem do cadastro.');
+      }
+      expectedDiscount=coupon.type==='percentage'
+        ?expectedSubtotal*Number(coupon.value||0)/100
+        :Number(coupon.value||0);
+      if(Number(coupon.maxDiscount||0)>0) expectedDiscount=Math.min(expectedDiscount,Number(coupon.maxDiscount));
+      expectedDiscount=Math.max(0,Math.min(expectedSubtotal,expectedDiscount));
+    }
+  }
+  if(Math.abs(expectedDiscount-Number(order.discount||0))>0.009){
+    issues.push(`Desconto divergente: pedido ${money(order.discount)}, calculado ${money(expectedDiscount)}.`);
+  }
+
+  const expectedTotal=Math.max(0,expectedSubtotal-expectedDiscount+expectedFee);
   if(Math.abs(expectedTotal-Number(order.total||0))>0.009){
     issues.push(`Total divergente: pedido ${money(order.total)}, calculado ${money(expectedTotal)}.`);
   }
 
-  return {valid:issues.length===0,issues,expectedSubtotal,expectedFee,expectedTotal};
+  return {valid:issues.length===0,issues,expectedSubtotal,expectedDiscount,expectedFee,expectedTotal};
 }
 
 function renderStats(){
@@ -753,6 +792,7 @@ function openOrder(id){
     <div class="order-items-detail">
       ${(o.items||[]).map(i=>`<div class="order-line"><div><strong>${i.qty}× ${esc(i.name)}</strong><small class="muted" style="display:block">${[i.size?.name,...(i.extras||[]).map(e=>e.name)].filter(Boolean).map(esc).join(' • ')}${i.note?` • Obs.: ${esc(i.note)}`:''}</small></div><strong>${money(Number(i.unitPrice)*Number(i.qty))}</strong></div>`).join('')}
       <div class="order-line"><span>Subtotal</span><strong>${money(o.subtotal)}</strong></div>
+      ${Number(o.discount||0)>0?`<div class="order-line"><span>Desconto${o.coupon?.code?` (${esc(o.coupon.code)})`:''}</span><strong>- ${money(o.discount)}</strong></div>`:''}
       <div class="order-line"><span>Entrega</span><strong>${money(o.deliveryFee)}</strong></div>
       <div class="order-line"><strong>Total</strong><strong>${money(o.total)}</strong></div>
     </div>
@@ -873,6 +913,10 @@ function receiptText(o){
 
   lines.push(divider);
   lines.push('Subtotal: '+money(o.subtotal));
+  if(Number(o.discount||0)>0){
+    lines.push('Desconto: -'+money(o.discount));
+    if(o.coupon?.code) lines.push('CUPOM: '+o.coupon.code);
+  }
   lines.push('Entrega:  '+money(o.deliveryFee));
   lines.push('TOTAL:    '+money(o.total));
   lines.push(divider);
