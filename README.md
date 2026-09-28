@@ -1,81 +1,194 @@
 # Delivery Pizzaria
 
-Sistema de delivery para pizzaria com cardápio público e painel administrativo separado.
+Sistema completo de delivery para pizzaria, com site público, conta do cliente, múltiplos endereços, checkout sem pagamento online, painel administrativo em tempo real e impressão automática por impressora instalada no Windows.
 
-## Recursos
+## URLs
 
-- Cardápio responsivo por categorias.
-- Produtos com preço simples ou tamanhos, adicionais, destaque e disponibilidade.
-- Carrinho e checkout para entrega ou retirada.
-- Seleção de forma de pagamento sem pagamento online, incluindo troco.
-- Horários de funcionamento configuráveis e modo forçar aberto/fechado.
-- Pedidos numerados em ordem de recebimento.
-- Painel administrativo em tempo real.
-- Fluxo de status: Novo, Em preparo, Pronto, Saiu para entrega, Concluído e Cancelado.
-- Cadastro, edição e exclusão de categorias e produtos.
-- Histórico/filtros de pedidos.
-- Comanda térmica de 80 mm com todos os dados do pedido.
-- Impressão manual e impressão automática preparada para Chrome/Edge com `--kiosk-printing`.
-- Fotos de produtos mantidas no próprio repositório (`assets/products/`).
-- Firebase Firestore + Authentication.
-- Deploy automático no GitHub Pages via GitHub Actions.
+- Público: \`https://guiasysstudio.github.io/Delivery-Pizzaria/\`
+- Minha Conta: \`https://guiasysstudio.github.io/Delivery-Pizzaria/account/\`
+- Administrativo: \`https://guiasysstudio.github.io/Delivery-Pizzaria/admin/\`
 
-## Firebase: configuração inicial obrigatória
+## Site público
 
-O front-end já está ligado ao projeto `delivery-pizzaria-f5b08`.
+- Cardápio por categorias.
+- Produtos simples, bebidas e pizzas.
+- Tamanhos e preços por tamanho.
+- Pizza meio a meio.
+- Adicionais/bordas.
+- Observação por item.
+- Favoritos.
+- Carrinho persistente.
+- Entrega ou retirada.
+- Horário de funcionamento automático.
+- Pedido mínimo e taxa de entrega configuráveis.
+- Cadastro/login do cliente por:
+  - Google.
+  - E-mail e senha.
+- Minha Conta:
+  - dados pessoais;
+  - troca de usuário;
+  - logout;
+  - vários endereços;
+  - endereço principal;
+  - CEP com preenchimento automático;
+  - histórico de pedidos;
+  - pedir novamente;
+  - favoritos.
+- Endereço ativo exibido no topo do cardápio.
+- Troca de endereço no checkout.
 
-No Firebase Console:
+## Pagamento
 
-1. Crie o banco **Cloud Firestore** em modo de produção.
-2. Em **Authentication > Sign-in method**, habilite **E-mail/Senha**.
-3. Em **Authentication > Users**, crie o usuário administrativo da pizzaria.
-4. Publique as regras do arquivo `firestore.rules` (ou execute `firebase deploy --only firestore`).
+Não existe pagamento online.
 
-Não existe cadastro público de administrador. Portanto, somente contas criadas no Firebase Authentication conseguem entrar no painel.
+O cliente apenas informa como irá pagar:
 
-## Primeiro uso
+- Dinheiro.
+- PIX na entrega/retirada.
+- Cartão de débito.
+- Cartão de crédito.
+- Outras formas que o administrador cadastrar.
 
-1. Entre em `/admin/`.
-2. Abra **Configurações** e cadastre nome, horários, taxa, pagamentos etc.
-3. Em **Produtos**, use **Criar cardápio de exemplo** para popular rapidamente pizzas e bebidas, ou crie tudo manualmente.
-4. Substitua `assets/products/placeholder.svg` pelas fotos reais e informe o caminho da imagem no produto.
+Quando o pagamento é em dinheiro:
 
-### Imagens no GitHub
+- o cliente escolhe se precisa de troco;
+- informa o valor entregue;
+- o sistema calcula o valor do troco;
+- a comanda mostra “Troco para” e “Levar de troco”.
 
-Coloque as imagens em:
+## Painel administrativo
 
-```text
+Perfis disponíveis:
+
+- **Master** — acesso total.
+- **Gerente** — operação, cardápio, clientes, configurações e impressão.
+- **Caixa** — pedidos, clientes e impressão.
+- **Cozinha** — andamento de produção.
+- **Entrega** — saída e conclusão da entrega.
+- **Operador** — operação dos pedidos.
+
+O Master cria os demais usuários diretamente no painel usando **Usuário + Senha**.
+
+Fluxo do pedido:
+
+1. Aguardando confirmação.
+2. Confirmado.
+3. Em preparo.
+4. Pronto.
+5. Saiu para entrega.
+6. Concluído.
+7. Cancelado.
+
+Em Configurações é possível escolher:
+
+- confirmar pedidos automaticamente; ou
+- exigir aceite manual do caixa/gerente.
+
+## Impressão no Windows
+
+A impressão automática é feita pelo **Delivery Pizzaria Print Agent**, localizado no diretório \`print-agent/\`.
+
+Motivo: navegadores comuns não podem selecionar silenciosamente uma impressora instalada no Windows.
+
+O Print Agent:
+
+- roda localmente na bandeja do Windows;
+- lista qualquer impressora instalada no Windows;
+- recebe a comanda pelo endereço local \`127.0.0.1\`;
+- imprime diretamente pela fila de impressão do Windows;
+- não armazena credenciais do Firebase;
+- não abre serviço para outros computadores da rede;
+- pode iniciar junto com o Windows.
+
+### Build do Print Agent
+
+O workflow **Build Print Agent** gera automaticamente um executável Windows x64 como artifact do GitHub Actions.
+
+Depois de abrir o Print Agent:
+
+1. Entre no ADM.
+2. Abra **Impressão**.
+3. Clique **Procurar impressoras**.
+4. Selecione a impressora do Windows.
+5. Use **Imprimir teste**.
+6. Ative a impressão automática nesta estação.
+
+A configuração da impressora é local por computador, evitando que vários caixas imprimam a mesma comanda sem necessidade.
+
+## Fotos dos produtos
+
+As fotos ficam no GitHub:
+
+\`\`\`text
 assets/products/
-```
+\`\`\`
 
 Exemplo:
 
-```text
+\`\`\`text
 assets/products/pizza-calabresa.webp
-```
+\`\`\`
 
-No editor do produto informe exatamente esse caminho. Recomenda-se WebP/JPEG otimizados.
+No editor do produto informe esse caminho.
 
-## Impressão automática
+## Firebase
 
-Navegadores normais exibem a janela de impressão por segurança. Para operação no balcão com impressão automática:
+Projeto atual:
 
-1. Defina a impressora térmica desejada como impressora padrão do Windows.
-2. Use o arquivo `abrir-admin-impressao.bat` para abrir o painel no Edge/Chrome com `--kiosk-printing`.
-3. No painel, em **Configurações > Impressão**, marque **Imprimir automaticamente novos pedidos**.
-4. Mantenha o painel aberto durante o expediente.
+\`\`\`text
+delivery-pizzaria-f5b08
+\`\`\`
 
-A impressão manual continua disponível dentro de cada pedido.
+### Authentication
 
-## GitHub Pages
+Habilitar:
 
-O workflow `.github/workflows/pages.yml` publica a branch `main`. Se necessário, em **Settings > Pages**, selecione GitHub Actions como fonte de publicação.
+- E-mail/Senha.
+- Google.
 
-URL esperada:
+Adicionar em **Authentication > Settings > Authorized domains**:
 
-- Público: `https://guiasysstudio.github.io/Delivery-Pizzaria/`
-- Admin: `https://guiasysstudio.github.io/Delivery-Pizzaria/admin/`
+\`\`\`text
+guiasysstudio.github.io
+\`\`\`
 
-## Segurança
+O usuário Master inicial usa internamente:
 
-A configuração Web do Firebase é pública por natureza. A proteção dos dados fica nas regras do Firestore e no Firebase Authentication. O público pode ler cardápio/configurações e criar pedidos; somente usuários autenticados podem ler pedidos e alterar dados administrativos.
+\`\`\`text
+master@delivery-pizzaria.local
+\`\`\`
+
+Na tela do ADM aparece apenas:
+
+\`\`\`text
+Usuário: master
+Senha: ********
+\`\`\`
+
+### Firestore
+
+As regras oficiais estão em:
+
+\`\`\`text
+firestore.rules
+\`\`\`
+
+Após mudanças neste arquivo, publique as regras no Firebase Console ou via Firebase CLI:
+
+\`\`\`bash
+firebase deploy --only firestore
+\`\`\`
+
+As regras separam:
+
+- dados públicos do cardápio;
+- dados privados do cliente;
+- endereços e favoritos do próprio cliente;
+- histórico de pedidos do próprio cliente;
+- permissões administrativas por perfil.
+
+## Desenvolvimento e validação
+
+O workflow **Validate Delivery Pizzaria** verifica sintaxe dos módulos JavaScript do público, Minha Conta e ADM.
+
+O GitHub Pages publica automaticamente a branch \`main\`.
