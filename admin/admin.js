@@ -226,7 +226,7 @@ onAuthStateChanged(auth,async user=>{
     $('#loginView').classList.add('hidden');
     $('#adminApp').classList.remove('hidden');
     $('#currentUserDisplay').textContent=`${currentProfile.displayName||currentProfile.username||username} • ${roleLabel(currentProfile.role)}`;
-    $$('.master-only').forEach(el=>el.classList.toggle('hidden',!isMaster()));
+    $$$('.master-only').forEach(el=>el.classList.toggle('hidden',!isMaster()));
     applyRoleUI();
 
     try{
@@ -444,7 +444,7 @@ $('#soundBtn').onclick=async()=>{
   if(soundEnabled) beep();
 };
 
-$$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
+$$$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
 
 function allowedViews(){
   const views=[];
@@ -463,8 +463,8 @@ function allowedViews(){
 }
 function applyRoleUI(){
   const allowed=allowedViews();
-  $('.nav-item').forEach(item=>item.classList.toggle('hidden',!allowed.includes(item.dataset.view)));
-  $('.master-only').forEach(el=>{
+  $$('.nav-item').forEach(item=>item.classList.toggle('hidden',!allowed.includes(item.dataset.view)));
+  $$('.master-only').forEach(el=>{
     const view=el.dataset.view;
     if(view) el.classList.toggle('hidden',!allowed.includes(view));
   });
@@ -477,7 +477,7 @@ function switchView(v){
   const allowed=allowedViews();
   if(!allowed.includes(v)) return;
 
-  $$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
+  $$$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   $$('.admin-view').forEach(x=>x.classList.toggle('active',x.id===`view-${v}`));
 
   const titles={
@@ -1009,8 +1009,8 @@ function renderRoles(){
     </div>`;
   }).join(''):'<div class="empty-state">Nenhum perfil personalizado.</div>';
 
-  $('.edit-role').forEach(b=>b.onclick=()=>editRole(b.dataset.id));
-  $('.delete-role').forEach(b=>b.onclick=()=>deleteRole(b.dataset.id));
+  $$('.edit-role').forEach(b=>b.onclick=()=>editRole(b.dataset.id));
+  $$('.delete-role').forEach(b=>b.onclick=()=>deleteRole(b.dataset.id));
 }
 
 function renderPermissionEditor(selected={}){
@@ -1052,7 +1052,7 @@ $('#roleEditorForm')?.addEventListener('submit',async e=>{
     return;
   }
   const permissions={};
-  $('[data-permission]').forEach(input=>permissions[input.dataset.permission]=input.checked);
+  $$('[data-permission]').forEach(input=>permissions[input.dataset.permission]=input.checked);
   try{
     if(id){
       await updateDoc(doc(db,'roles',id),{name,permissions,active:true,updatedAt:serverTimestamp()});
@@ -1107,8 +1107,8 @@ function renderPromotions(){
       <div class="data-actions"><button class="btn btn-secondary edit-promotion" data-id="${p.id}" type="button">Editar</button><button class="btn btn-danger delete-promotion" data-id="${p.id}" type="button">Excluir</button></div>
     </div>
   `).join(''):'<div class="empty-state">Nenhuma promoção cadastrada.</div>';
-  $('.edit-promotion').forEach(b=>b.onclick=()=>editPromotion(b.dataset.id));
-  $('.delete-promotion').forEach(b=>b.onclick=()=>deletePromotion(b.dataset.id));
+  $$('.edit-promotion').forEach(b=>b.onclick=()=>editPromotion(b.dataset.id));
+  $$('.delete-promotion').forEach(b=>b.onclick=()=>deletePromotion(b.dataset.id));
 }
 
 function refreshPromotionTarget(){
@@ -1204,8 +1204,8 @@ function renderCoupons(){
       <div class="data-actions"><button class="btn btn-secondary edit-coupon" data-id="${cp.id}" type="button">Editar</button><button class="btn btn-danger delete-coupon" data-id="${cp.id}" type="button">Excluir</button></div>
     </div>
   `).join(''):'<div class="empty-state">Nenhum cupom cadastrado.</div>';
-  $('.edit-coupon').forEach(b=>b.onclick=()=>editCoupon(b.dataset.id));
-  $('.delete-coupon').forEach(b=>b.onclick=()=>deleteCoupon(b.dataset.id));
+  $$('.edit-coupon').forEach(b=>b.onclick=()=>editCoupon(b.dataset.id));
+  $$('.delete-coupon').forEach(b=>b.onclick=()=>deleteCoupon(b.dataset.id));
 }
 
 function normalizeCouponCode(value){
@@ -1825,7 +1825,7 @@ function closeAdminDialog(dialog){
   if(dialog?.open) dialog.close();
 }
 
-$('dialog').forEach(dialog=>{
+$$('dialog').forEach(dialog=>{
   dialog.querySelectorAll('.dialog-close').forEach(btn=>btn.addEventListener('click',()=>closeAdminDialog(dialog)));
   dialog.addEventListener('cancel',e=>{
     e.preventDefault();
