@@ -203,8 +203,28 @@ $('#soundBtn').onclick=async()=>{
 
 $$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
 
+function applyRoleUI(){
+  const role=currentProfile?.role||'operator';
+  const allowed=role==='master'
+    ?['orders','products','categories','users','settings']
+    :role==='manager'
+      ?['orders','products','categories','settings']
+      :['orders'];
+  $('.nav-item').forEach(item=>item.classList.toggle('hidden',!allowed.includes(item.dataset.view)));
+  if(!allowed.includes(document.querySelector('.admin-view.active')?.id?.replace('view-',''))){
+    switchView('orders');
+  }
+}
+
 function switchView(v){
-  $$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
+  const role=currentProfile?.role||'operator';
+  const allowed=role==='master'
+    ?['orders','products','categories','users','settings']
+    :role==='manager'
+      ?['orders','products','categories','settings']
+      :['orders'];
+  if(!allowed.includes(v)) return;
+  $('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   $$('.admin-view').forEach(x=>x.classList.toggle('active',x.id===`view-${v}`));
   const titles={
     orders:['OPERAÇÃO','Pedidos'],
