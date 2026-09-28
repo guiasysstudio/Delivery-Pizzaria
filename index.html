@@ -51,6 +51,13 @@
     </div>
   </header>
 
+  <div id="promotionBanner" class="promotion-banner hidden">
+    <div class="shell promotion-banner-inner">
+      <span class="promotion-banner-icon">🏷️</span>
+      <div><strong id="promotionBannerTitle"></strong><small id="promotionBannerText"></small></div>
+    </div>
+  </div>
+
   <main>
     <section class="public-hero">
       <div class="shell public-hero-grid">
@@ -104,6 +111,7 @@
         <div id="cartItems" class="cart-items"></div>
         <div class="cart-summary">
           <div><span>Subtotal</span><strong id="subtotal">R$ 0,00</strong></div>
+          <div id="discountRow" class="hidden discount-row"><span>Desconto</span><strong id="discountTotal">- R$ 0,00</strong></div>
           <div><span>Entrega</span><strong id="deliveryFee">R$ 0,00</strong></div>
           <div class="cart-total"><span>Total</span><strong id="total">R$ 0,00</strong></div>
         </div>
@@ -228,6 +236,17 @@
       <section class="checkout-section">
         <h3>Contato</h3>
         <label class="field"><span>Telefone / WhatsApp *</span><input id="checkoutPhone" maxlength="30" inputmode="tel" required placeholder="Telefone para contato"></label>
+      </section>
+
+      <section class="checkout-section">
+        <div class="checkout-section-head"><h3>Cupom</h3><span id="couponAppliedBadge" class="coupon-applied-badge hidden">Aplicado</span></div>
+        <p class="muted small-copy">Se você recebeu um cupom, digite o código abaixo.</p>
+        <div class="coupon-entry">
+          <input id="couponCodeInput" maxlength="30" placeholder="Ex.: PIZZA10" autocapitalize="characters">
+          <button id="applyCouponBtn" class="btn btn-secondary" type="button">Aplicar</button>
+          <button id="removeCouponBtn" class="btn btn-ghost hidden" type="button">Remover</button>
+        </div>
+        <div id="couponFeedback" class="coupon-feedback hidden"></div>
       </section>
 
       <section class="checkout-section">
