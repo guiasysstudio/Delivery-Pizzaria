@@ -431,7 +431,10 @@ function renderCart(){
   $('#deliveryFee').textContent=money(fee);
   $('#total').textContent=money(total);
   $('#checkoutTotal').textContent=money(total);
-  $('#checkoutBtn').disabled=!count||!isOpen();
+  const storeOpen=isOpen();
+  $('#checkoutBtn').disabled=!count;
+  $('#checkoutBtn').textContent=!count?'Carrinho vazio':(storeOpen?'Continuar':'Loja fechada • ver detalhes');
+  $('#checkoutBtn').title=storeOpen?'Finalizar pedido':'A pizzaria está fechada para novos pedidos no momento.';
   $('#cartItems').innerHTML=cart.length?cart.map(x=>`<div class="cart-item">
     <div class="cart-item-top"><div><strong>${x.qty}× ${esc(x.name)}</strong><br><small>${[x.size?.name,...(x.extras||[]).map(e=>e.name)].filter(Boolean).map(esc).join(' • ')}</small>${x.note?`<br><small>Obs.: ${esc(x.note)}</small>`:''}</div><strong>${money(x.unitPrice*x.qty)}</strong></div>
     <div class="mini-actions"><button data-act="minus" data-id="${x.lineId}" type="button">−</button><span>${x.qty}</span><button data-act="plus" data-id="${x.lineId}" type="button">+</button><button data-act="remove" data-id="${x.lineId}" type="button" title="Remover">×</button></div>
@@ -643,7 +646,11 @@ $('#searchInput').addEventListener('input',renderCatalog);
 $('#desktopCartBtn').onclick=()=>$('#cartPanel').scrollIntoView({behavior:'smooth',block:'start'});
 $('#floatingCart').onclick=()=>$('#cartPanel').classList.toggle('open');
 $('#checkoutBtn').onclick=()=>{
-  if(!isOpen()) return alert('A pizzaria está fechada no momento.');
+  if(!cart.length) return;
+  if(!isOpen()){
+    alert('A pizzaria está fechada para novos pedidos neste momento. No painel administrativo, use Configurações → Modo de funcionamento → Forçar aberto para realizar testes fora do horário.');
+    return;
+  }
   if(!customer){
     afterAuthAction='checkout';
     openAuth();
@@ -653,14 +660,23 @@ $('#checkoutBtn').onclick=()=>{
 };
 
 function openCheckout(){
-  if(!customer) return;
+  if(!customer){
+    afterAuthAction='checkout';
+    openAuth();
+    return;
+  }
   if(!cart.length) return;
-  renderCheckoutAddress();
-  $('#checkoutPhone').value=customerProfile?.phone||activeAddress()?.phone||'';
-  renderPaymentOptions();
-  renderCart();
-  $('#checkoutError').classList.add('hidden');
-  $('#checkoutDialog').showModal();
+  try{
+    renderCheckoutAddress();
+    $('#checkoutPhone').value=customerProfile?.phone||activeAddress()?.phone||'';
+    renderPaymentOptions();
+    renderCart();
+    $('#checkoutError').classList.add('hidden');
+    $('#checkoutDialog').showModal();
+  }catch(err){
+    console.error('Falha ao abrir checkout:',err);
+    alert('Não foi possível abrir a finalização do pedido. Atualize a página e tente novamente.');
+  }
 }
 
 function renderCheckoutAddress(){
