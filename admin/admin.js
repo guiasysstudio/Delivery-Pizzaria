@@ -391,7 +391,10 @@ function renderStats(){
 function renderOrders(){
   const f=$('#orderStatusFilter').value;
   const term=$('#orderSearch').value.trim().toLowerCase();
+  const role=currentProfile?.role||'operator';
   const list=orders.filter(o=>{
+    if(role==='kitchen'&&!['accepted','preparing','ready'].includes(o.status)) return false;
+    if(role==='delivery'&&!['ready','out_for_delivery','completed'].includes(o.status)) return false;
     if(f==='active'&&['completed','cancelled'].includes(o.status)) return false;
     if(f!=='all'&&f!=='active'&&o.status!==f) return false;
     const text=`${o.orderNumber} ${o.customer?.name||''} ${o.customer?.phone||''}`.toLowerCase();
@@ -408,20 +411,31 @@ $('#orderSearch').oninput=renderOrders;
 
 function allowedStatusTargets(order){
   const role=currentProfile?.role||'operator';
+  const current=order.status;
 
-  if(['master','manager','cashier','operator'].includes(role)){
+  if(['master','manager','operator'].includes(role)){
     return ['pending','accepted','preparing','ready','out_for_delivery','completed','cancelled'];
   }
 
+  if(role==='cashier'){
+    if(current==='pending') return ['pending','accepted','cancelled'];
+    if(current==='accepted') return ['accepted','cancelled'];
+    return [current];
+  }
+
   if(role==='kitchen'){
-    return ['accepted','preparing','ready'];
+    if(current==='accepted') return ['accepted','preparing'];
+    if(current==='preparing') return ['preparing','ready'];
+    return [current];
   }
 
   if(role==='delivery'){
-    return ['ready','out_for_delivery','completed'];
+    if(current==='ready') return ['ready','out_for_delivery'];
+    if(current==='out_for_delivery') return ['out_for_delivery','completed'];
+    return [current];
   }
 
-  return [order.status];
+  return [current];
 }
 
 function orderAddressText(o){
