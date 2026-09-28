@@ -39,6 +39,8 @@ const defaults={
   phone:'',
   storeAddress:'',
   deliveryFee:5,
+  deliveryZones:[],
+  restrictDeliveryZones:false,
   minimumOrder:0,
   allowPickup:true,
   openMode:'schedule',
@@ -839,6 +841,15 @@ function parsePriceLines(v){
   }).filter(x=>x.name);
 }
 
+function parseDeliveryZones(value){
+  return String(value||'').split('\n').map(line=>line.trim()).filter(Boolean).map(line=>{
+    const parts=line.split('|');
+    const neighborhood=(parts[0]||'').trim();
+    const fee=Number(String(parts[1]||0).trim().replace(',','.'));
+    return {neighborhood,fee:Number.isFinite(fee)?fee:0};
+  }).filter(x=>x.neighborhood);
+}
+
 function renderSchedules(){
   $('#scheduleEditor').innerHTML=dayNames.map((n,i)=>`<div class="schedule-row"><strong>${n}</strong><label class="check-row"><input class="sch-enabled" data-day="${i}" type="checkbox"><span>Aberto</span></label><input class="sch-open" data-day="${i}" type="time"><input class="sch-close" data-day="${i}" type="time"></div>`).join('');
 }
@@ -850,6 +861,8 @@ function renderSettings(){
   $('#setStoreAddress').value=settings.storeAddress||'';
   $('#setOpenMode').value=settings.openMode||'schedule';
   $('#setDeliveryFee').value=settings.deliveryFee??0;
+  $('#setDeliveryZones').value=(settings.deliveryZones||[]).map(z=>`${z.neighborhood}|${Number(z.fee||0).toFixed(2)}`).join('\n');
+  $('#setRestrictDeliveryZones').checked=!!settings.restrictDeliveryZones;
   $('#setMinimumOrder').value=settings.minimumOrder??0;
   $('#setAllowPickup').checked=settings.allowPickup!==false;
   $('#setAutoAccept').checked=!!settings.autoAcceptOrders;
@@ -882,6 +895,8 @@ $('#settingsForm').onsubmit=async e=>{
     storeAddress:$('#setStoreAddress').value.trim(),
     openMode:$('#setOpenMode').value,
     deliveryFee:Number($('#setDeliveryFee').value||0),
+    deliveryZones:parseDeliveryZones($('#setDeliveryZones').value),
+    restrictDeliveryZones:$('#setRestrictDeliveryZones').checked,
     minimumOrder:Number($('#setMinimumOrder').value||0),
     allowPickup:$('#setAllowPickup').checked,
     autoAcceptOrders:$('#setAutoAccept').checked,
