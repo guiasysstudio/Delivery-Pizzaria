@@ -524,6 +524,7 @@ function loadPrintSettingsUI(){
   if(!$('#localAutoPrint')) return;
   $('#localAutoPrint').checked=printConfig.autoPrint;
   $('#localPrintPending').checked=printConfig.printPending;
+  if($('#cashierAutoAccept')) $('#cashierAutoAccept').checked=!!settings.autoAcceptOrders;
 }
 
 function savePrintSettings(){
@@ -674,6 +675,21 @@ async function printOrder(order,automatic=false){
   window.open(`./print.html?id=${encodeURIComponent(order.id)}`,'_blank');
   return false;
 }
+
+$('#saveAutoAcceptBtn')?.addEventListener('click',async()=>{
+  try{
+    const value=$('#cashierAutoAccept').checked;
+    await updateDoc(doc(db,'settings','store'),{
+      autoAcceptOrders:value,
+      updatedAt:serverTimestamp()
+    });
+    settings.autoAcceptOrders=value;
+    alert('Modo de confirmação atualizado.');
+  }catch(err){
+    console.error(err);
+    alert('Você não tem permissão para alterar o modo de confirmação.');
+  }
+});
 
 $('#refreshPrintersBtn')?.addEventListener('click',checkPrintAgent);
 
