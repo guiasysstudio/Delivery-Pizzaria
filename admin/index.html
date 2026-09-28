@@ -24,11 +24,15 @@
       <div class="brand"><span class="brand-mark">🍕</span><div><strong id="adminStoreName">Pizzaria</strong><small>Painel de delivery</small></div></div>
       <nav class="admin-nav">
         <button class="nav-item active" data-view="orders">📋 <span>Pedidos</span><span id="pendingBadge" class="nav-badge hidden">0</span></button>
+        <button class="nav-item" data-view="cash">💰 <span>Caixa</span></button>
         <button class="nav-item" data-view="products">🍕 <span>Produtos</span></button>
         <button class="nav-item" data-view="categories">🗂️ <span>Categorias</span></button>
+        <button class="nav-item" data-view="promotions">🏷️ <span>Promoções</span></button>
+        <button class="nav-item" data-view="coupons">🎟️ <span>Cupons</span></button>
         <button class="nav-item" data-view="customers">👤 <span>Clientes</span></button>
         <button class="nav-item cashier-feature" data-view="printing">🖨️ <span>Impressão</span></button>
         <button class="nav-item master-only hidden" data-view="users">👥 <span>Usuários</span></button>
+        <button class="nav-item master-only hidden" data-view="roles">🔐 <span>Perfis</span></button>
         <button class="nav-item" data-view="settings">⚙️ <span>Configurações</span></button>
       </nav>
       <div class="sidebar-bottom"><small id="currentUserDisplay" class="muted" style="text-align:center"></small><a class="btn btn-secondary btn-block" href="../" target="_blank">Abrir cardápio</a><button id="logoutBtn" class="btn btn-ghost btn-block">Sair</button></div>
@@ -43,6 +47,46 @@
           <div class="stat-card"><span>Aguardando</span><strong id="statPending">0</strong></div><div class="stat-card"><span>Confirmados</span><strong id="statAccepted">0</strong></div><div class="stat-card"><span>Em preparo</span><strong id="statPreparing">0</strong></div><div class="stat-card"><span>Hoje</span><strong id="statToday">0</strong></div>
         </div>
         <div class="panel"><div class="panel-head"><div class="filters"><select id="orderStatusFilter"><option value="active">Pedidos ativos</option><option value="all">Todos</option><option value="pending">Aguardando confirmação</option><option value="accepted">Confirmados</option><option value="preparing">Em preparo</option><option value="ready">Prontos</option><option value="out_for_delivery">Saiu para entrega</option><option value="completed">Concluídos</option><option value="cancelled">Cancelados</option></select><input id="orderSearch" type="search" placeholder="Buscar nº, cliente ou telefone" /></div></div><div id="ordersList" class="orders-list"></div></div>
+      </section>
+
+      <section id="view-cash" class="admin-view">
+        <div class="cash-grid">
+          <div class="panel settings-card">
+            <span class="eyebrow">CONTROLE FINANCEIRO</span><h2>Caixa atual</h2>
+            <div id="cashClosedState">
+              <p class="muted">Nenhum caixa está aberto nesta estação.</p>
+              <label class="field"><span>Valor inicial em dinheiro (R$)</span><input id="cashOpeningAmount" type="number" min="0" step="0.01" value="0"></label>
+              <label class="field"><span>Observação da abertura</span><textarea id="cashOpeningNote" rows="2" placeholder="Ex.: troco inicial do turno"></textarea></label>
+              <button id="openCashBtn" class="btn btn-primary" type="button">Abrir caixa</button>
+            </div>
+            <div id="cashOpenState" class="hidden">
+              <div id="cashSessionMeta" class="cash-session-meta"></div>
+              <button id="closeCashBtn" class="btn btn-danger" type="button">Fechar caixa</button>
+            </div>
+          </div>
+          <div class="panel settings-card cash-summary-card">
+            <h2>Resumo do período</h2>
+            <div class="cash-kpis">
+              <div><span>Pedidos concluídos</span><strong id="cashOrderCount">0</strong></div>
+              <div><span>Vendas</span><strong id="cashGrossTotal">R$ 0,00</strong></div>
+              <div><span>Dinheiro</span><strong id="cashMoneyTotal">R$ 0,00</strong></div>
+              <div><span>PIX</span><strong id="cashPixTotal">R$ 0,00</strong></div>
+              <div><span>Débito</span><strong id="cashDebitTotal">R$ 0,00</strong></div>
+              <div><span>Crédito</span><strong id="cashCreditTotal">R$ 0,00</strong></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:16px"><div class="panel-head"><strong>Histórico de caixas</strong></div><div id="cashHistory" class="data-list"></div></div>
+      </section>
+
+      <section id="view-promotions" class="admin-view">
+        <div class="section-actions"><button id="newPromotionBtn" class="btn btn-primary" type="button">+ Nova promoção</button></div>
+        <div class="panel"><div id="promotionsTable" class="data-list"></div></div>
+      </section>
+
+      <section id="view-coupons" class="admin-view">
+        <div class="section-actions"><button id="newCouponBtn" class="btn btn-primary" type="button">+ Novo cupom</button></div>
+        <div class="panel"><div id="couponsTable" class="data-list"></div></div>
       </section>
 
       <section id="view-products" class="admin-view">
@@ -95,6 +139,11 @@
       <section id="view-users" class="admin-view">
         <div class="section-actions"><button id="newUserBtn" class="btn btn-primary">+ Novo usuário</button></div>
         <div class="panel"><div id="usersTable" class="data-list"></div></div>
+      </section>
+
+      <section id="view-roles" class="admin-view">
+        <div class="section-actions"><button id="newRoleBtn" class="btn btn-primary" type="button">+ Novo perfil</button></div>
+        <div class="panel"><div class="panel-head"><p class="muted" style="margin:0">Crie perfis como Caixa, Cozinha ou Supervisor e escolha exatamente o que cada um pode visualizar e alterar.</p></div><div id="rolesTable" class="data-list"></div></div>
       </section>
 
       <section id="view-settings" class="admin-view">
@@ -208,6 +257,86 @@
       <p class="muted" id="userEditorHelp">A senha é definida somente na criação. O usuário poderá ser desativado depois pelo Master.</p>
       <div id="userEditorError" class="alert alert-error hidden"></div>
       <button class="btn btn-primary btn-block" type="submit" value="default">Salvar usuário</button>
+    </form>
+  </dialog>
+
+  <dialog id="promotionEditor" class="modal modal-wide">
+    <form id="promotionEditorForm" class="modal-card" novalidate>
+      <button class="modal-close dialog-close" type="button">×</button>
+      <span class="eyebrow">PROMOÇÃO</span><h2 id="promotionEditorTitle">Nova promoção</h2>
+      <input id="promotionId" type="hidden">
+      <label class="field"><span>Nome da promoção *</span><input id="promotionName" maxlength="100" required placeholder="Ex.: Terça da Pizza"></label>
+      <label class="field"><span>Descrição</span><textarea id="promotionDescription" rows="2" maxlength="240"></textarea></label>
+      <div class="form-grid">
+        <label class="field"><span>Tipo de desconto</span><select id="promotionDiscountType"><option value="percentage">Porcentagem (%)</option><option value="fixed">Valor fixo (R$)</option></select></label>
+        <label class="field"><span>Desconto</span><input id="promotionDiscountValue" type="number" min="0" step="0.01" required></label>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>Aplicar em</span><select id="promotionTargetType"><option value="all">Todo o cardápio</option><option value="category">Categoria</option><option value="product">Produto</option></select></label>
+        <label class="field" id="promotionTargetField"><span>Alvo</span><select id="promotionTargetId"></select></label>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>Início</span><input id="promotionStartsAt" type="datetime-local"></label>
+        <label class="field"><span>Fim</span><input id="promotionEndsAt" type="datetime-local"></label>
+      </div>
+      <label class="check-row"><input id="promotionActive" type="checkbox" checked><span>Promoção ativa</span></label>
+      <div id="promotionEditorError" class="alert alert-error hidden"></div>
+      <button class="btn btn-primary btn-block" type="submit">Salvar promoção</button>
+    </form>
+  </dialog>
+
+  <dialog id="couponEditor" class="modal modal-wide">
+    <form id="couponEditorForm" class="modal-card" novalidate>
+      <button class="modal-close dialog-close" type="button">×</button>
+      <span class="eyebrow">CUPOM</span><h2 id="couponEditorTitle">Novo cupom</h2>
+      <input id="couponId" type="hidden">
+      <div class="form-grid">
+        <label class="field"><span>Código *</span><input id="couponCode" maxlength="30" required placeholder="PIZZA10" autocapitalize="characters"></label>
+        <label class="field"><span>Descrição</span><input id="couponDescription" maxlength="120" placeholder="10% para clientes recorrentes"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>Tipo do desconto</span><select id="couponType"><option value="percentage">Porcentagem (%)</option><option value="fixed">Valor fixo (R$)</option></select></label>
+        <label class="field"><span>Valor do desconto</span><input id="couponValue" type="number" min="0" step="0.01" required></label>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>Pedido mínimo (R$)</span><input id="couponMinimumOrder" type="number" min="0" step="0.01" value="0"></label>
+        <label class="field"><span>Desconto máximo (R$)</span><input id="couponMaxDiscount" type="number" min="0" step="0.01" value="0"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>Mínimo de pedidos concluídos</span><input id="couponMinOrders" type="number" min="0" step="1" value="0"></label>
+        <label class="field"><span>Mínimo já gasto pelo cliente (R$)</span><input id="couponMinSpent" type="number" min="0" step="0.01" value="0"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>Início</span><input id="couponStartsAt" type="datetime-local"></label>
+        <label class="field"><span>Fim</span><input id="couponEndsAt" type="datetime-local"></label>
+      </div>
+      <label class="check-row"><input id="couponActive" type="checkbox" checked><span>Cupom ativo</span></label>
+      <div id="couponEditorError" class="alert alert-error hidden"></div>
+      <button class="btn btn-primary btn-block" type="submit">Salvar cupom</button>
+    </form>
+  </dialog>
+
+  <dialog id="roleEditor" class="modal modal-wide">
+    <form id="roleEditorForm" class="modal-card" novalidate>
+      <button class="modal-close dialog-close" type="button">×</button>
+      <span class="eyebrow">PERFIL DE ACESSO</span><h2 id="roleEditorTitle">Novo perfil</h2>
+      <input id="roleId" type="hidden">
+      <label class="field"><span>Nome do perfil *</span><input id="roleName" maxlength="60" required placeholder="Ex.: Caixa, Cozinha, Supervisor"></label>
+      <div id="rolePermissionsEditor" class="permission-grid"></div>
+      <div id="roleEditorError" class="alert alert-error hidden"></div>
+      <button class="btn btn-primary btn-block" type="submit">Salvar perfil</button>
+    </form>
+  </dialog>
+
+  <dialog id="cashCloseDialog" class="modal">
+    <form id="cashCloseForm" class="modal-card" novalidate>
+      <button class="modal-close dialog-close" type="button">×</button>
+      <span class="eyebrow">FECHAMENTO</span><h2>Fechar caixa</h2>
+      <label class="field"><span>Dinheiro contado no caixa (R$)</span><input id="cashClosingAmount" type="number" min="0" step="0.01" required></label>
+      <label class="field"><span>Observação</span><textarea id="cashClosingNote" rows="3"></textarea></label>
+      <div id="cashClosePreview" class="cash-close-preview"></div>
+      <div id="cashCloseError" class="alert alert-error hidden"></div>
+      <button class="btn btn-primary btn-block" type="submit">Confirmar fechamento</button>
     </form>
   </dialog>
 
