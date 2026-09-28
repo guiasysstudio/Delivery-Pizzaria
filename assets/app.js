@@ -674,6 +674,9 @@ $('#checkoutForm').addEventListener('submit',async e=>{
     const autoAccepted=settings.autoAcceptOrders===true;
     const profileName=customerProfile?.name||customer.displayName||'Cliente';
     const profilePhone=customerProfile?.phone||address?.phone||'';
+    if(!profilePhone){
+      return showCheckoutError('Informe um telefone de contato na sua conta ou no endereço.');
+    }
     const payload={
       orderNumber,
       customerId:customer.uid,
