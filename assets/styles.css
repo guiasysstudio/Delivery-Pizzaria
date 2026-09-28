@@ -31,3 +31,66 @@
   .account-body .public-header-actions .header-action{min-width:40px;justify-content:center}
   .account-body .public-header-actions .header-action-copy{display:none}
 }
+
+
+/* ===== Admin UX 3.0 ===== */
+.field-help{margin:-4px 0 12px;color:var(--muted);font-size:.78rem}
+.editor-section{margin:18px 0;padding:16px;border:1px solid var(--line);border-radius:15px;background:#fbfcfd}
+.editor-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}
+.editor-section-head h3{margin:0 0 3px}
+.editor-section-head p{margin:0}
+.repeat-editor{display:grid;gap:9px}
+.repeat-row{display:grid;grid-template-columns:minmax(0,1fr) 170px 40px;gap:10px;align-items:end;padding:10px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.repeat-row .field{margin:0}
+.repeat-remove{height:42px;width:40px;border:0;border-radius:10px;background:#fee2e2;color:#991b1b;font-size:1.35rem;font-weight:800}
+.repeat-empty{padding:14px;border:1px dashed #d1d5db;border-radius:11px;color:var(--muted);font-size:.82rem;text-align:center;background:#fff}
+.image-editor-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(240px,.75fr);gap:16px}
+.image-preview-shell{position:relative;min-height:260px;border:1px dashed #cbd5e1;border-radius:14px;background:#111827;overflow:hidden;display:grid;place-items:center}
+#productImageCanvas{width:100%;height:auto;display:block;cursor:grab;touch-action:none}
+#productImageCanvas:active{cursor:grabbing}
+.image-preview-empty{position:absolute;inset:0;display:grid;place-items:center;color:#cbd5e1;font-weight:800;pointer-events:none}
+.image-editor-controls{align-self:start}
+.danger-text{color:#b91c1c!important;font-weight:800}
+
+.order-row{transition:.16s}
+.order-row:hover{transform:translateY(-1px);box-shadow:0 7px 20px rgba(15,23,42,.05);z-index:1}
+
+@media(min-width:1320px){
+  .app-shell .shell{width:min(1360px,calc(100% - 40px))}
+  .app-shell .catalog-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .app-shell .public-content{grid-template-columns:minmax(0,1fr) 380px}
+}
+
+@media(max-width:720px){
+  .modal{width:calc(100% - 12px);max-height:96vh}
+  .modal-card{border-radius:16px;padding:18px;max-height:94vh}
+  .editor-section{padding:12px}
+  .editor-section-head{display:grid}
+  .editor-section-head .btn{width:100%}
+  .repeat-row{grid-template-columns:minmax(0,1fr) 110px 38px;gap:7px;padding:8px}
+  .repeat-row .field>span{font-size:.72rem}
+  .image-editor-grid{grid-template-columns:1fr}
+  .image-preview-shell{min-height:210px}
+
+  .app-shell .public-content{gap:14px}
+  .app-shell .catalog-grid{display:grid;grid-template-columns:1fr;gap:10px}
+  .app-shell .product-card{display:grid;grid-template-columns:112px minmax(0,1fr);min-height:112px;border-radius:14px;box-shadow:0 4px 16px rgba(17,24,39,.06)}
+  .app-shell .product-image-wrap{height:100%;min-height:112px}
+  .app-shell .product-image{height:100%;min-height:112px;aspect-ratio:auto;border-radius:0;object-fit:cover}
+  .app-shell .product-content{padding:11px 12px;gap:5px}
+  .app-shell .product-content h3{font-size:.98rem}
+  .app-shell .product-content p{font-size:.78rem;line-height:1.32;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .app-shell .product-foot{padding-top:3px}
+  .app-shell .price{font-size:1rem}
+  .app-shell .add-round{width:34px;height:34px;font-size:1.2rem}
+  .app-shell .favorite-card-button{width:31px;height:31px;font-size:1.1rem;right:6px;top:6px}
+  .app-shell .featured-tag{left:6px;bottom:6px;font-size:.58rem;padding:4px 6px}
+  .app-shell .catalog-section{margin-bottom:22px}
+
+  .admin-main{padding:12px}
+  .admin-topbar{margin-bottom:14px}
+  .admin-topbar h1{font-size:1.35rem}
+  .orders-list{gap:10px;background:transparent}
+  .order-row{border:1px solid var(--line)!important;border-radius:14px;background:#fff!important;padding:12px!important;grid-template-columns:72px minmax(0,1fr) auto!important}
+  .order-row .order-meta small{display:block;margin-top:3px;font-size:.75rem}
+}
