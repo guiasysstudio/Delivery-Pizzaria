@@ -114,6 +114,8 @@ O mesmo pacote continua disponível como artifact do GitHub Actions.
 
 Depois de abrir o Print Agent:
 
+> Na primeira conexão, Chrome/Edge pode solicitar permissão para acessar dispositivos/serviços locais. Autorize para que o site HTTPS possa conversar com o Print Agent em `127.0.0.1`.
+
 1. Entre no ADM.
 2. Abra **Impressão**.
 3. Clique **Procurar impressoras**.
