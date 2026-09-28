@@ -34,7 +34,13 @@ googleProvider.setCustomParameters({prompt:'select_account'});
 
 export function watchCustomer(callback){
   return onAuthStateChanged(auth,async user=>{
-    if(user) await ensureCustomerProfile(user);
+    if(user){
+      try{
+        await ensureCustomerProfile(user);
+      }catch(err){
+        console.error('Não foi possível sincronizar o perfil do cliente.',err);
+      }
+    }
     callback(user);
   });
 }
