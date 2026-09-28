@@ -14,11 +14,14 @@ jobs:
       - name: Validate JavaScript syntax
         run: |
           node --check assets/app.js
+          node --check assets/customer-auth.js
+          node --check account/account.js
           node --check admin/admin.js
           node --check admin/print.js
       - name: Check required files
         run: |
           test -f index.html
           test -f admin/index.html
+          test -f account/index.html
           test -f firebase-config.js
           test -f firestore.rules
