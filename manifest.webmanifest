@@ -1,0 +1,19 @@
+{
+  "name": "Delivery Pizzaria",
+  "short_name": "Pizzaria",
+  "description": "Peça pizzas, bebidas e acompanhe seus pedidos.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#b91c1c",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "./assets/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
