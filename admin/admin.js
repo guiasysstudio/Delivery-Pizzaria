@@ -253,7 +253,9 @@ async function initializeAdmin(){
 async function loadSettings(){
   const snap=await getDoc(doc(db,'settings','store'));
   settings=snap.exists()?{...defaults,...snap.data()}:defaults;
-  if(!snap.exists()) await setDoc(doc(db,'settings','store'),settings);
+  if(!snap.exists()&&['master','manager'].includes(currentProfile?.role)){
+    await setDoc(doc(db,'settings','store'),settings);
+  }
   $('#adminStoreName').textContent=settings.storeName||'Pizzaria';
 }
 
