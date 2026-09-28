@@ -282,15 +282,16 @@ internal sealed class LocalPrintServer : IDisposable
                 using var font = new Font("Consolas", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
                 using var bold = new Font("Consolas", 8.5f, FontStyle.Bold, GraphicsUnit.Point);
 
-                var y = e.MarginBounds.Top;
-                var lineHeight = font.GetHeight(e.Graphics) + 1;
+                var graphics = e.Graphics ?? throw new InvalidOperationException("Contexto de impressão indisponível.");
+                float y = e.MarginBounds.Top;
+                var lineHeight = font.GetHeight(graphics) + 1;
                 var maxWidth = e.MarginBounds.Width;
 
                 while (lineIndex < lines.Count)
                 {
                     var line = lines[lineIndex];
                     var currentFont = IsStrongLine(line) ? bold : font;
-                    var wrapped = WrapLine(e.Graphics, line, currentFont, maxWidth).ToList();
+                    var wrapped = WrapLine(graphics, line, currentFont, maxWidth).ToList();
 
                     foreach (var part in wrapped)
                     {
@@ -300,7 +301,7 @@ internal sealed class LocalPrintServer : IDisposable
                             return;
                         }
 
-                        e.Graphics.DrawString(part, currentFont, Brushes.Black, e.MarginBounds.Left, y);
+                        graphics.DrawString(part, currentFont, Brushes.Black, e.MarginBounds.Left, y);
                         y += lineHeight;
                     }
 
