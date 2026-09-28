@@ -106,6 +106,10 @@ watchCustomer(async user=>{
     $('#authDialog').close();
     if(action==='checkout') openCheckout();
     if(action==='address') openAddressSelector();
+    if(action.startsWith('favorite:')){
+      const productId=action.split(':')[1];
+      if(productId) toggleFavorite(productId);
+    }
   }
 });
 
@@ -330,7 +334,7 @@ $('#favoriteBtn').onclick=()=>currentProduct&&toggleFavorite(currentProduct.id);
 
 async function toggleFavorite(productId){
   if(!customer){
-    afterAuthAction=null;
+    afterAuthAction='favorite:'+productId;
     openAuth();
     return;
   }
