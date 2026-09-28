@@ -19,55 +19,97 @@ service cloud.firestore {
       return hasStaffProfile() && staff().active == true;
     }
 
+    function roleIs(role) {
+      return activeStaff() && staff().role == role;
+    }
+
     function isMaster() {
-      return activeStaff() && staff().role == 'master';
+      return roleIs('master');
     }
 
     function isManager() {
-      return activeStaff() &&
-        (staff().role == 'master' || staff().role == 'manager');
+      return activeStaff() && staff().role in ['master','manager'];
     }
 
     function isCashier() {
-      return activeStaff() &&
-        (staff().role == 'master' || staff().role == 'manager' || staff().role == 'cashier');
+      return roleIs('cashier');
     }
 
     function isKitchen() {
-      return activeStaff() &&
-        (staff().role == 'master' || staff().role == 'manager' || staff().role == 'kitchen');
+      return roleIs('kitchen');
     }
 
     function isOperator() {
-      return activeStaff() &&
-        (staff().role == 'master' || staff().role == 'manager' || staff().role == 'operator');
+      return roleIs('operator');
     }
 
     function isDelivery() {
-      return activeStaff() &&
-        (staff().role == 'master' || staff().role == 'manager' || staff().role == 'delivery');
+      return roleIs('delivery');
     }
 
     function canReadOrders() {
       return activeStaff() &&
-        (staff().role in ['master','manager','cashier','kitchen','operator','delivery']);
-    }
-
-    function canUpdateOrders() {
-      return canReadOrders();
+        staff().role in ['master','manager','cashier','kitchen','operator','delivery'];
     }
 
     function canManageCatalog() {
-      return isMaster() || isManager();
+      return activeStaff() && staff().role in ['master','manager'];
     }
 
     function isOwnCustomer(uid) {
       return signedIn() && request.auth.uid == uid;
     }
 
+    function orderStatusUpdateOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['status','updatedAt','acceptedAt','completedAt','cancelledAt']);
+    }
+
+    function knownOrderStatus() {
+      return request.resource.data.status in [
+        'pending','accepted','preparing','ready','out_for_delivery','completed','cancelled'
+      ];
+    }
+
+    function cashierTransition() {
+      return isCashier() && (
+        (resource.data.status == 'pending' &&
+          request.resource.data.status in ['accepted','cancelled']) ||
+        (resource.data.status == 'accepted' &&
+          request.resource.data.status == 'cancelled')
+      );
+    }
+
+    function kitchenTransition() {
+      return isKitchen() && (
+        (resource.data.status == 'accepted' &&
+          request.resource.data.status == 'preparing') ||
+        (resource.data.status == 'preparing' &&
+          request.resource.data.status == 'ready')
+      );
+    }
+
+    function deliveryTransition() {
+      return isDelivery() && (
+        (resource.data.status == 'ready' &&
+          request.resource.data.status == 'out_for_delivery') ||
+        (resource.data.status == 'out_for_delivery' &&
+          request.resource.data.status == 'completed')
+      );
+    }
+
+    function canUpdateOrder() {
+      return orderStatusUpdateOnly() && knownOrderStatus() && (
+        isMaster() ||
+        isManager() ||
+        isOperator() ||
+        cashierTransition() ||
+        kitchenTransition() ||
+        deliveryTransition()
+      );
+    }
+
     match /staffLogins/{username} {
-      // O e-mail interno não concede permissão por si só; ele serve apenas
-      // para traduzir o nome de usuário digitado no login.
       allow read: if true;
       allow create, update, delete: if isMaster();
     }
@@ -153,7 +195,7 @@ service cloud.firestore {
       allow read: if canReadOrders() ||
         (signedIn() && resource.data.customerId == request.auth.uid);
 
-      allow update: if canUpdateOrders();
+      allow update: if canUpdateOrder();
       allow delete: if isMaster();
     }
 
