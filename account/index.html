@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#b91c1c">
+  <title>Minha conta • Delivery Pizzaria</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body class="account-body">
+  <header class="public-header">
+    <div class="shell public-header-row">
+      <a class="public-brand" href="../"><span class="public-brand-mark">🍕</span><span><strong id="accountStoreName">Pizzaria</strong><small>Voltar ao cardápio</small></span></a>
+      <div class="public-header-actions">
+        <a class="header-action" href="../"><span>←</span><span class="header-action-copy"><small>Continuar comprando</small><strong>Cardápio</strong></span></a>
+        <button id="accountLogoutBtn" class="header-action" type="button"><span>↪</span><span class="header-action-copy"><small>Sessão</small><strong>Sair</strong></span></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell account-layout">
+    <aside class="account-sidebar panel">
+      <div class="account-profile-summary">
+        <div id="accountBigAvatar" class="account-big-avatar">👤</div>
+        <strong id="accountProfileName">Minha conta</strong>
+        <small id="accountProfileEmail" class="muted"></small>
+      </div>
+      <nav class="account-nav">
+        <button class="account-nav-item active" data-section="profile">👤 <span>Meus dados</span></button>
+        <button class="account-nav-item" data-section="addresses">📍 <span>Endereços</span></button>
+        <button class="account-nav-item" data-section="orders">🧾 <span>Meus pedidos</span></button>
+        <button class="account-nav-item" data-section="favorites">♥ <span>Favoritos</span></button>
+      </nav>
+    </aside>
+
+    <section class="account-main">
+      <div id="accountLoading" class="panel settings-card">Carregando sua conta...</div>
+      <div id="accountGuest" class="panel settings-card hidden">
+        <h2>Entre para acessar sua conta</h2>
+        <p class="muted">Sua sessão terminou. Volte ao cardápio e faça login novamente.</p>
+        <a href="../" class="btn btn-primary">Voltar ao cardápio</a>
+      </div>
+
+      <section id="account-section-profile" class="account-section hidden">
+        <div class="section-heading"><div><span class="eyebrow">MINHA CONTA</span><h1>Meus dados</h1></div></div>
+        <form id="profileForm" class="panel settings-card account-form">
+          <div class="form-grid">
+            <label class="field"><span>Nome completo</span><input id="profileName" required maxlength="100"></label>
+            <label class="field"><span>Telefone / WhatsApp</span><input id="profilePhone" required maxlength="30" inputmode="tel"></label>
+          </div>
+          <label class="field"><span>E-mail</span><input id="profileEmail" disabled></label>
+          <div class="section-actions"><button class="btn btn-primary" type="submit">Salvar alterações</button><span id="profileSaved" class="saved-note hidden">Salvo ✓</span></div>
+        </form>
+      </section>
+
+      <section id="account-section-addresses" class="account-section hidden">
+        <div class="section-heading"><div><span class="eyebrow">ENTREGAS</span><h1>Meus endereços</h1></div><button id="accountNewAddressBtn" class="btn btn-primary" type="button">+ Novo endereço</button></div>
+        <div id="accountAddressList" class="account-card-grid"></div>
+      </section>
+
+      <section id="account-section-orders" class="account-section hidden">
+        <div class="section-heading"><div><span class="eyebrow">HISTÓRICO</span><h1>Meus pedidos</h1></div></div>
+        <div id="accountOrdersList" class="account-orders-list"></div>
+      </section>
+
+      <section id="account-section-favorites" class="account-section hidden">
+        <div class="section-heading"><div><span class="eyebrow">SALVOS</span><h1>Favoritos</h1></div></div>
+        <div id="accountFavoritesList" class="catalog-grid"></div>
+      </section>
+    </section>
+  </main>
+
+  <dialog id="accountAddressEditor" class="modal modal-wide">
+    <form id="accountAddressForm" method="dialog" class="modal-card">
+      <button class="modal-close" value="cancel">×</button>
+      <span class="eyebrow">ENDEREÇO</span><h2 id="accountAddressTitle">Novo endereço</h2>
+      <input id="accountAddressId" type="hidden">
+      <div class="form-grid">
+        <label class="field"><span>Nome do endereço</span><input id="accAddressLabel" required maxlength="40" placeholder="Casa, Trabalho..."></label>
+        <label class="field"><span>CEP</span><input id="accAddressZip" maxlength="10" inputmode="numeric"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>Rua / Avenida</span><input id="accAddressStreet" required maxlength="160"></label>
+        <label class="field field-small"><span>Número</span><input id="accAddressNumber" required maxlength="20"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>Bairro</span><input id="accAddressNeighborhood" required maxlength="80"></label>
+        <label class="field"><span>Complemento</span><input id="accAddressComplement" maxlength="100"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>Cidade</span><input id="accAddressCity" required maxlength="80"></label>
+        <label class="field field-small"><span>UF</span><input id="accAddressState" required maxlength="2"></label>
+      </div>
+      <label class="field"><span>Ponto de referência</span><input id="accAddressReference" maxlength="140"></label>
+      <div class="form-grid">
+        <label class="field"><span>Recebedor</span><input id="accAddressRecipient" maxlength="100"></label>
+        <label class="field"><span>Telefone</span><input id="accAddressPhone" maxlength="30"></label>
+      </div>
+      <label class="check-row"><input id="accAddressDefault" type="checkbox"><span>Usar como endereço principal</span></label>
+      <div id="accountAddressError" class="alert alert-error hidden"></div>
+      <button class="btn btn-primary btn-block" type="submit" value="default">Salvar endereço</button>
+    </form>
+  </dialog>
+
+  <script type="module" src="./account.js"></script>
+</body>
+</html>
