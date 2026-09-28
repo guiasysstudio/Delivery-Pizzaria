@@ -303,6 +303,11 @@ function renderFavorites(){
   });
 }
 
+$('#switchAccountBtn').onclick=async()=>{
+  await logoutCustomer();
+  location.href='../?login=1';
+};
+
 $('#accountLogoutBtn').onclick=async()=>{
   await logoutCustomer();
   location.href='../';
