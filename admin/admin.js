@@ -90,18 +90,32 @@ onAuthStateChanged(auth,async user=>{
   }
   try{
     const username=(user.email||'').split('@')[0];
-    const profileSnap=await getDoc(doc(db,'users',user.uid));
-    if(profileSnap.exists()){
-      currentProfile={uid:user.uid,...profileSnap.data()};
-      if(currentProfile.active===false){
-        await signOut(auth);
-        throw new Error('disabled');
-      }
-    }else if((user.email||'').toLowerCase()==='master@delivery-pizzaria.local'){
+    if((user.email||'').toLowerCase()==='master@delivery-pizzaria.local'){
       currentProfile={uid:user.uid,username:'master',displayName:'Administrador Master',role:'master',active:true,bootstrap:true};
+      try{
+        const profileSnap=await getDoc(doc(db,'users',user.uid));
+        if(profileSnap.exists()){
+          currentProfile={uid:user.uid,...profileSnap.data(),bootstrap:false};
+          if(currentProfile.active===false){
+            await signOut(auth);
+            throw new Error('disabled');
+          }
+        }
+      }catch(profileError){
+        console.warn('Perfil Master ainda não registrado nas regras atuais.',profileError);
+      }
     }else{
-      await signOut(auth);
-      throw new Error('unauthorized');
+      const profileSnap=await getDoc(doc(db,'users',user.uid));
+      if(profileSnap.exists()){
+        currentProfile={uid:user.uid,...profileSnap.data()};
+        if(currentProfile.active===false){
+          await signOut(auth);
+          throw new Error('disabled');
+        }
+      }else{
+        await signOut(auth);
+        throw new Error('unauthorized');
+      }
     }
 
     $('#loginView').classList.add('hidden');
@@ -563,8 +577,13 @@ function esc(v){
 
 async function loadUsers(){
   if(!isMaster()) return;
-  const s=await getDocs(collection(db,'users'));
-  users=s.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(a.username||'').localeCompare(b.username||''));
+  try{
+    const s=await getDocs(collection(db,'users'));
+    users=s.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(a.username||'').localeCompare(b.username||''));
+  }catch(err){
+    console.warn('Coleção de usuários ainda não liberada pelas regras publicadas.',err);
+    users=[];
+  }
   if(!users.some(u=>u.uid===auth.currentUser?.uid) && currentProfile?.bootstrap){
     users.unshift({...currentProfile});
   }
