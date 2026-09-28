@@ -159,3 +159,9 @@
   .coupon-entry{grid-template-columns:1fr auto}
   .coupon-entry #removeCouponBtn{grid-column:1/-1;justify-self:start}
 }
+
+
+.simple-repeat-editor{display:grid;gap:8px}
+.simple-repeat-row{display:grid;grid-template-columns:minmax(0,1fr) 40px;gap:8px;align-items:center}
+.simple-repeat-row>input{width:100%;border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fff;outline:none}
+.simple-repeat-row>input:focus{border-color:#f87171;box-shadow:0 0 0 3px #fee2e2}
