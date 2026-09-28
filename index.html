@@ -5,87 +5,238 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#b91c1c" />
   <title>Delivery Pizzaria</title>
-  <meta name="description" content="Cardápio online e pedidos para delivery de pizzaria." />
+  <meta name="description" content="Peça pizzas, bebidas e muito mais pelo delivery." />
   <link rel="stylesheet" href="./assets/styles.css" />
 </head>
-<body class="public-body">
-  <header class="hero">
-    <div class="shell hero-inner">
-      <div>
-        <span class="eyebrow">DELIVERY</span>
-        <h1 id="storeName">Pizzaria</h1>
-        <p id="storeSubtitle">Pizza quentinha, do forno para sua casa.</p>
+<body class="public-body app-shell">
+  <header class="public-header">
+    <div class="shell public-header-row">
+      <a class="public-brand" href="./" aria-label="Início">
+        <span class="public-brand-mark">🍕</span>
+        <span>
+          <strong id="headerStoreName">Pizzaria</strong>
+          <small id="headerStoreStatus">Carregando...</small>
+        </span>
+      </a>
+
+      <button id="addressSelectorBtn" class="location-button" type="button">
+        <span class="location-icon">📍</span>
+        <span class="location-copy">
+          <small>Entregar em</small>
+          <strong id="activeAddressText">Informe seu endereço</strong>
+        </span>
+        <span>⌄</span>
+      </button>
+
+      <div class="public-header-actions">
+        <button id="accountBtn" class="header-action" type="button">
+          <span id="accountAvatar" class="avatar-circle">👤</span>
+          <span class="header-action-copy">
+            <small id="accountHello">Olá!</small>
+            <strong id="accountLabel">Entrar ou cadastrar</strong>
+          </span>
+        </button>
+        <button id="desktopCartBtn" class="header-action cart-head-button" type="button">
+          <span>🛒</span>
+          <span class="header-action-copy">
+            <small>Carrinho</small>
+            <strong><span id="headerCartCount">0</span> item(ns)</strong>
+          </span>
+        </button>
       </div>
-      <div class="store-status" id="storeStatus" aria-live="polite">Carregando horário...</div>
     </div>
   </header>
 
-  <main class="shell layout-public">
-    <section>
-      <div class="toolbar">
-        <div class="search-wrap"><input id="searchInput" type="search" placeholder="Buscar pizza, bebida..." autocomplete="off" /></div>
-        <div id="categoryChips" class="chips"></div>
+  <main>
+    <section class="public-hero">
+      <div class="shell public-hero-grid">
+        <div class="public-hero-copy">
+          <span class="hero-kicker">PIZZA DO JEITO QUE VOCÊ GOSTA</span>
+          <h1 id="storeName">Delivery Pizzaria</h1>
+          <p id="storeSubtitle">Pizza quentinha, ingredientes selecionados e pedido simples do começo ao fim.</p>
+          <div class="hero-status-row">
+            <span id="storeStatus" class="store-open-pill">Carregando horário...</span>
+            <span id="minimumOrderText" class="hero-note"></span>
+          </div>
+        </div>
+        <div class="hero-pizza-art" aria-hidden="true">
+          <div class="hero-pizza">🍕</div>
+          <div class="hero-badge">feito na hora</div>
+        </div>
       </div>
-      <div id="catalog" class="catalog-grid"></div>
-      <div id="catalogEmpty" class="empty-state hidden">Nenhum produto encontrado.</div>
     </section>
 
-    <aside class="cart-panel" id="cartPanel">
-      <div class="cart-head">
-        <div><span class="eyebrow">SEU PEDIDO</span><h2>Carrinho</h2></div>
-        <span id="cartCount" class="badge">0</span>
+    <section class="shell public-content">
+      <div class="catalog-area">
+        <div class="catalog-toolbar">
+          <div class="search-wrap public-search">
+            <span>⌕</span>
+            <input id="searchInput" type="search" placeholder="Buscar pizza, bebida, adicional..." autocomplete="off" />
+          </div>
+          <div id="categoryChips" class="chips category-scroll"></div>
+        </div>
+
+        <section id="featuredSection" class="catalog-section hidden">
+          <div class="section-heading">
+            <div><span class="eyebrow">DESTAQUES</span><h2>Mais pedidos</h2></div>
+          </div>
+          <div id="featuredCatalog" class="catalog-grid"></div>
+        </section>
+
+        <section class="catalog-section">
+          <div class="section-heading">
+            <div><span class="eyebrow">CARDÁPIO</span><h2 id="catalogTitle">Todos os produtos</h2></div>
+          </div>
+          <div id="catalog" class="catalog-grid"></div>
+          <div id="catalogEmpty" class="empty-state hidden">Nenhum produto encontrado.</div>
+        </section>
       </div>
-      <div id="cartItems" class="cart-items"></div>
-      <div class="cart-summary">
-        <div><span>Subtotal</span><strong id="subtotal">R$ 0,00</strong></div>
-        <div><span>Entrega</span><strong id="deliveryFee">R$ 0,00</strong></div>
-        <div class="cart-total"><span>Total</span><strong id="total">R$ 0,00</strong></div>
-      </div>
-      <button id="checkoutBtn" class="btn btn-primary btn-block" disabled>Finalizar pedido</button>
-    </aside>
+
+      <aside class="cart-panel cart-panel-desktop" id="cartPanel">
+        <div class="cart-head">
+          <div><span class="eyebrow">SEU PEDIDO</span><h2>Carrinho</h2></div>
+          <span id="cartCount" class="badge">0</span>
+        </div>
+        <div id="cartItems" class="cart-items"></div>
+        <div class="cart-summary">
+          <div><span>Subtotal</span><strong id="subtotal">R$ 0,00</strong></div>
+          <div><span>Entrega</span><strong id="deliveryFee">R$ 0,00</strong></div>
+          <div class="cart-total"><span>Total</span><strong id="total">R$ 0,00</strong></div>
+        </div>
+        <button id="checkoutBtn" class="btn btn-primary btn-block" disabled>Continuar</button>
+      </aside>
+    </section>
   </main>
 
   <button class="floating-cart" id="floatingCart" aria-label="Abrir carrinho">🛒 <span id="floatingCount">0</span></button>
 
-  <dialog id="productDialog" class="modal">
-    <form method="dialog" class="modal-card" id="productForm">
+  <dialog id="productDialog" class="modal modal-wide">
+    <form method="dialog" class="modal-card product-modal-card" id="productForm">
       <button class="modal-close" value="cancel" aria-label="Fechar">×</button>
-      <img id="modalImage" class="modal-product-image" alt="" />
-      <h2 id="modalName"></h2><p id="modalDescription" class="muted"></p>
-      <div id="sizeOptions"></div><div id="extraOptions"></div>
-      <label class="field"><span>Observação do item</span><textarea id="itemNote" rows="2" placeholder="Ex.: sem cebola, massa bem passada..."></textarea></label>
-      <div class="qty-row"><button type="button" class="qty-btn" id="qtyMinus">−</button><strong id="qtyValue">1</strong><button type="button" class="qty-btn" id="qtyPlus">+</button><strong id="modalPrice" class="price-push">R$ 0,00</strong></div>
-      <button type="submit" class="btn btn-primary btn-block" value="default">Adicionar ao carrinho</button>
+      <div class="product-modal-grid">
+        <img id="modalImage" class="modal-product-image" alt="" />
+        <div>
+          <div class="product-modal-title-row">
+            <div><span id="modalFeatured" class="eyebrow hidden">DESTAQUE</span><h2 id="modalName"></h2></div>
+            <button type="button" id="favoriteBtn" class="favorite-button" title="Favoritar">♡</button>
+          </div>
+          <p id="modalDescription" class="muted"></p>
+          <div id="flavorOptions"></div>
+          <div id="sizeOptions"></div>
+          <div id="extraOptions"></div>
+          <label class="field"><span>Observação do item</span><textarea id="itemNote" rows="2" maxlength="200" placeholder="Ex.: sem cebola, bem assada..."></textarea></label>
+          <div class="qty-row"><button type="button" class="qty-btn" id="qtyMinus">−</button><strong id="qtyValue">1</strong><button type="button" class="qty-btn" id="qtyPlus">+</button><strong id="modalPrice" class="price-push">R$ 0,00</strong></div>
+          <button type="submit" class="btn btn-primary btn-block" value="default">Adicionar ao carrinho</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="authDialog" class="modal">
+    <div class="modal-card auth-card">
+      <button class="modal-close" id="authCloseBtn" type="button">×</button>
+      <span class="eyebrow">SUA CONTA</span>
+      <h2 id="authTitle">Entrar</h2>
+      <p id="authSubtitle" class="muted">Entre para usar seus endereços e acompanhar pedidos.</p>
+      <button id="googleLoginBtn" class="btn btn-google btn-block" type="button"><span class="google-g">G</span> Continuar com Google</button>
+      <div class="auth-divider"><span>ou</span></div>
+      <form id="loginCustomerForm">
+        <label class="field"><span>E-mail</span><input id="customerLoginEmail" type="email" required autocomplete="email"></label>
+        <label class="field"><span>Senha</span><input id="customerLoginPassword" type="password" required autocomplete="current-password"></label>
+        <div id="customerAuthError" class="alert alert-error hidden"></div>
+        <button class="btn btn-primary btn-block" type="submit">Entrar</button>
+        <button id="forgotPasswordBtn" class="link-button" type="button">Esqueci minha senha</button>
+        <p class="auth-switch">Ainda não tem conta? <button id="showRegisterBtn" class="link-button" type="button">Criar conta</button></p>
+      </form>
+      <form id="registerCustomerForm" class="hidden">
+        <label class="field"><span>Nome completo</span><input id="registerName" required maxlength="100"></label>
+        <label class="field"><span>Telefone</span><input id="registerPhone" required maxlength="30" inputmode="tel"></label>
+        <label class="field"><span>E-mail</span><input id="registerEmail" type="email" required autocomplete="email"></label>
+        <label class="field"><span>Senha</span><input id="registerPassword" type="password" minlength="6" required autocomplete="new-password"></label>
+        <div id="registerAuthError" class="alert alert-error hidden"></div>
+        <button class="btn btn-primary btn-block" type="submit">Criar minha conta</button>
+        <p class="auth-switch">Já possui conta? <button id="showLoginBtn" class="link-button" type="button">Entrar</button></p>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog id="addressSelectorDialog" class="modal">
+    <div class="modal-card">
+      <button class="modal-close" id="addressSelectorClose" type="button">×</button>
+      <span class="eyebrow">ENDEREÇO</span><h2>Onde devemos entregar?</h2>
+      <div id="addressSelectorGuest" class="hidden">
+        <p class="muted">Entre na sua conta para escolher entre seus endereços cadastrados.</p>
+        <button id="addressLoginBtn" class="btn btn-primary btn-block" type="button">Entrar ou criar conta</button>
+      </div>
+      <div id="addressSelectorUser" class="hidden">
+        <div id="addressSelectorList" class="address-list"></div>
+        <button id="newAddressFromSelector" class="btn btn-secondary btn-block" type="button">+ Cadastrar novo endereço</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="addressEditorDialog" class="modal modal-wide">
+    <form id="addressEditorForm" method="dialog" class="modal-card">
+      <button class="modal-close" value="cancel">×</button>
+      <span class="eyebrow">ENDEREÇO</span><h2 id="addressEditorTitle">Novo endereço</h2>
+      <input id="addressId" type="hidden">
+      <div class="form-grid">
+        <label class="field"><span>Nome do endereço</span><input id="addressLabel" maxlength="40" placeholder="Casa, Trabalho..." required></label>
+        <label class="field"><span>CEP</span><input id="addressZip" maxlength="10" inputmode="numeric" placeholder="00000-000"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field field-grow"><span>Rua / Avenida *</span><input id="addressStreet" maxlength="160" required></label>
+        <label class="field field-small"><span>Número *</span><input id="addressNumber" maxlength="20" required></label>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>Bairro *</span><input id="addressNeighborhood" maxlength="80" required></label>
+        <label class="field"><span>Complemento</span><input id="addressComplement" maxlength="100"></label>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>Cidade *</span><input id="addressCity" maxlength="80" required></label>
+        <label class="field field-small"><span>UF *</span><input id="addressState" maxlength="2" required></label>
+      </div>
+      <label class="field"><span>Ponto de referência</span><input id="addressReference" maxlength="140"></label>
+      <div class="form-grid">
+        <label class="field"><span>Recebedor</span><input id="addressRecipient" maxlength="100"></label>
+        <label class="field"><span>Telefone no endereço</span><input id="addressPhone" maxlength="30" inputmode="tel"></label>
+      </div>
+      <label class="check-row"><input id="addressDefault" type="checkbox"><span>Usar como endereço principal</span></label>
+      <div id="addressEditorError" class="alert alert-error hidden"></div>
+      <button class="btn btn-primary btn-block" type="submit" value="default">Salvar endereço</button>
     </form>
   </dialog>
 
   <dialog id="checkoutDialog" class="modal modal-wide">
-    <form method="dialog" class="modal-card" id="checkoutForm">
+    <form method="dialog" class="modal-card checkout-card" id="checkoutForm">
       <button class="modal-close" value="cancel" aria-label="Fechar">×</button>
-      <span class="eyebrow">FINALIZAÇÃO</span><h2>Dados do pedido</h2>
-      <div class="form-grid">
-        <label class="field"><span>Nome completo *</span><input id="customerName" required maxlength="100" /></label>
-        <label class="field"><span>Telefone / WhatsApp *</span><input id="customerPhone" required maxlength="30" inputmode="tel" /></label>
-      </div>
-      <div class="segmented" id="fulfillmentControl">
-        <label><input type="radio" name="fulfillment" value="delivery" checked /><span>Entrega</span></label>
-        <label><input type="radio" name="fulfillment" value="pickup" /><span>Retirada</span></label>
-      </div>
-      <div id="addressFields">
-        <div class="form-grid">
-          <label class="field field-grow"><span>Endereço *</span><input id="customerAddress" maxlength="180" placeholder="Rua, avenida..." /></label>
-          <label class="field field-small"><span>Número *</span><input id="customerNumber" maxlength="20" /></label>
+      <span class="eyebrow">FINALIZAR PEDIDO</span><h2>Revise antes de enviar</h2>
+
+      <section class="checkout-section">
+        <div class="checkout-section-head"><h3>Entrega</h3><button id="changeCheckoutAddressBtn" class="link-button" type="button">Trocar</button></div>
+        <div class="segmented" id="fulfillmentControl">
+          <label><input type="radio" name="fulfillment" value="delivery" checked><span>Entrega</span></label>
+          <label id="pickupOption"><input type="radio" name="fulfillment" value="pickup"><span>Retirada</span></label>
         </div>
-        <div class="form-grid">
-          <label class="field"><span>Bairro *</span><input id="customerNeighborhood" maxlength="80" /></label>
-          <label class="field"><span>Complemento</span><input id="customerComplement" maxlength="100" /></label>
+        <div id="checkoutAddressCard" class="selected-address-card"></div>
+      </section>
+
+      <section class="checkout-section">
+        <h3>Pagamento na entrega/retirada</h3>
+        <p class="muted small-copy">Nenhum pagamento é feito pelo site.</p>
+        <div id="paymentOptions" class="payment-options"></div>
+        <div id="cashChangeBlock" class="cash-change-box hidden">
+          <label class="check-row"><input id="needsChange" type="checkbox"><span>Preciso de troco</span></label>
+          <label class="field hidden" id="changeField"><span>Troco para quanto?</span><input id="changeFor" inputmode="decimal" placeholder="Ex.: 50,00"></label>
+          <div id="changePreview" class="change-preview hidden"></div>
         </div>
-        <label class="field"><span>Ponto de referência</span><input id="customerReference" maxlength="140" /></label>
-      </div>
-      <label class="field"><span>Forma de pagamento *</span><select id="paymentMethod" required></select></label>
-      <label class="field hidden" id="changeField"><span>Troco para quanto?</span><input id="changeFor" inputmode="decimal" placeholder="Ex.: 100,00" /></label>
-      <label class="field"><span>Observações gerais</span><textarea id="orderNote" rows="3" maxlength="500" placeholder="Informações para a pizzaria..."></textarea></label>
-      <div class="checkout-total"><span>Total estimado</span><strong id="checkoutTotal">R$ 0,00</strong></div>
+      </section>
+
+      <section class="checkout-section">
+        <label class="field"><span>Observações gerais</span><textarea id="orderNote" rows="3" maxlength="500" placeholder="Ex.: tocar campainha, entregar na portaria..."></textarea></label>
+      </section>
+
+      <div class="checkout-total"><span>Total</span><strong id="checkoutTotal">R$ 0,00</strong></div>
       <div id="checkoutError" class="alert alert-error hidden"></div>
       <button id="sendOrderBtn" type="submit" class="btn btn-primary btn-block" value="default">Enviar pedido</button>
     </form>
@@ -93,14 +244,23 @@
 
   <dialog id="successDialog" class="modal">
     <div class="modal-card success-card">
-      <div class="success-icon">✓</div><h2>Pedido recebido!</h2>
+      <div class="success-icon">✓</div><h2>Pedido enviado!</h2>
       <p>Seu pedido é o <strong id="successOrderNumber">#0000</strong>.</p>
-      <p class="muted">A pizzaria recebeu sua comanda e dará andamento ao pedido.</p>
-      <button class="btn btn-primary btn-block" id="successClose">Fechar</button>
+      <p id="successStatusText" class="muted">A pizzaria recebeu seu pedido.</p>
+      <div class="success-actions">
+        <a class="btn btn-secondary btn-block" href="./account/#orders">Acompanhar pedido</a>
+        <button class="btn btn-primary btn-block" id="successClose">Continuar no cardápio</button>
+      </div>
     </div>
   </dialog>
 
-  <footer class="footer"><div class="shell"><span id="footerStore">Delivery Pizzaria</span><span> • </span><a href="./admin/">Área administrativa</a></div></footer>
+  <footer class="footer">
+    <div class="shell footer-grid">
+      <div><strong id="footerStore">Delivery Pizzaria</strong><p id="footerAddress" class="muted"></p></div>
+      <div class="footer-right"><span>Pedido seguro • Atendimento pela pizzaria</span></div>
+    </div>
+  </footer>
+
   <script type="module" src="./assets/app.js"></script>
 </body>
 </html>
