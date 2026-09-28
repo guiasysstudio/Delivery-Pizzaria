@@ -288,6 +288,7 @@ function listenOrders(){
 
     renderOrders();
     renderStats();
+    if(customers.length) renderCustomers();
 
     if(!first&&incoming.length){
       for(const o of incoming){
@@ -725,6 +726,8 @@ function editProduct(id){
   $('#productImage').value=p?.image||'';
   $('#productSizes').value=(p?.sizes||[]).map(x=>`${x.name}|${x.price}`).join('\n');
   $('#productExtras').value=(p?.extras||[]).map(x=>`${x.name}|${x.price}`).join('\n');
+  $('#productIsPizza').checked=!!p?.isPizza;
+  $('#productHalfHalf').checked=p?.allowHalfHalf!==false;
   $('#productActive').checked=p?.active!==false;
   $('#productFeatured').checked=!!p?.featured;
   $('#productEditor').showModal();
@@ -742,6 +745,8 @@ $('#productEditorForm').onsubmit=async e=>{
     image:$('#productImage').value.trim(),
     sizes:parsePriceLines($('#productSizes').value),
     extras:parsePriceLines($('#productExtras').value),
+    isPizza:$('#productIsPizza').checked,
+    allowHalfHalf:$('#productIsPizza').checked&&$('#productHalfHalf').checked,
     active:$('#productActive').checked,
     featured:$('#productFeatured').checked,
     updatedAt:serverTimestamp()
@@ -827,8 +832,8 @@ function renderSettings(){
   $('#setDeliveryFee').value=settings.deliveryFee??0;
   $('#setMinimumOrder').value=settings.minimumOrder??0;
   $('#setAllowPickup').checked=settings.allowPickup!==false;
+  $('#setAutoAccept').checked=!!settings.autoAcceptOrders;
   $('#setPayments').value=(settings.payments||[]).join('\n');
-  $('#setAutoPrint').checked=!!settings.autoPrint;
 
   for(let i=0;i<7;i++){
     const d=settings.schedule?.[i]||settings.schedule?.[String(i)]||defaults.schedule[i];
@@ -859,8 +864,8 @@ $('#settingsForm').onsubmit=async e=>{
     deliveryFee:Number($('#setDeliveryFee').value||0),
     minimumOrder:Number($('#setMinimumOrder').value||0),
     allowPickup:$('#setAllowPickup').checked,
+    autoAcceptOrders:$('#setAutoAccept').checked,
     payments:$('#setPayments').value.split('\n').map(x=>x.trim()).filter(Boolean),
-    autoPrint:$('#setAutoPrint').checked,
     schedule,
     timezone:'America/Porto_Velho',
     updatedAt:serverTimestamp()
@@ -894,7 +899,7 @@ $('#seedBtn').onclick=async()=>{
       image:'assets/products/placeholder.svg',
       sizes:[{name:'Pequena',price:35},{name:'Média',price:45},{name:'Grande',price:55}],
       extras:[{name:'Borda de catupiry',price:8},{name:'Bacon extra',price:6}],
-      price:0,order:1,active:true,featured:true
+      price:0,order:1,active:true,featured:true,isPizza:true,allowHalfHalf:true
     },
     {
       name:'Pizza Frango com Catupiry',
@@ -903,7 +908,7 @@ $('#seedBtn').onclick=async()=>{
       image:'assets/products/placeholder.svg',
       sizes:[{name:'Pequena',price:38},{name:'Média',price:48},{name:'Grande',price:58}],
       extras:[{name:'Borda de catupiry',price:8}],
-      price:0,order:2,active:true
+      price:0,order:2,active:true,isPizza:true,allowHalfHalf:true
     },
     {
       name:'Coca-Cola 2L',
@@ -941,6 +946,46 @@ function formatDate(ts){
 function esc(v){
   return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 }
+
+
+async function loadCustomers(){
+  try{
+    const s=await getDocs(collection(db,'customers'));
+    customers=s.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+    renderCustomers();
+  }catch(err){
+    console.warn('Não foi possível carregar clientes.',err);
+    customers=[];
+    renderCustomers();
+  }
+}
+
+function renderCustomers(){
+  if(!$('#customersTable')) return;
+
+  const term=($('#customerSearch')?.value||'').trim().toLowerCase();
+  const list=customers.filter(customer=>{
+    const text=`${customer.name||''} ${customer.email||''} ${customer.phone||''}`.toLowerCase();
+    return !term||text.includes(term);
+  });
+
+  $('#customersTable').innerHTML=list.length?list.map(customer=>{
+    const customerOrders=orders.filter(o=>o.customerId===customer.uid);
+    const completed=customerOrders.filter(o=>o.status==='completed');
+    const spent=completed.reduce((sum,o)=>sum+Number(o.total||0),0);
+
+    return `<div class="data-row">
+      <div class="data-main">
+        <strong>${esc(customer.name||'Cliente')}</strong>
+        <small>${esc(customer.phone||'Sem telefone')} • ${esc(customer.email||'Sem e-mail')}</small>
+      </div>
+      <span>${customerOrders.length} pedido(s)</span>
+      <div><strong>${money(spent)}</strong><small class="muted" style="display:block">concluídos</small></div>
+    </div>`;
+  }).join(''):'<div class="empty-state">Nenhum cliente encontrado.</div>';
+}
+
+$('#customerSearch')?.addEventListener('input',renderCustomers);
 
 
 async function loadUsers(){
@@ -994,7 +1039,7 @@ function editUser(uid){
   $('#userPassword').value='';
   $('#userPassword').required=!u;
   $('#userPasswordField').classList.toggle('hidden',!!u);
-  $('#userRole').value=u?.role||'operator';
+  $('#userRole').value=u?.role||'cashier';
   $('#userRole').disabled=u?.uid===auth.currentUser?.uid;
   $('#userActive').checked=u?.active!==false;
   $('#userActive').disabled=u?.uid===auth.currentUser?.uid;
