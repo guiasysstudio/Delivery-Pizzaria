@@ -696,49 +696,54 @@ $('#checkoutForm').addEventListener('submit',async e=>{
   const btn=$('#sendOrderBtn');
   btn.disabled=true;btn.textContent='Enviando pedido...';
   try{
-    let orderNumber=0;
-    await runTransaction(db,async tx=>{
-      const ref=doc(db,'counters','orders');
-      const snap=await tx.get(ref);
-      orderNumber=(snap.exists()?Number(snap.data().value||0):0)+1;
-      tx.set(ref,{value:orderNumber,updatedAt:serverTimestamp()},{merge:true});
-    });
-
     const autoAccepted=settings.autoAcceptOrders===true;
     const profileName=customerProfile?.name||customer.displayName||'Cliente';
     const profilePhone=customerProfile?.phone||address?.phone||'';
+
     if(!profilePhone){
       return showCheckoutError('Informe um telefone de contato na sua conta ou no endereço.');
     }
-    const payload={
-      orderNumber,
-      customerId:customer.uid,
-      status:autoAccepted?'accepted':'pending',
-      autoAccepted,
-      createdAt:serverTimestamp(),
-      acceptedAt:autoAccepted?serverTimestamp():null,
-      customer:{
-        name:profileName,
-        email:customer.email||'',
-        phone:profilePhone
-      },
-      fulfillment:type,
-      address:type==='delivery'?{
-        id:address.id,label:address.label||'',recipient:address.recipient||profileName,phone:address.phone||profilePhone,
-        zip:address.zip||'',street:address.street||'',number:address.number||'',complement:address.complement||'',
-        neighborhood:address.neighborhood||'',city:address.city||'',state:address.state||'',reference:address.reference||''
-      }:null,
-      payment:{
-        method:selectedPayment,
-        needsChange:changeFor>0,
-        changeFor,
-        changeAmount
-      },
-      note:$('#orderNote').value.trim(),
-      items:cart.map(({lineId,...x})=>x),
-      subtotal,deliveryFee:fee,total
-    };
-    await addDoc(collection(db,'orders'),payload);
+
+    let orderNumber=0;
+    const orderRef=doc(collection(db,'orders'));
+    const counterRef=doc(db,'counters','orders');
+
+    await runTransaction(db,async tx=>{
+      const snap=await tx.get(counterRef);
+      orderNumber=(snap.exists()?Number(snap.data().value||0):0)+1;
+
+      const payload={
+        orderNumber,
+        customerId:customer.uid,
+        status:autoAccepted?'accepted':'pending',
+        autoAccepted,
+        createdAt:serverTimestamp(),
+        acceptedAt:autoAccepted?serverTimestamp():null,
+        customer:{
+          name:profileName,
+          email:customer.email||'',
+          phone:profilePhone
+        },
+        fulfillment:type,
+        address:type==='delivery'?{
+          id:address.id,label:address.label||'',recipient:address.recipient||profileName,phone:address.phone||profilePhone,
+          zip:address.zip||'',street:address.street||'',number:address.number||'',complement:address.complement||'',
+          neighborhood:address.neighborhood||'',city:address.city||'',state:address.state||'',reference:address.reference||''
+        }:null,
+        payment:{
+          method:selectedPayment,
+          needsChange:changeFor>0,
+          changeFor,
+          changeAmount
+        },
+        note:$('#orderNote').value.trim(),
+        items:cart.map(({lineId,...x})=>x),
+        subtotal,deliveryFee:fee,total
+      };
+
+      tx.set(counterRef,{value:orderNumber,updatedAt:serverTimestamp()},{merge:true});
+      tx.set(orderRef,payload);
+    });
     cart=[];saveCart();
     $('#checkoutDialog').close();
     $('#successOrderNumber').textContent='#'+String(orderNumber).padStart(4,'0');
