@@ -501,7 +501,7 @@ function openOrder(id){
 
     <h3>Andamento do pedido</h3>
     <div class="status-actions">
-      ${targets.map(k=>`<button class="btn ${k===o.status?'btn-primary':'btn-secondary'} status-change" data-status="${k}">${statusLabels[k]||k}</button>`).join('')}
+      ${targets.map(k=>`<button class="btn ${k===o.status?'btn-primary':'btn-secondary'} status-change" data-status="${k}" ${k===o.status?'disabled':''}>${statusLabels[k]||k}</button>`).join('')}
     </div>
 
     <div class="section-actions" style="margin-top:16px">
@@ -510,6 +510,7 @@ function openOrder(id){
   `;
 
   async function changeStatus(status){
+    if(status===o.status) return;
     const patch={status,updatedAt:serverTimestamp()};
     if(status==='accepted') patch.acceptedAt=serverTimestamp();
     if(status==='completed') patch.completedAt=serverTimestamp();
