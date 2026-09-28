@@ -1,4 +1,5 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
@@ -10,33 +11,65 @@ service cloud.firestore {
         request.auth.token.email == 'master@delivery-pizzaria.local';
     }
 
-    function hasProfile() {
+    function hasStaffProfile() {
       return signedIn() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    function profile() {
+    function staff() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
     function activeStaff() {
       return bootstrapMaster() ||
-        (hasProfile() && profile().active == true);
+        (hasStaffProfile() && staff().active == true);
     }
 
     function isMaster() {
       return bootstrapMaster() ||
-        (activeStaff() && profile().role == 'master');
+        (activeStaff() && staff().role == 'master');
     }
 
     function isManager() {
       return activeStaff() &&
-        (isMaster() || profile().role == 'manager');
+        (isMaster() || staff().role == 'manager');
+    }
+
+    function isCashier() {
+      return activeStaff() &&
+        (isManager() || staff().role == 'cashier');
+    }
+
+    function isKitchen() {
+      return activeStaff() &&
+        (isManager() || staff().role == 'kitchen');
     }
 
     function isOperator() {
       return activeStaff() &&
-        (isManager() || profile().role == 'operator');
+        (isManager() || staff().role == 'operator');
+    }
+
+    function isDelivery() {
+      return activeStaff() &&
+        (isManager() || staff().role == 'delivery');
+    }
+
+    function canReadOrders() {
+      return activeStaff() &&
+        (isMaster() || isManager() || isCashier() || isKitchen() || isOperator() || isDelivery());
+    }
+
+    function canUpdateOrders() {
+      return canReadOrders();
+    }
+
+    function canManageCatalog() {
+      return isMaster() || isManager();
+    }
+
+    function isOwnCustomer(uid) {
+      return signedIn() && request.auth.uid == uid;
     }
 
     match /users/{uid} {
@@ -45,43 +78,69 @@ service cloud.firestore {
       allow create, update, delete: if isMaster();
     }
 
+    match /customers/{uid} {
+      allow create: if isOwnCustomer(uid);
+      allow read: if isOwnCustomer(uid) || isMaster() || isManager() || isCashier();
+      allow update: if isOwnCustomer(uid) || isMaster() || isManager();
+      allow delete: if isMaster();
+
+      match /addresses/{addressId} {
+        allow read, create, update, delete: if isOwnCustomer(uid);
+        allow read: if isMaster() || isManager() || isCashier();
+      }
+
+      match /favorites/{productId} {
+        allow read, create, update, delete: if isOwnCustomer(uid);
+      }
+    }
+
     match /settings/{document=**} {
       allow read: if true;
-      allow write: if isManager();
+      allow write: if isMaster() || isManager();
     }
 
     match /categories/{categoryId} {
       allow read: if true;
-      allow write: if isManager();
+      allow write: if canManageCatalog();
     }
 
     match /products/{productId} {
       allow read: if true;
-      allow write: if isManager();
+      allow write: if canManageCatalog();
     }
 
     match /counters/orders {
-      allow read: if true;
-      allow create: if request.resource.data.value == 1;
-      allow update: if request.resource.data.value == resource.data.value + 1;
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.value == 1;
+      allow update: if signedIn() &&
+        request.resource.data.value == resource.data.value + 1;
       allow delete: if isMaster();
     }
 
     match /orders/{orderId} {
-      allow create: if
+      allow create: if signedIn() &&
+        request.resource.data.customerId == request.auth.uid &&
         request.resource.data.orderNumber is int &&
         request.resource.data.orderNumber > 0 &&
-        request.resource.data.status == 'pending' &&
+        (
+          request.resource.data.status == 'pending' ||
+          (
+            request.resource.data.status == 'accepted' &&
+            get(/databases/$(database)/documents/settings/store).data.autoAcceptOrders == true
+          )
+        ) &&
         request.resource.data.customer.name is string &&
         request.resource.data.customer.name.size() > 0 &&
-        request.resource.data.customer.phone is string &&
-        request.resource.data.customer.phone.size() > 0 &&
         request.resource.data.items is list &&
         request.resource.data.items.size() > 0 &&
         request.resource.data.subtotal is number &&
         request.resource.data.total is number &&
         request.resource.data.total >= 0;
-      allow read, update: if isOperator();
+
+      allow read: if canReadOrders() ||
+        (signedIn() && resource.data.customerId == request.auth.uid);
+
+      allow update: if canUpdateOrders();
       allow delete: if isMaster();
     }
 
