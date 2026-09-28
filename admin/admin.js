@@ -295,7 +295,14 @@ function listenOrders(){
 
         if(printConfig.autoPrint){
           const shouldPrint=o.status==='accepted'||(o.status==='pending'&&printConfig.printPending);
-          if(shouldPrint) printOrder(o,true);
+          if(shouldPrint){
+            const pricing=verifyOrderPricing(o);
+            if(pricing.valid){
+              printOrder(o,true);
+            }else{
+              showSystemAlert(`Pedido #${String(o.orderNumber||0).padStart(4,'0')} não foi impresso automaticamente porque os valores divergem do cardápio. Revise o pedido antes de aceitar.`);
+            }
+          }
         }
       }
     }
@@ -373,6 +380,86 @@ function switchView(v){
   if(v==='printing') checkPrintAgent();
 }
 
+function normalizePriceKey(value){
+  return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+}
+
+function expectedDeliveryFee(order){
+  if(order.fulfillment==='pickup') return 0;
+  const fallback=Number(settings.deliveryFee||0);
+  const zones=Array.isArray(settings.deliveryZones)?settings.deliveryZones:[];
+  const neighborhood=normalizePriceKey(order.address?.neighborhood);
+  const zone=zones.find(z=>normalizePriceKey(z.neighborhood)===neighborhood);
+  return zone?Number(zone.fee||0):fallback;
+}
+
+function expectedItemUnitPrice(item){
+  const first=products.find(p=>p.id===item.productId);
+  if(!first) return {ok:false,reason:'Produto não existe mais no cardápio.',value:0};
+
+  let base=Number(first.price||0);
+  const sizeName=item.size?.name||'';
+  if(first.sizes?.length){
+    const size=first.sizes.find(s=>normalizePriceKey(s.name)===normalizePriceKey(sizeName));
+    if(!size) return {ok:false,reason:`Tamanho inválido em ${item.name}.`,value:0};
+    base=Number(size.price||0);
+  }
+
+  const ids=Array.isArray(item.flavorProductIds)?item.flavorProductIds:[item.productId];
+  if(ids.length>1&&sizeName){
+    for(const id of ids.slice(1)){
+      const flavor=products.find(p=>p.id===id);
+      if(!flavor) return {ok:false,reason:'Um dos sabores não existe mais no cardápio.',value:0};
+      const size=flavor.sizes?.find(s=>normalizePriceKey(s.name)===normalizePriceKey(sizeName));
+      if(!size) return {ok:false,reason:`Segundo sabor indisponível no tamanho ${sizeName}.`,value:0};
+      base=Math.max(base,Number(size.price||0));
+    }
+  }
+
+  let extras=0;
+  for(const extra of (item.extras||[])){
+    const catalogExtra=first.extras?.find(x=>normalizePriceKey(x.name)===normalizePriceKey(extra.name));
+    if(!catalogExtra) return {ok:false,reason:`Adicional inválido em ${item.name}: ${extra.name}.`,value:0};
+    extras+=Number(catalogExtra.price||0);
+  }
+
+  return {ok:true,value:base+extras};
+}
+
+function verifyOrderPricing(order){
+  const issues=[];
+  let expectedSubtotal=0;
+
+  for(const item of (order.items||[])){
+    const result=expectedItemUnitPrice(item);
+    if(!result.ok){
+      issues.push(result.reason);
+      continue;
+    }
+    const qty=Math.max(1,Number(item.qty||1));
+    expectedSubtotal+=result.value*qty;
+    if(Math.abs(result.value-Number(item.unitPrice||0))>0.009){
+      issues.push(`Preço divergente em ${item.name}: pedido ${money(item.unitPrice)}, cardápio ${money(result.value)}.`);
+    }
+  }
+
+  if(Math.abs(expectedSubtotal-Number(order.subtotal||0))>0.009){
+    issues.push(`Subtotal divergente: pedido ${money(order.subtotal)}, calculado ${money(expectedSubtotal)}.`);
+  }
+
+  const expectedFee=expectedDeliveryFee(order);
+  if(Math.abs(expectedFee-Number(order.deliveryFee||0))>0.009){
+    issues.push(`Taxa de entrega divergente: pedido ${money(order.deliveryFee)}, atual ${money(expectedFee)}.`);
+  }
+
+  const expectedTotal=expectedSubtotal+expectedFee;
+  if(Math.abs(expectedTotal-Number(order.total||0))>0.009){
+    issues.push(`Total divergente: pedido ${money(order.total)}, calculado ${money(expectedTotal)}.`);
+  }
+
+  return {valid:issues.length===0,issues,expectedSubtotal,expectedFee,expectedTotal};
+}
+
 function renderStats(){
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:settings.timezone||'America/Porto_Velho'}).format(new Date());
   const sameDay=o=>{
@@ -401,7 +488,10 @@ function renderOrders(){
     return !term||text.includes(term);
   });
 
-  $('#ordersList').innerHTML=list.length?list.map(o=>`<button class="order-row" data-id="${o.id}" style="border-left:0;border-right:0;border-top:0;background:#fff;text-align:left;width:100%"><span class="order-number">#${String(o.orderNumber||0).padStart(4,'0')}</span><span class="order-meta"><strong>${esc(o.customer?.name||'Cliente')}</strong><small>${esc(o.customer?.phone||'')} • ${formatDate(o.createdAt)}</small></span><span class="status-pill status-${o.status}">${statusLabels[o.status]||o.status}</span><strong>${money(o.total)}</strong></button>`).join(''):'<div class="empty-state">Nenhum pedido encontrado.</div>';
+  $('#ordersList').innerHTML=list.length?list.map(o=>{
+    const pricing=verifyOrderPricing(o);
+    return `<button class="order-row" data-id="${o.id}" style="border-left:0;border-right:0;border-top:0;background:#fff;text-align:left;width:100%"><span class="order-number">#${String(o.orderNumber||0).padStart(4,'0')}</span><span class="order-meta"><strong>${esc(o.customer?.name||'Cliente')}</strong><small>${esc(o.customer?.phone||'')} • ${formatDate(o.createdAt)}${pricing.valid?'':' • ⚠ valores divergentes'}</small></span><span class="status-pill status-${o.status}">${statusLabels[o.status]||o.status}</span><strong>${money(o.total)}</strong></button>`;
+  }).join(''):'<div class="empty-state">Nenhum pedido encontrado.</div>';
 
   $$('.order-row').forEach(r=>r.onclick=()=>openOrder(r.dataset.id));
 }
@@ -471,6 +561,10 @@ function openOrder(id){
       <span class="status-pill status-${o.status}">${statusLabels[o.status]||o.status}</span>
     </div>
 
+    ${(()=>{
+      const pricing=verifyOrderPricing(o);
+      return pricing.valid?'':`<div class="alert alert-error"><strong>⚠ Valores divergentes do cardápio.</strong><br>${pricing.issues.map(esc).join('<br>')}</div>`;
+    })()}
     ${acceptBanner}
 
     <div class="order-detail-grid">
@@ -511,6 +605,13 @@ function openOrder(id){
 
   async function changeStatus(status){
     if(status===o.status) return;
+    if(status==='accepted'){
+      const pricing=verifyOrderPricing(o);
+      if(!pricing.valid){
+        const proceed=confirm('Os valores deste pedido divergem do cardápio atual. Deseja aceitar mesmo assim?\n\n'+pricing.issues.join('\n'));
+        if(!proceed) return;
+      }
+    }
     const patch={status,updatedAt:serverTimestamp()};
     if(status==='accepted') patch.acceptedAt=serverTimestamp();
     if(status==='completed') patch.completedAt=serverTimestamp();
@@ -601,6 +702,10 @@ function receiptText(o){
   if(settings.phone) lines.push(centerText(settings.phone,width));
   lines.push(divider);
   lines.push(centerText('PEDIDO #'+String(o.orderNumber||0).padStart(4,'0'),width));
+  const pricing=verifyOrderPricing(o);
+  if(!pricing.valid){
+    lines.push(centerText('*** ATENCAO: VALORES DIVERGENTES ***',width));
+  }
   lines.push(formatDate(o.createdAt));
   lines.push('STATUS: '+(statusLabels[o.status]||o.status));
   lines.push(divider);
