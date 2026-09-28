@@ -1,8 +1,10 @@
 using System.Drawing;
 using System.Drawing.Printing;
-using System.Net;
-using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Win32;
 
 namespace DeliveryPizzaria.PrintAgent;
@@ -83,6 +85,7 @@ internal sealed class TrayContext : ApplicationContext
     private static void SetStartup(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+
         if (enabled)
         {
             key.SetValue(StartupValueName, $"\"{Application.ExecutablePath}\"");
@@ -96,172 +99,146 @@ internal sealed class TrayContext : ApplicationContext
 
 internal sealed class LocalPrintServer : IDisposable
 {
-    private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly object _printLock = new();
-    private Task? _loopTask;
-
-    public LocalPrintServer()
-    {
-        _listener.Prefixes.Add("http://127.0.0.1:17329/");
-    }
+    private WebApplication? _app;
+    private Task? _runTask;
 
     public void Start()
     {
-        _listener.Start();
-        _loopTask = Task.Run(ListenLoopAsync);
-    }
+        var builder = WebApplication.CreateSlimBuilder();
 
-    private async Task ListenLoopAsync()
-    {
-        while (!_cts.IsCancellationRequested)
+        builder.WebHost.UseUrls("http://127.0.0.1:17329");
+
+        _app = builder.Build();
+
+        _app.Use(async (context, next) =>
         {
+            var origin = context.Request.Headers.Origin.ToString();
+
+            if (!IsAllowedOrigin(origin))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await context.Response.WriteAsJsonAsync(new { error = "origin_not_allowed" });
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(origin))
+            {
+                context.Response.Headers.AccessControlAllowOrigin = origin;
+                context.Response.Headers.Vary = "Origin";
+            }
+
+            context.Response.Headers.AccessControlAllowMethods = "GET,POST,OPTIONS";
+            context.Response.Headers.AccessControlAllowHeaders = "Content-Type";
+            context.Response.Headers["Access-Control-Allow-Private-Network"] = "true";
+            context.Response.Headers.CacheControl = "no-store";
+
+            if (HttpMethods.IsOptions(context.Request.Method))
+            {
+                context.Response.StatusCode = StatusCodes.Status204NoContent;
+                return;
+            }
+
+            await next();
+        });
+
+        _app.MapGet("/", () => Results.Json(new
+        {
+            ok = true,
+            name = "Delivery Pizzaria Print Agent",
+            version = "1.1.0"
+        }));
+
+        _app.MapGet("/health", () => Results.Json(new
+        {
+            ok = true,
+            name = "Delivery Pizzaria Print Agent",
+            version = "1.1.0"
+        }));
+
+        _app.MapGet("/printers", () =>
+        {
+            var printers = PrinterSettings.InstalledPrinters.Cast<string>()
+                .OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)
+                .ToArray();
+
+            return Results.Json(new { printers });
+        });
+
+        _app.MapPost("/print", async (HttpContext context) =>
+        {
+            PrintRequest? request;
+
             try
             {
-                var context = await _listener.GetContextAsync();
-                _ = Task.Run(() => HandleAsync(context), _cts.Token);
-            }
-            catch (HttpListenerException) when (_cts.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (ObjectDisposedException)
-            {
-                break;
+                request = await context.Request.ReadFromJsonAsync<PrintRequest>(
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
+                    cancellationToken: context.RequestAborted);
             }
             catch
             {
-                await Task.Delay(250);
+                return Results.BadRequest(new { error = "invalid_json" });
             }
-        }
+
+            if (request is null ||
+                string.IsNullOrWhiteSpace(request.Printer) ||
+                string.IsNullOrWhiteSpace(request.Text))
+            {
+                return Results.BadRequest(new { error = "invalid_request" });
+            }
+
+            var installed = PrinterSettings.InstalledPrinters.Cast<string>()
+                .Any(p => string.Equals(p, request.Printer, StringComparison.CurrentCultureIgnoreCase));
+
+            if (!installed)
+            {
+                return Results.NotFound(new { error = "printer_not_found" });
+            }
+
+            try
+            {
+                lock (_printLock)
+                {
+                    PrintText(
+                        request.Printer,
+                        request.Text,
+                        Math.Clamp(request.Copies <= 0 ? 1 : request.Copies, 1, 5));
+                }
+
+                return Results.Ok(new { ok = true });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(
+                    new { error = "print_failed", message = ex.Message },
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+        });
+
+        _runTask = _app.RunAsync(_cts.Token);
     }
 
     private static bool IsAllowedOrigin(string? origin)
     {
         if (string.IsNullOrWhiteSpace(origin)) return true;
 
-        return origin.Equals("https://guiasysstudio.github.io", StringComparison.OrdinalIgnoreCase)
-            || origin.StartsWith("http://localhost", StringComparison.OrdinalIgnoreCase)
-            || origin.StartsWith("http://127.0.0.1", StringComparison.OrdinalIgnoreCase);
-    }
+        if (origin.Equals("https://guiasysstudio.github.io", StringComparison.OrdinalIgnoreCase))
+            return true;
 
-    private static void AddCors(HttpListenerContext context)
-    {
-        var origin = context.Request.Headers["Origin"];
-        if (!string.IsNullOrWhiteSpace(origin) && IsAllowedOrigin(origin))
-        {
-            context.Response.Headers["Access-Control-Allow-Origin"] = origin;
-            context.Response.Headers["Vary"] = "Origin";
-        }
+        if (origin.Equals("https://guiasys.online", StringComparison.OrdinalIgnoreCase))
+            return true;
 
-        context.Response.Headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS";
-        context.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
-        context.Response.Headers["Access-Control-Allow-Private-Network"] = "true";
-        context.Response.Headers["Cache-Control"] = "no-store";
-    }
+        if (origin.EndsWith(".guiasys.online", StringComparison.OrdinalIgnoreCase))
+            return true;
 
-    private async Task HandleAsync(HttpListenerContext context)
-    {
-        try
-        {
-            AddCors(context);
+        if (origin.StartsWith("http://localhost", StringComparison.OrdinalIgnoreCase))
+            return true;
 
-            var origin = context.Request.Headers["Origin"];
-            if (!IsAllowedOrigin(origin))
-            {
-                await WriteJson(context, 403, new { error = "origin_not_allowed" });
-                return;
-            }
+        if (origin.StartsWith("http://127.0.0.1", StringComparison.OrdinalIgnoreCase))
+            return true;
 
-            if (context.Request.HttpMethod.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
-            {
-                context.Response.StatusCode = 204;
-                context.Response.Close();
-                return;
-            }
-
-            var path = context.Request.Url?.AbsolutePath?.TrimEnd('/') ?? "";
-
-            if (context.Request.HttpMethod == "GET" && (path == "" || path == "/health"))
-            {
-                await WriteJson(context, 200, new
-                {
-                    ok = true,
-                    name = "Delivery Pizzaria Print Agent",
-                    version = "1.0.0"
-                });
-                return;
-            }
-
-            if (context.Request.HttpMethod == "GET" && path == "/printers")
-            {
-                var printers = PrinterSettings.InstalledPrinters.Cast<string>()
-                    .OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)
-                    .ToArray();
-
-                await WriteJson(context, 200, new { printers });
-                return;
-            }
-
-            if (context.Request.HttpMethod == "POST" && path == "/print")
-            {
-                using var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding);
-                var body = await reader.ReadToEndAsync();
-                var request = JsonSerializer.Deserialize<PrintRequest>(
-                    body,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (request is null ||
-                    string.IsNullOrWhiteSpace(request.Printer) ||
-                    string.IsNullOrWhiteSpace(request.Text))
-                {
-                    await WriteJson(context, 400, new { error = "invalid_request" });
-                    return;
-                }
-
-                var installed = PrinterSettings.InstalledPrinters.Cast<string>()
-                    .Any(p => string.Equals(p, request.Printer, StringComparison.CurrentCultureIgnoreCase));
-
-                if (!installed)
-                {
-                    await WriteJson(context, 404, new { error = "printer_not_found" });
-                    return;
-                }
-
-                try
-                {
-                    lock (_printLock)
-                    {
-                        PrintText(
-                            request.Printer,
-                            request.Text,
-                            Math.Clamp(request.Copies <= 0 ? 1 : request.Copies, 1, 5));
-                    }
-
-                    await WriteJson(context, 200, new { ok = true });
-                }
-                catch (Exception ex)
-                {
-                    await WriteJson(context, 500, new { error = "print_failed", message = ex.Message });
-                }
-
-                return;
-            }
-
-            await WriteJson(context, 404, new { error = "not_found" });
-        }
-        catch
-        {
-            try
-            {
-                context.Response.StatusCode = 500;
-                context.Response.Close();
-            }
-            catch
-            {
-                // ignored
-            }
-        }
+        return false;
     }
 
     private static void PrintText(string printerName, string text, int copies)
@@ -269,6 +246,7 @@ internal sealed class LocalPrintServer : IDisposable
         for (var copy = 0; copy < copies; copy++)
         {
             using var document = new PrintDocument();
+
             document.PrinterSettings.PrinterName = printerName;
             document.PrintController = new StandardPrintController();
             document.DocumentName = "Comanda Delivery Pizzaria";
@@ -326,6 +304,7 @@ internal sealed class LocalPrintServer : IDisposable
     private static bool IsStrongLine(string line)
     {
         var upper = line.Trim().ToUpperInvariant();
+
         return upper.StartsWith("PEDIDO #")
             || upper.StartsWith("TOTAL:")
             || upper.StartsWith("PAGAMENTO:")
@@ -359,35 +338,35 @@ internal sealed class LocalPrintServer : IDisposable
             }
 
             var breakAt = remaining.LastIndexOf(' ', Math.Max(0, split - 1), split);
-            if (breakAt > 0) split = breakAt;
+
+            if (breakAt > 0)
+            {
+                split = breakAt;
+            }
 
             yield return remaining[..split].TrimEnd();
             remaining = remaining[split..].TrimStart();
         }
     }
 
-    private static async Task WriteJson(HttpListenerContext context, int status, object payload)
-    {
-        var json = JsonSerializer.Serialize(payload);
-        var bytes = Encoding.UTF8.GetBytes(json);
-
-        context.Response.StatusCode = status;
-        context.Response.ContentType = "application/json; charset=utf-8";
-        context.Response.ContentLength64 = bytes.Length;
-        await context.Response.OutputStream.WriteAsync(bytes);
-        context.Response.Close();
-    }
-
     public void Dispose()
     {
         _cts.Cancel();
 
-        if (_listener.IsListening)
+        if (_app is not null)
         {
-            _listener.Stop();
+            try
+            {
+                _app.StopAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // ignored during shutdown
+            }
+
+            _app.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
 
-        _listener.Close();
         _cts.Dispose();
     }
 
