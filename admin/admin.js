@@ -13,7 +13,8 @@ const $$=s=>[...document.querySelectorAll(s)];
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
 
 const statusLabels={
-  pending:'Novo',
+  pending:'Aguardando confirmação',
+  accepted:'Confirmado',
   preparing:'Em preparo',
   ready:'Pronto',
   out_for_delivery:'Saiu para entrega',
@@ -22,8 +23,14 @@ const statusLabels={
 };
 const dayNames=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 
-let categories=[],products=[],orders=[],settings={},users=[],currentProfile=null;
+let categories=[],products=[],orders=[],settings={},users=[],customers=[],currentProfile=null;
 let unsubscribeOrders=null,soundEnabled=false,knownOrderIds=new Set();
+let printConfig={
+  printer:localStorage.getItem('deliveryPrinter')||'',
+  autoPrint:localStorage.getItem('deliveryAutoPrint')==='1',
+  printPending:localStorage.getItem('deliveryPrintPending')==='1'
+};
+const PRINT_AGENT='http://127.0.0.1:17329';
 
 const defaults={
   storeName:'Delivery Pizzaria',
@@ -36,7 +43,7 @@ const defaults={
   openMode:'schedule',
   payments:['Dinheiro','PIX na entrega','Cartão de débito','Cartão de crédito'],
   timezone:'America/Porto_Velho',
-  autoPrint:false,
+  autoAcceptOrders:false,
   schedule:{
     0:{enabled:true,open:'18:00',close:'23:30'},
     1:{enabled:false,open:'18:00',close:'23:30'},
@@ -55,7 +62,14 @@ function usernameEmail(username){
   return `${normalizeUsername(username)}@delivery-pizzaria.local`;
 }
 function roleLabel(role){
-  return ({master:'Master',manager:'Gerente',operator:'Operador'})[role]||role;
+  return ({
+    master:'Master',
+    manager:'Gerente',
+    cashier:'Caixa',
+    kitchen:'Cozinha',
+    delivery:'Entrega',
+    operator:'Operador'
+  })[role]||role;
 }
 function isMaster(){
   return currentProfile?.role==='master';
