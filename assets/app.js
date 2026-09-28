@@ -4,7 +4,7 @@ import {
   saveAddress, setDefaultAddress, getFavorites, setFavorite
 } from './customer-auth.js';
 import {
-  collection, doc, getDoc, getDocs, runTransaction, addDoc, serverTimestamp
+  collection, doc, getDoc, getDocs, runTransaction, addDoc, serverTimestamp, query, where
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 
 const $=s=>document.querySelector(s);
@@ -12,12 +12,12 @@ const $$=s=>[...document.querySelectorAll(s)];
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
 const placeholder='./assets/products/placeholder.svg';
 
-let categories=[],products=[],settings=null;
+let categories=[],products=[],promotions=[],settings=null;
 let cart=JSON.parse(localStorage.getItem('deliveryCart')||'[]');
 let selectedCategory='all';
 let currentProduct=null,currentQty=1,currentSecondFlavorId='';
 let customer=null,customerProfile=null,addresses=[],selectedAddressId=localStorage.getItem('deliverySelectedAddress')||'';
-let favorites=new Set(),afterAuthAction=null,selectedPayment='';
+let favorites=new Set(),afterAuthAction=null,selectedPayment='',activeCoupon=null,customerOrderStats={count:0,spent:0};
 
 const defaultSettings={
   storeName:'Delivery Pizzaria',
@@ -59,9 +59,10 @@ function parseCurrency(v){
 
 async function loadStore(){
   try{
-    const [catSnap,prodSnap,setSnap]=await Promise.all([
+    const [catSnap,prodSnap,promoSnap,setSnap]=await Promise.all([
       getDocs(collection(db,'categories')),
       getDocs(collection(db,'products')),
+      getDocs(collection(db,'promotions')),
       getDoc(doc(db,'settings','store'))
     ]);
     categories=catSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.active!==false).sort((a,b)=>(a.order||0)-(b.order||0));
@@ -69,6 +70,7 @@ async function loadStore(){
     products=prodSnap.docs.map(d=>({id:d.id,...d.data()}))
       .filter(x=>x.active!==false&&activeCategoryIds.has(x.categoryId))
       .sort((a,b)=>(a.order||0)-(b.order||0));
+    promotions=promoSnap.docs.map(d=>({id:d.id,...d.data()}));
     settings=setSnap.exists()?{...defaultSettings,...setSnap.data()}:defaultSettings;
     renderStore();
     const productId=new URLSearchParams(location.search).get('product');
@@ -90,6 +92,7 @@ watchCustomer(async user=>{
         getAddresses(user.uid),
         getFavorites(user.uid)
       ]);
+      customerOrderStats=await loadCustomerOrderStats(user.uid);
       chooseInitialAddress();
     }catch(err){
       console.error('Falha ao carregar conta:',err);
@@ -98,6 +101,8 @@ watchCustomer(async user=>{
     customerProfile=null;
     addresses=[];
     favorites=new Set();
+    activeCoupon=null;
+    customerOrderStats={count:0,spent:0};
     selectedAddressId='';
     localStorage.removeItem('deliverySelectedAddress');
   }
@@ -169,6 +174,7 @@ function renderStore(){
   renderCart();
   renderCustomerHeader();
   renderPaymentOptions();
+  renderPromotionBanner();
 }
 
 function renderCustomerHeader(){
@@ -188,6 +194,161 @@ function renderCustomerHeader(){
   }
 }
 
+async function loadCustomerOrderStats(uid){
+  try{
+    const snap=await getDocs(query(collection(db,'orders'),where('customerId','==',uid)));
+    const completed=snap.docs.map(d=>d.data()).filter(o=>o.status==='completed');
+    return {
+      count:completed.length,
+      spent:completed.reduce((sum,o)=>sum+Number(o.total||0),0)
+    };
+  }catch(err){
+    console.warn('Não foi possível carregar o histórico para regras de cupom.',err);
+    return {count:0,spent:0};
+  }
+}
+
+function promotionIsActive(p){
+  if(p?.active===false) return false;
+  const now=Date.now();
+  const start=p?.startsAt?new Date(p.startsAt).getTime():0;
+  const end=p?.endsAt?new Date(p.endsAt).getTime():0;
+  if(start&&Number.isFinite(start)&&now<start) return false;
+  if(end&&Number.isFinite(end)&&now>end) return false;
+  return true;
+}
+
+function promotionMatchesProduct(p,product){
+  if(!promotionIsActive(p)) return false;
+  if(p.targetType==='all') return true;
+  if(p.targetType==='category') return p.targetId===product.categoryId;
+  if(p.targetType==='product') return p.targetId===product.id;
+  return false;
+}
+
+function applyPromotionValue(base,promo){
+  const value=Number(base||0);
+  if(!promo) return value;
+  if(promo.discountType==='percentage'){
+    return Math.max(0,value-(value*Number(promo.discountValue||0)/100));
+  }
+  return Math.max(0,value-Number(promo.discountValue||0));
+}
+
+function bestPromotionForProduct(product,basePrice){
+  const matches=promotions.filter(p=>promotionMatchesProduct(p,product));
+  if(!matches.length) return null;
+  return matches.map(p=>({promo:p,price:applyPromotionValue(basePrice,p)}))
+    .sort((a,b)=>a.price-b.price)[0];
+}
+
+function productDisplayPrice(product,basePrice){
+  const best=bestPromotionForProduct(product,basePrice);
+  return best?best.price:Number(basePrice||0);
+}
+
+function renderPromotionBanner(){
+  const active=promotions.filter(p=>promotionIsActive(p));
+  const banner=$('#promotionBanner');
+  if(!banner) return;
+  banner.classList.toggle('hidden',!active.length);
+  if(!active.length) return;
+  const p=active[0];
+  $('#promotionBannerTitle').textContent=p.name||'Promoção';
+  $('#promotionBannerText').textContent=p.description||(
+    p.discountType==='percentage'
+      ?`${Number(p.discountValue||0)}% de desconto`
+      :`${money(p.discountValue)} de desconto`
+  );
+}
+
+function normalizeCouponCode(value){
+  return String(value||'').trim().toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9_-]/g,'');
+}
+
+function couponValidation(coupon,subtotal){
+  if(!coupon||coupon.active===false) return {valid:false,message:'Cupom inválido ou inativo.'};
+  const now=Date.now();
+  const start=coupon.startsAt?new Date(coupon.startsAt).getTime():0;
+  const end=coupon.endsAt?new Date(coupon.endsAt).getTime():0;
+  if(start&&Number.isFinite(start)&&now<start) return {valid:false,message:'Este cupom ainda não começou.'};
+  if(end&&Number.isFinite(end)&&now>end) return {valid:false,message:'Este cupom expirou.'};
+  if(subtotal<Number(coupon.minimumOrder||0)) return {valid:false,message:`Pedido mínimo para este cupom: ${money(coupon.minimumOrder)}.`};
+  if(customerOrderStats.count<Number(coupon.minOrders||0)) return {valid:false,message:`Este cupom exige pelo menos ${coupon.minOrders} pedido(s) concluído(s).`};
+  if(customerOrderStats.spent<Number(coupon.minSpent||0)) return {valid:false,message:`Este cupom exige ${money(coupon.minSpent)} em compras anteriores.`};
+  return {valid:true,message:'Cupom aplicado com sucesso.'};
+}
+
+function couponDiscount(subtotal){
+  if(!activeCoupon) return 0;
+  const validation=couponValidation(activeCoupon,subtotal);
+  if(!validation.valid) return 0;
+  let discount=activeCoupon.type==='percentage'
+    ?subtotal*Number(activeCoupon.value||0)/100
+    :Number(activeCoupon.value||0);
+  const max=Number(activeCoupon.maxDiscount||0);
+  if(max>0) discount=Math.min(discount,max);
+  return Math.max(0,Math.min(subtotal,discount));
+}
+
+function renderCouponState(message=''){
+  const feedback=$('#couponFeedback');
+  if(!feedback) return;
+  $('#couponAppliedBadge').classList.toggle('hidden',!activeCoupon);
+  $('#removeCouponBtn').classList.toggle('hidden',!activeCoupon);
+  $('#applyCouponBtn').classList.toggle('hidden',!!activeCoupon);
+  if(activeCoupon) $('#couponCodeInput').value=activeCoupon.code||activeCoupon.id||'';
+  feedback.classList.toggle('hidden',!message&&!activeCoupon);
+  feedback.classList.toggle('invalid',!!message&&!activeCoupon);
+  feedback.textContent=message||(activeCoupon?couponValidation(activeCoupon,cart.reduce((a,x)=>a+Number(x.unitPrice)*Number(x.qty),0)).message:'');
+}
+
+async function applyCoupon(){
+  if(!customer){
+    afterAuthAction='checkout';
+    openAuth();
+    return;
+  }
+  const code=normalizeCouponCode($('#couponCodeInput').value);
+  if(!code) return renderCouponState('Digite o código do cupom.');
+  try{
+    const snap=await getDoc(doc(db,'coupons',code));
+    if(!snap.exists()){
+      activeCoupon=null;
+      renderCouponState('Cupom não encontrado.');
+      renderCart();
+      return;
+    }
+    const coupon={id:snap.id,...snap.data()};
+    const subtotal=cart.reduce((a,x)=>a+Number(x.unitPrice)*Number(x.qty),0);
+    const validation=couponValidation(coupon,subtotal);
+    if(!validation.valid){
+      activeCoupon=null;
+      renderCouponState(validation.message);
+      renderCart();
+      return;
+    }
+    activeCoupon=coupon;
+    renderCouponState(validation.message);
+    renderCart();
+  }catch(err){
+    console.error(err);
+    activeCoupon=null;
+    renderCouponState('Não foi possível validar o cupom agora.');
+  }
+}
+
+$('#applyCouponBtn')?.addEventListener('click',applyCoupon);
+$('#couponCodeInput')?.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();applyCoupon();}
+});
+$('#removeCouponBtn')?.addEventListener('click',()=>{
+  activeCoupon=null;
+  $('#couponCodeInput').value='';
+  renderCouponState('');
+  renderCart();
+});
+
 function renderCategories(){
   const items=[{id:'all',name:'Todos'},...categories];
   $('#categoryChips').innerHTML=items.map(c=>`<button class="chip ${selectedCategory===c.id?'active':''}" data-id="${c.id}">${esc(c.name)}</button>`).join('');
@@ -200,24 +361,25 @@ function renderCategories(){
 }
 
 function productCard(p){
-  const from=p.sizes?.length?Math.min(...p.sizes.map(s=>Number(s.price||0))):Number(p.price||0);
+  const base=p.sizes?.length?Math.min(...p.sizes.map(s=>Number(s.price||0))):Number(p.price||0);
+  const best=bestPromotionForProduct(p,base);
+  const from=best?best.price:base;
   const fav=customer&&favorites.has(p.id);
   return `<article class="product-card">
     <div class="product-image-wrap">
       <img class="product-image" src="${attr(pathImage(p.image))}" onerror="this.src='${placeholder}'" alt="${attr(p.name)}">
       <button class="favorite-card-button ${fav?'active':''}" data-fav="${p.id}" type="button" aria-label="Favoritar">${fav?'♥':'♡'}</button>
-      ${p.featured?'<span class="featured-tag">Destaque</span>':''}
+      ${best?`<span class="featured-tag promo-tag">${best.promo.discountType==='percentage'?Number(best.promo.discountValue)+'% OFF':'OFERTA'}</span>`:(p.featured?'<span class="featured-tag">Destaque</span>':'')}
     </div>
     <div class="product-content">
       <div><h3>${esc(p.name)}</h3><p>${esc(p.description||'')}</p></div>
       <div class="product-foot">
-        <span><small>${p.sizes?.length?'A partir de':''}</small><strong class="price">${money(from)}</strong></span>
+        <span><small>${p.sizes?.length?'A partir de':''}</small>${best?`<del class="old-price">${money(base)}</del>`:''}<strong class="price">${money(from)}</strong></span>
         <button class="add-round add-product" data-id="${p.id}" type="button">+</button>
       </div>
     </div>
   </article>`;
 }
-
 function bindProductCards(scope=document){
   scope.querySelectorAll('.add-product').forEach(b=>b.onclick=()=>openProduct(b.dataset.id));
   scope.querySelectorAll('.favorite-card-button').forEach(b=>b.onclick=async e=>{
@@ -310,18 +472,32 @@ function selectedSize(){
 }
 
 function flavorBasePrice(){
-  let price=Number(currentProduct?.price||0);
+  let raw=Number(currentProduct?.price||0);
   const size=selectedSize();
-  if(size) price=Number(size.price||0);
+  if(size) raw=Number(size.price||0);
   const half=document.querySelector('input[name=flavorMode]:checked')?.value==='half';
   if(half&&currentSecondFlavorId&&size){
     const second=products.find(p=>p.id===currentSecondFlavorId);
     const matching=second?.sizes?.find(s=>String(s.name).toLowerCase()===String(size.name).toLowerCase());
-    if(matching) price=Math.max(price,Number(matching.price||0));
+    if(matching) raw=Math.max(raw,Number(matching.price||0));
   }
-  return price;
+  return productDisplayPrice(currentProduct,raw);
 }
 
+function currentPromotionSnapshot(){
+  if(!currentProduct) return null;
+  let raw=Number(currentProduct.price||0);
+  const size=selectedSize();
+  if(size) raw=Number(size.price||0);
+  const best=bestPromotionForProduct(currentProduct,raw);
+  if(!best) return null;
+  return {
+    id:best.promo.id,
+    name:best.promo.name||'Promoção',
+    discountType:best.promo.discountType,
+    discountValue:Number(best.promo.discountValue||0)
+  };
+}
 function chosenUnitPrice(){
   let price=flavorBasePrice();
   $$('input[name=extra]:checked').forEach(el=>price+=Number(currentProduct.extras?.[Number(el.value)]?.price||0));
@@ -376,6 +552,7 @@ $('#productForm').addEventListener('submit',e=>{
     size,
     extras,
     unitPrice:chosenUnitPrice(),
+    promotion:currentPromotionSnapshot(),
     qty:currentQty,
     note:$('#itemNote').value.trim()
   });
@@ -416,18 +593,20 @@ function deliveryQuote(address=activeAddress()){
 
 function cartTotals(){
   const subtotal=cart.reduce((a,x)=>a+Number(x.unitPrice)*Number(x.qty),0);
+  const discount=couponDiscount(subtotal);
   const quote=deliveryQuote();
   const fee=subtotal&&fulfillment()==='delivery'&&quote.supported?quote.fee:0;
-  return {subtotal,fee,total:subtotal+fee,deliverySupported:quote.supported,deliveryZone:quote.zone};
+  return {subtotal,discount,fee,total:Math.max(0,subtotal-discount+fee),deliverySupported:quote.supported,deliveryZone:quote.zone};
 }
-
 function renderCart(){
   const count=cart.reduce((a,x)=>a+Number(x.qty||0),0);
-  const {subtotal,fee,total}=cartTotals();
+  const {subtotal,discount,fee,total}=cartTotals();
   $('#cartCount').textContent=count;
   $('#floatingCount').textContent=count;
   $('#headerCartCount').textContent=count;
   $('#subtotal').textContent=money(subtotal);
+  $('#discountRow').classList.toggle('hidden',discount<=0);
+  $('#discountTotal').textContent='- '+money(discount);
   $('#deliveryFee').textContent=money(fee);
   $('#total').textContent=money(total);
   $('#checkoutTotal').textContent=money(total);
@@ -670,6 +849,7 @@ function openCheckout(){
     renderCheckoutAddress();
     $('#checkoutPhone').value=customerProfile?.phone||activeAddress()?.phone||'';
     renderPaymentOptions();
+    renderCouponState();
     renderCart();
     $('#checkoutError').classList.add('hidden');
     $('#checkoutDialog').showModal();
@@ -756,7 +936,11 @@ $('#checkoutForm').addEventListener('submit',async e=>{
   if(type==='delivery'&&!quote.supported) return showCheckoutError('Este endereço está fora da área de entrega da pizzaria.');
   if(!selectedPayment) return showCheckoutError('Escolha a forma de pagamento.');
 
-  const {subtotal,fee,total}=cartTotals();
+  const {subtotal,discount,fee,total}=cartTotals();
+  if(activeCoupon){
+    const couponCheck=couponValidation(activeCoupon,subtotal);
+    if(!couponCheck.valid) return showCheckoutError(couponCheck.message);
+  }
   if(subtotal<Number(settings.minimumOrder||0)) return showCheckoutError(`Pedido mínimo: ${money(settings.minimumOrder)}.`);
 
   let changeFor=0,changeAmount=0;
@@ -816,7 +1000,16 @@ $('#checkoutForm').addEventListener('submit',async e=>{
         },
         note:$('#orderNote').value.trim(),
         items:cart.map(({lineId,...x})=>x),
-        subtotal,deliveryFee:fee,total
+        subtotal,
+        discount,
+        coupon:activeCoupon?{
+          id:activeCoupon.id,
+          code:activeCoupon.code||activeCoupon.id,
+          type:activeCoupon.type,
+          value:Number(activeCoupon.value||0),
+          amount:discount
+        }:null,
+        deliveryFee:fee,total
       };
 
       tx.set(counterRef,{value:orderNumber,updatedAt:serverTimestamp()},{merge:true});
@@ -828,6 +1021,9 @@ $('#checkoutForm').addEventListener('submit',async e=>{
     $('#successStatusText').textContent=autoAccepted?'Pedido confirmado automaticamente e enviado para a pizzaria.':'Pedido recebido. Aguarde a confirmação da pizzaria.';
     $('#successDialog').showModal();
     selectedPayment='';
+    activeCoupon=null;
+    $('#couponCodeInput').value='';
+    renderCouponState('');
     $('#orderNote').value='';
     $('#needsChange').checked=false;
     $('#changeFor').value='';
