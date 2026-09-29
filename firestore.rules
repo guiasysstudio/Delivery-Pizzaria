@@ -33,11 +33,37 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/roles/$(staff().role)).data;
     }
 
+    function rolePermission(key) {
+      return roleExists() &&
+        roleData().get('permissions', {}).get(key, false) == true;
+    }
+
     function hasPermission(key) {
       return isMaster() ||
+        rolePermission(key) ||
         (
-          roleExists() &&
-          roleData().get('permissions', {}).get(key, false) == true
+          key == 'ordersView' &&
+          (
+            rolePermission('ordersAccept') ||
+            rolePermission('ordersPrepare') ||
+            rolePermission('ordersDispatch') ||
+            rolePermission('ordersComplete') ||
+            rolePermission('ordersCancel')
+          )
+        ) ||
+        (
+          key == 'productsView' &&
+          (
+            rolePermission('productsCreate') ||
+            rolePermission('productsEdit') ||
+            rolePermission('productsDelete') ||
+            rolePermission('categoriesManage') ||
+            rolePermission('promotionsManage')
+          )
+        ) ||
+        (
+          key == 'cashView' &&
+          rolePermission('cashOperate')
         );
     }
 
@@ -123,16 +149,21 @@ service cloud.firestore {
     }
 
     match /staffLogins/{username} {
-      // O mapa serve somente para traduzir "usuário" em credencial interna.
-      // Ler o e-mail interno não concede acesso: toda autorização vem de /users e /roles.
-      allow read: if true;
+      // O login por nome de usuário precisa consultar apenas o documento exato.
+      // Listar toda a coleção revelaria os identificadores/e-mails internos.
+      allow get: if true;
+      allow list: if false;
       allow create, update, delete: if hasPermission('usersManage');
     }
 
     match /users/{uid} {
+      // Quem gerencia perfis precisa consultar usuários somente para impedir
+      // a exclusão de um perfil ainda atribuído, sem ganhar permissão de edição.
       allow get: if hasPermission('usersManage') ||
+        hasPermission('rolesManage') ||
         (signedIn() && request.auth.uid == uid);
-      allow list: if hasPermission('usersManage');
+      allow list: if hasPermission('usersManage') ||
+        hasPermission('rolesManage');
 
       allow create: if hasPermission('usersManage') &&
         (
@@ -165,13 +196,17 @@ service cloud.firestore {
     match /customers/{uid} {
       allow create: if isOwnCustomer(uid) &&
         request.resource.data.get('identityComplete', false) == false;
-      allow read: if isOwnCustomer(uid) || hasPermission('customersView');
-      allow update: if ownCustomerPublicUpdate(uid) || hasPermission('customersView');
+      allow read: if isOwnCustomer(uid) ||
+        hasPermission('customersView') ||
+        hasPermission('customersEdit');
+      allow update: if ownCustomerPublicUpdate(uid) ||
+        hasPermission('customersEdit');
       allow delete: if isMaster();
 
       match /addresses/{addressId} {
         allow read, create, update, delete: if isOwnCustomer(uid);
-        allow read: if hasPermission('customersView');
+        allow read: if hasPermission('customersView') ||
+          hasPermission('customersEdit');
       }
 
       match /favorites/{productId} {
@@ -179,7 +214,9 @@ service cloud.firestore {
       }
 
       match /coupons/{couponId} {
-        allow read: if isOwnCustomer(uid) || hasPermission('customersView');
+        allow read: if isOwnCustomer(uid) ||
+          hasPermission('customersView') ||
+          hasPermission('customersEdit');
         allow write: if false;
       }
     }
