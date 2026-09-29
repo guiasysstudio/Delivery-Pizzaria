@@ -281,7 +281,15 @@ $('#profileForm').onsubmit=async e=>{
 
     if(localStorage.getItem('deliveryReturnToCheckout')==='1'){
       localStorage.removeItem('deliveryReturnToCheckout');
+      localStorage.removeItem('deliveryReturnAfterProfile');
       setTimeout(()=>location.href='../?checkout=1',450);
+      return;
+    }
+
+    const returnAfterProfile=localStorage.getItem('deliveryReturnAfterProfile');
+    if(returnAfterProfile){
+      localStorage.removeItem('deliveryReturnAfterProfile');
+      setTimeout(()=>location.href=returnAfterProfile,450);
     }
   }catch(err){
     console.error(err);
