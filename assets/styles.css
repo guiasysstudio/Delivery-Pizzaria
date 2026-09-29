@@ -246,3 +246,18 @@
   .app-shell .shell{width:min(1540px,calc(100% - 48px))}
   .app-shell .catalog-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
+
+
+/* ===== Delivery pricing modes ===== */
+.delivery-mode-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
+.delivery-mode-card{position:relative;display:block}
+.delivery-mode-card input{position:absolute;opacity:0;pointer-events:none}
+.delivery-mode-card span{display:block;height:100%;padding:14px;border:1px solid var(--line);border-radius:13px;background:#fff;cursor:pointer;transition:.16s}
+.delivery-mode-card strong{display:block;margin-bottom:4px}
+.delivery-mode-card small{display:block;color:var(--muted);line-height:1.35}
+.delivery-mode-card:has(input:checked) span{border-color:#b91c1c;background:#fff7f7;box-shadow:0 0 0 2px #fee2e2}
+.delivery-mode-settings{margin-top:14px;padding:15px;border:1px solid var(--line);border-radius:14px;background:#fafafa}
+.delivery-km-row .repeat-field input{text-align:left}
+@media(max-width:720px){
+  .delivery-mode-grid{grid-template-columns:1fr}
+}
