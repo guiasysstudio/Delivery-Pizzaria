@@ -3,6 +3,8 @@ import {
   getAuth,
   GoogleAuthProvider,
   onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -29,35 +31,52 @@ import { firebaseConfig } from '../firebase-config.js';
 export const app=initializeApp(firebaseConfig);
 export const auth=getAuth(app);
 export const db=getFirestore(app);
+export const authPersistenceReady=setPersistence(auth,browserLocalPersistence).catch(err=>{
+  console.error('Não foi possível ativar a persistência local da sessão.',err);
+});
 export const googleProvider=new GoogleAuthProvider();
 googleProvider.setCustomParameters({prompt:'select_account'});
 
 export function watchCustomer(callback){
-  return onAuthStateChanged(auth,async user=>{
-    if(user){
-      try{
-        await ensureCustomerProfile(user);
-      }catch(err){
-        console.error('Não foi possível sincronizar o perfil do cliente.',err);
+  let disposed=false;
+  let unsubscribe=()=>{};
+
+  Promise.resolve(authPersistenceReady).finally(()=>{
+    if(disposed) return;
+    unsubscribe=onAuthStateChanged(auth,async user=>{
+      if(user){
+        try{
+          await ensureCustomerProfile(user);
+        }catch(err){
+          console.error('Não foi possível sincronizar o perfil do cliente.',err);
+        }
       }
-    }
-    callback(user);
+      callback(user);
+    });
   });
+
+  return ()=>{
+    disposed=true;
+    unsubscribe();
+  };
 }
 
 export async function loginWithGoogle(){
+  await authPersistenceReady;
   const result=await signInWithPopup(auth,googleProvider);
   try{await ensureCustomerProfile(result.user);}catch(err){console.error(err);}
   return result.user;
 }
 
 export async function loginWithEmail(email,password){
+  await authPersistenceReady;
   const result=await signInWithEmailAndPassword(auth,email.trim(),password);
   try{await ensureCustomerProfile(result.user);}catch(err){console.error(err);}
   return result.user;
 }
 
 export async function registerWithEmail({name,email,password,phone='' }){
+  await authPersistenceReady;
   const normalizedEmail=email.trim().toLowerCase();
   if(normalizedEmail.endsWith('@delivery-pizzaria.local')){
     const err=new Error('reserved-domain');
@@ -105,11 +124,15 @@ export async function getCustomerProfile(uid){
 }
 
 export async function saveCustomerProfile(uid,data){
-  await setDoc(doc(db,'customers',uid),{
+  const patch={
     name:(data.name||'').trim(),
     phone:(data.phone||'').trim(),
     updatedAt:serverTimestamp()
-  },{merge:true});
+  };
+  if(Object.prototype.hasOwnProperty.call(data,'customPhotoURL')){
+    patch.customPhotoURL=String(data.customPhotoURL||'');
+  }
+  await setDoc(doc(db,'customers',uid),patch,{merge:true});
 }
 
 export async function getAddresses(uid){
@@ -228,6 +251,8 @@ export async function lookupBrazilianZip(zip){
 export function friendlyAuthError(err){
   const code=String(err?.code||'');
   if(code.includes('popup-closed')) return 'Login cancelado.';
+  if(code.includes('cancelled-popup-request')) return 'Já existe uma tentativa de login em andamento. Aguarde a janela do Google.';
+  if(code.includes('popup-blocked')) return 'O navegador bloqueou a janela do Google. Libere pop-ups para este site e tente novamente.';
   if(code.includes('unauthorized-domain')) return 'Este domínio ainda não foi autorizado no Firebase Authentication.';
   if(code.includes('invalid-credential')||code.includes('wrong-password')||code.includes('user-not-found')) return 'E-mail ou senha inválidos.';
   if(code.includes('email-already-in-use')) return 'Já existe uma conta com este e-mail.';
