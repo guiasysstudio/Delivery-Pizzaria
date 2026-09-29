@@ -7,6 +7,7 @@ import {
 import {
   collection, doc, getDoc, getDocs, query, where
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+import { showToast, emptyStateHtml, iconHtml, skeletonListHtml } from './ui.js';
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -360,23 +361,25 @@ function customerPhoto(){
   return customerProfile?.customPhotoURL||customerProfile?.photoURL||customer?.photoURL||'';
 }
 
-function setAvatarElement(element,url,fallback='👤'){
+function setAvatarElement(element,url,fallback=''){
   if(!element) return;
+  const renderFallback=()=>{
+    element.replaceChildren();
+    if(fallback) element.textContent=fallback;
+    else element.innerHTML=iconHtml('user-round');
+    element.classList.remove('has-photo');
+  };
   element.replaceChildren();
   if(url){
     const img=document.createElement('img');
     img.src=url;
     img.alt='Foto do perfil';
     img.referrerPolicy='no-referrer';
-    img.onerror=()=>{
-      element.replaceChildren(document.createTextNode(fallback));
-      element.classList.remove('has-photo');
-    };
+    img.onerror=renderFallback;
     element.appendChild(img);
     element.classList.add('has-photo');
   }else{
-    element.textContent=fallback;
-    element.classList.remove('has-photo');
+    renderFallback();
   }
 }
 
@@ -389,11 +392,11 @@ function renderCustomerHeader(){
     const name=customerProfile?.name||customer.displayName||'Cliente';
     $('#accountHello').textContent='Olá, '+name.split(' ')[0];
     $('#accountLabel').textContent='Minha conta';
-    setAvatarElement($('#accountAvatar'),customerPhoto(),(name[0]||'👤').toUpperCase());
+    setAvatarElement($('#accountAvatar'),customerPhoto(),(name[0]||'U').toUpperCase());
   }else{
     $('#accountHello').textContent='Olá!';
     $('#accountLabel').textContent='Entrar ou cadastrar';
-    setAvatarElement($('#accountAvatar'),'','👤');
+    setAvatarElement($('#accountAvatar'),'','');
   }
 }
 
@@ -601,14 +604,14 @@ function productCard(p){
   return `<article class="product-card">
     <div class="product-image-wrap">
       <img class="product-image" src="${attr(pathImage(p.image))}" onerror="this.src='${placeholder}'" alt="${attr(p.name)}">
-      <button class="favorite-card-button ${fav?'active':''}" data-fav="${p.id}" type="button" aria-label="Favoritar">${fav?'♥':'♡'}</button>
+      <button class="favorite-card-button ${fav?'active':''}" data-fav="${p.id}" type="button" aria-label="${fav?'Remover dos favoritos':'Adicionar aos favoritos'}" aria-pressed="${fav?'true':'false'}">${iconHtml('heart')}</button>
       ${best?`<span class="featured-tag promo-tag">${best.promo.discountType==='percentage'?Number(best.promo.discountValue)+'% OFF':'OFERTA'}</span>`:(p.featured?'<span class="featured-tag">Destaque</span>':'')}
     </div>
     <div class="product-content">
       <div><h3>${esc(p.name)}</h3><p>${esc(p.description||'')}</p></div>
       <div class="product-foot">
         <span><small>${p.sizes?.length?'A partir de':''}</small>${best?`<del class="old-price">${money(base)}</del>`:''}<strong class="price">${money(from)}</strong></span>
-        <button class="add-round add-product" data-id="${p.id}" type="button">+</button>
+        <button class="add-round add-product" data-id="${p.id}" type="button" aria-label="Adicionar ${attr(p.name)}">${iconHtml('plus')}</button>
       </div>
     </div>
   </article>`;
@@ -840,7 +843,7 @@ $('#productForm').addEventListener('submit',e=>{
   if(!currentProduct) return;
   const half=document.querySelector('input[name=flavorMode]:checked')?.value==='half';
   if(half&&!currentSecondFlavorId){
-    alert('Escolha o segundo sabor.');
+    showToast('Escolha o segundo sabor.','warning');
     return;
   }
   const second=half?products.find(p=>p.id===currentSecondFlavorId):null;
@@ -1007,8 +1010,8 @@ function renderCart(){
   $('#checkoutBtn').title=storeOpen?'Finalizar pedido':'A pizzaria está fechada para novos pedidos no momento.';
   $('#cartItems').innerHTML=cart.length?cart.map(x=>`<div class="cart-item">
     <div class="cart-item-top"><div><strong>${x.qty}× ${esc(x.name)}</strong><br><small>${[x.size?.name,...(x.extras||[]).map(e=>e.name)].filter(Boolean).map(esc).join(' • ')}</small>${x.note?`<br><small>Obs.: ${esc(x.note)}</small>`:''}</div><strong>${money(x.unitPrice*x.qty)}</strong></div>
-    <div class="mini-actions"><button data-act="minus" data-id="${x.lineId}" type="button">−</button><span>${x.qty}</span><button data-act="plus" data-id="${x.lineId}" type="button">+</button><button data-act="remove" data-id="${x.lineId}" type="button" title="Remover">×</button></div>
-  </div>`).join(''):'<div class="cart-empty"><span>🛒</span><strong>Seu carrinho está vazio</strong><small>Adicione seus favoritos do cardápio.</small></div>';
+    <div class="mini-actions"><button data-act="minus" data-id="${x.lineId}" type="button" aria-label="Diminuir quantidade">${iconHtml('minus')}</button><span>${x.qty}</span><button data-act="plus" data-id="${x.lineId}" type="button" aria-label="Aumentar quantidade">${iconHtml('plus')}</button><button data-act="remove" data-id="${x.lineId}" type="button" aria-label="Remover item">${iconHtml('circle-x')}</button></div>
+  </div>`).join(''):'<div class="cart-empty"><span class="empty-icon-compact">'+iconHtml('shopping-cart')+'</span><strong>Seu carrinho está vazio</strong><small>Adicione produtos do cardápio para começar seu pedido.</small></div>';
   $$('.mini-actions button').forEach(b=>b.onclick=()=>{
     const x=cart.find(i=>i.lineId===b.dataset.id);
     if(!x) return;
@@ -1131,7 +1134,7 @@ $('#registerCustomerForm').onsubmit=async e=>{
         :friendlyAuthError(err);
 
     if(auth.currentUser&&!code.startsWith('auth/')){
-      alert(message+' Sua conta foi criada, mas o cadastro precisa ser concluído em Minha Conta.');
+      showToast(message+' Sua conta foi criada, mas o cadastro precisa ser concluído em Minha Conta.');
       location.href='./account/#profile';
       return;
     }
@@ -1140,17 +1143,19 @@ $('#registerCustomerForm').onsubmit=async e=>{
     $('#registerAuthError').classList.remove('hidden');
   }
 };
-function showAuthError(message){
-  $('#customerAuthError').textContent=message;
-  $('#customerAuthError').classList.remove('hidden');
+function showAuthError(message,success=false){
+  const box=$('#customerAuthError');
+  box.textContent=message;
+  box.classList.remove('hidden');
+  box.classList.toggle('alert-error',!success);
+  box.classList.toggle('alert-success',success);
 }
 $('#forgotPasswordBtn').onclick=async()=>{
   const email=$('#customerLoginEmail').value.trim();
   if(!email) return showAuthError('Digite seu e-mail primeiro.');
   try{
     await resetCustomerPassword(email);
-    showAuthError('Enviamos o link de redefinição para seu e-mail.');
-    $('#customerAuthError').classList.remove('alert-error');
+    showAuthError('Enviamos o link de redefinição para seu e-mail.',true);
   }catch(err){showAuthError(friendlyAuthError(err));}
 };
 
@@ -1342,7 +1347,7 @@ $('#floatingCart').onclick=()=>$('#cartPanel').classList.toggle('open');
 $('#checkoutBtn').onclick=async()=>{
   if(!cart.length) return;
   if(!isOpen()){
-    alert('A pizzaria está fechada para novos pedidos neste momento. No painel administrativo, use Dados da Pizzaria → Modo de funcionamento → Forçar aberto para realizar testes fora do horário.');
+    showToast('A pizzaria está fechada para novos pedidos neste momento. No painel administrativo, use Dados da Pizzaria → Modo de funcionamento → Forçar aberto para realizar testes fora do horário.','warning',{duration:8000});
     return;
   }
   if(!customer){
@@ -1363,7 +1368,7 @@ async function openCheckout(){
 
   if(!customerProfile?.identityComplete||!validFullName(customerProfile?.name||customer.displayName||'')){
     localStorage.setItem('deliveryReturnToCheckout','1');
-    alert('Antes de fazer o primeiro pedido, complete seu nome, telefone e CPF em Minha Conta.');
+    showToast('Antes de fazer o primeiro pedido, complete seu nome, telefone e CPF em Minha Conta.','warning',{duration:7000});
     location.href='./account/#profile';
     return;
   }
@@ -1389,7 +1394,7 @@ async function openCheckout(){
     }
   }catch(err){
     console.error('Falha ao abrir checkout:',err);
-    alert('Não foi possível abrir a finalização do pedido. Atualize a página e tente novamente.');
+    showToast('Não foi possível abrir a finalização do pedido. Atualize a página e tente novamente.','error');
   }
 }
 
@@ -1415,16 +1420,16 @@ $$('input[name=fulfillment]').forEach(r=>r.onchange=()=>{renderCheckoutAddress()
 
 function paymentIcon(label){
   const l=label.toLowerCase();
-  if(l.includes('dinheiro')) return '💵';
-  if(l.includes('pix')) return '◆';
-  if(l.includes('crédito')||l.includes('credito')) return '💳';
-  if(l.includes('débito')||l.includes('debito')) return '💳';
-  return '💰';
+  if(l.includes('dinheiro')) return 'banknote';
+  if(l.includes('pix')) return 'qr-code';
+  if(l.includes('crédito')||l.includes('credito')) return 'credit-card';
+  if(l.includes('débito')||l.includes('debito')) return 'credit-card';
+  return 'wallet-cards';
 }
 function renderPaymentOptions(){
   const list=settings?.payments?.length?settings.payments:defaultSettings.payments;
   if(selectedPayment&&!list.includes(selectedPayment)) selectedPayment='';
-  $('#paymentOptions').innerHTML=list.map(x=>`<label class="payment-choice ${selectedPayment===x?'active':''}"><input type="radio" name="payment" value="${attr(x)}" ${selectedPayment===x?'checked':''}><span class="payment-icon">${paymentIcon(x)}</span><span><strong>${esc(x)}</strong><small>Pagar no recebimento</small></span></label>`).join('');
+  $('#paymentOptions').innerHTML=list.map(x=>`<label class="payment-choice ${selectedPayment===x?'active':''}"><input type="radio" name="payment" value="${attr(x)}" ${selectedPayment===x?'checked':''}><span class="payment-icon">${iconHtml(paymentIcon(x))}</span><span><strong>${esc(x)}</strong><small>Pagar no recebimento</small></span></label>`).join('');
   $$('input[name=payment]').forEach(r=>r.onchange=()=>{
     selectedPayment=r.value;
     renderPaymentOptions();
@@ -1709,6 +1714,9 @@ function installDialogDismissal(){
   });
 }
 installDialogDismissal();
+
+if($('#catalogSections')) $('#catalogSections').innerHTML=skeletonListHtml(5);
+if($('#categoryChips')) $('#categoryChips').innerHTML='<span class="skeleton skeleton-pill" style="width:92px;height:38px"></span><span class="skeleton skeleton-pill" style="width:118px;height:38px"></span><span class="skeleton skeleton-pill" style="width:104px;height:38px"></span>';
 
 loadStore().then(async()=>{
   await authPersistenceReady;
