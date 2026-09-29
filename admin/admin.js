@@ -126,6 +126,7 @@ let printConfig={
   model:localStorage.getItem('deliveryPrintModel')||'thermal80'
 };
 const PRINT_AGENT='http://127.0.0.1:17329';
+const MIN_PRINT_AGENT_VERSION='1.4.0';
 const IMAGE_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadProductImage';
 const STORE_LOGO_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadStoreLogo';
 const STAFF_USER_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageStaffUser';
@@ -1161,6 +1162,17 @@ function savePrintSettings(){
   localStorage.setItem('deliveryPrintModel',printConfig.model);
 }
 
+function versionAtLeast(current,minimum){
+  const a=String(current||'0').split('.').map(x=>Number(x)||0);
+  const b=String(minimum||'0').split('.').map(x=>Number(x)||0);
+  for(let i=0;i<Math.max(a.length,b.length);i++){
+    const left=a[i]||0,right=b[i]||0;
+    if(left>right) return true;
+    if(left<right) return false;
+  }
+  return true;
+}
+
 async function checkPrintAgent(){
   const status=$('#printerAgentStatus');
   if(!status) return false;
@@ -1173,13 +1185,14 @@ async function checkPrintAgent(){
     const printers=Array.isArray(data.printers)?data.printers:[];
     const supportsAgentPrinter=Object.prototype.hasOwnProperty.call(data,'selectedPrinter');
     const selectedPrinter=String(data.selectedPrinter||'').trim();
+    const agentVersion=String(data.version||data.agentVersion||'0.0.0');
 
-    if(!supportsAgentPrinter){
+    if(!supportsAgentPrinter||!versionAtLeast(agentVersion,MIN_PRINT_AGENT_VERSION)){
       status.textContent='● Print Agent desatualizado';
       status.classList.add('off');
       status.classList.remove('ok');
-      if($('#printerAgentInfoState')) $('#printerAgentInfoState').textContent='Atualize para a versão 1.3.0 ou superior';
-      if($('#printerAgentVersion')) $('#printerAgentVersion').textContent=data.version||data.agentVersion||'Anterior à 1.3.0';
+      if($('#printerAgentInfoState')) $('#printerAgentInfoState').textContent='Atualize para a versão '+MIN_PRINT_AGENT_VERSION+' ou superior';
+      if($('#printerAgentVersion')) $('#printerAgentVersion').textContent=agentVersion==='0.0.0'?'Versão antiga':agentVersion;
       return false;
     }
 
@@ -1306,12 +1319,23 @@ function receiptText(o){
   return lines.join('\n');
 }
 
+function printStoreLogoUrl(){
+  const value=String(settings.storeLogo||'').trim();
+  if(!value) return '';
+  if(/^https:\/\//i.test(value)) return value;
+  try{
+    return new URL('../'+value.replace(/^\.?\//,'').replace(/^\//,''),location.href).href;
+  }catch{
+    return '';
+  }
+}
+
 async function sendToPrintAgent(text){
   const payload={
     text,
     copies:1,
     model:printConfig.model,
-    storeLogo:settings.storeLogo||''
+    storeLogo:printStoreLogoUrl()
   };
 
   const response=await fetch(PRINT_AGENT+'/print',{
@@ -2077,6 +2101,7 @@ function refreshCategorySelect(){
 }
 
 let productImageSource=null;
+let productImageUploadKey='';
 let productImageZoom=1;
 let productImageOffset={x:0,y:0};
 let productImageDragging=false;
@@ -2199,7 +2224,9 @@ $('#uploadProductImageBtn')?.addEventListener('click',async()=>{
   const button=$('#uploadProductImageBtn');
   const status=$('#productImageUploadStatus');
   const canvas=$('#productImageCanvas');
-  const name=($('#productName').value||'produto').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'produto';
+  const slug=($('#productName').value||'produto').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'produto';
+  if(!productImageUploadKey) productImageUploadKey=crypto.randomUUID().replace(/-/g,'').slice(0,12);
+  const name=slug+'-'+productImageUploadKey;
 
   button.disabled=true;
   status.textContent='Enviando imagem ao GitHub...';
@@ -2249,6 +2276,7 @@ function editProduct(id){
   if(id&&!hasPermission('productsEdit')) return;
   if(!id&&!hasPermission('productsCreate')) return;
   const p=products.find(x=>x.id===id);
+  productImageUploadKey=p?.id||crypto.randomUUID().replace(/-/g,'').slice(0,12);
   $('#productEditorTitle').textContent=p?'Editar produto':'Novo produto';
   $('#productId').value=p?.id||'';
   $('#productName').value=p?.name||'';
