@@ -79,7 +79,7 @@ const defaultRoleTemplates={
   }}
 };
 
-let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=[],promotions=[],coupons=[],cashSessions=[],currentCashSession=null,currentProfile=null;
+let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=[],promotions=[],coupons=[],cashSessions=[],cashMovements=[],currentCashSession=null,currentProfile=null;
 let unsubscribeOrders=null,soundEnabled=false,knownOrderIds=new Set();
 let printConfig={
   printer:localStorage.getItem('deliveryPrinter')||'',
@@ -1398,12 +1398,29 @@ async function loadCashSessions(){
     const snap=await getDocs(query(collection(db,'cashSessions'),orderBy('openedAt','desc')));
     cashSessions=snap.docs.map(d=>({id:d.id,...d.data()}));
     currentCashSession=cashSessions.find(s=>s.status==='open')||null;
+    await loadCashMovements(currentCashSession?.id||null);
   }catch(err){
     console.warn('Caixas indisponíveis.',err);
     cashSessions=[];
+    cashMovements=[];
     currentCashSession=null;
   }
   renderCash();
+}
+
+async function loadCashMovements(sessionId){
+  cashMovements=[];
+  if(!sessionId) return;
+  try{
+    const snap=await getDocs(collection(db,'cashSessions',sessionId,'movements'));
+    cashMovements=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
+      const at=a.createdAt?.toMillis?.()||0;
+      const bt=b.createdAt?.toMillis?.()||0;
+      return bt-at;
+    });
+  }catch(err){
+    console.warn('Movimentos do caixa indisponíveis.',err);
+  }
 }
 
 function orderWithinCash(order,session){
@@ -1416,7 +1433,7 @@ function orderWithinCash(order,session){
 
 function cashSummary(session=currentCashSession){
   const list=session?orders.filter(o=>orderWithinCash(o,session)):[];
-  const summary={count:list.length,gross:0,money:0,pix:0,debit:0,credit:0,other:0};
+  const summary={count:list.length,gross:0,money:0,pix:0,debit:0,credit:0,other:0,supplies:0,withdrawals:0};
   for(const o of list){
     const value=Number(o.total||0);
     summary.gross+=value;
@@ -1427,6 +1444,18 @@ function cashSummary(session=currentCashSession){
     else if(method.includes('crédito')||method.includes('credito')) summary.credit+=value;
     else summary.other+=value;
   }
+
+  if(session?.id===currentCashSession?.id){
+    for(const movement of cashMovements){
+      const value=Number(movement.amount||0);
+      if(movement.type==='supply') summary.supplies+=value;
+      if(movement.type==='withdrawal') summary.withdrawals+=value;
+    }
+  }else if(session?.summary){
+    summary.supplies=Number(session.summary.supplies||0);
+    summary.withdrawals=Number(session.summary.withdrawals||0);
+  }
+
   return summary;
 }
 
@@ -1444,7 +1473,20 @@ function renderCash(){
   $('#cashCreditTotal').textContent=money(summary.credit);
 
   if(currentCashSession){
-    $('#cashSessionMeta').innerHTML=`<p><strong>Aberto por:</strong> ${esc(currentCashSession.openedByName||'Usuário')}</p><p><strong>Valor inicial:</strong> ${money(currentCashSession.openingAmount)}</p><p><strong>Abertura:</strong> ${formatDate(currentCashSession.openedAt)}</p>`;
+    const expected=Number(currentCashSession.openingAmount||0)+summary.money+summary.supplies-summary.withdrawals;
+    $('#cashSessionMeta').innerHTML=`
+      <p><strong>Aberto por:</strong> ${esc(currentCashSession.openedByName||'Usuário')}</p>
+      <p><strong>Valor inicial:</strong> ${money(currentCashSession.openingAmount)}</p>
+      <p><strong>Suprimentos:</strong> ${money(summary.supplies)} • <strong>Sangrias:</strong> ${money(summary.withdrawals)}</p>
+      <p><strong>Dinheiro esperado agora:</strong> ${money(expected)}</p>
+      <p><strong>Abertura:</strong> ${formatDate(currentCashSession.openedAt)}</p>`;
+  }
+
+  const movementsHost=$('#cashMovements');
+  if(movementsHost){
+    movementsHost.innerHTML=currentCashSession
+      ?(cashMovements.length?cashMovements.map(m=>`<div class="data-row"><div class="data-main"><strong>${m.type==='supply'?'Suprimento':'Sangria'}</strong><small>${esc(m.note||'Sem observação')} • ${formatDate(m.createdAt)} • ${esc(m.createdByName||'')}</small></div><span class="status-pill ${m.type==='supply'?'status-completed':'status-cancelled'}">${m.type==='supply'?'+':'−'}</span><strong>${money(m.amount)}</strong></div>`).join(''):'<div class="empty-state">Nenhum suprimento ou sangria neste caixa.</div>')
+      :'<div class="empty-state">Abra um caixa para registrar movimentos.</div>';
   }
 
   $('#cashHistory').innerHTML=cashSessions.length?cashSessions.slice(0,20).map(s=>{
@@ -1481,6 +1523,8 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
       });
     });
     await loadCashSessions();
+    cashMovements=[];
+    if(currentCashSession) await loadCashMovements(currentCashSession.id);
     renderCash();
   }catch(err){
     console.error(err);
@@ -1493,10 +1537,55 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
   }
 });
 
+function openCashMovement(type){
+  if(!hasPermission('cashOperate')||!currentCashSession) return;
+  $('#cashMovementType').value=type;
+  $('#cashMovementTitle').textContent=type==='supply'?'Adicionar suprimento':'Registrar sangria';
+  $('#cashMovementAmount').value='';
+  $('#cashMovementNote').value='';
+  $('#cashMovementError').classList.add('hidden');
+  $('#cashMovementDialog').showModal();
+  setTimeout(()=>$('#cashMovementAmount').focus(),50);
+}
+
+$('#cashSupplyBtn')?.addEventListener('click',()=>openCashMovement('supply'));
+$('#cashWithdrawalBtn')?.addEventListener('click',()=>openCashMovement('withdrawal'));
+
+$('#cashMovementForm')?.addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(!hasPermission('cashOperate')||!currentCashSession) return;
+  const type=$('#cashMovementType').value==='withdrawal'?'withdrawal':'supply';
+  const amount=Number($('#cashMovementAmount').value||0);
+  const note=$('#cashMovementNote').value.trim();
+  if(!(amount>0)){
+    $('#cashMovementError').textContent='Informe um valor maior que zero.';
+    $('#cashMovementError').classList.remove('hidden');
+    return;
+  }
+
+  try{
+    await addDoc(collection(db,'cashSessions',currentCashSession.id,'movements'),{
+      type,
+      amount,
+      note,
+      createdBy:auth.currentUser.uid,
+      createdByName:currentProfile.displayName||currentProfile.username||'Usuário',
+      createdAt:serverTimestamp()
+    });
+    $('#cashMovementDialog').close();
+    await loadCashMovements(currentCashSession.id);
+    renderCash();
+  }catch(err){
+    console.error(err);
+    $('#cashMovementError').textContent='Não foi possível salvar o movimento.';
+    $('#cashMovementError').classList.remove('hidden');
+  }
+});
+
 $('#closeCashBtn')?.addEventListener('click',()=>{
   if(!hasPermission('cashOperate')||!currentCashSession) return;
   const summary=cashSummary();
-  const expected=Number(currentCashSession.openingAmount||0)+summary.money;
+  const expected=Number(currentCashSession.openingAmount||0)+summary.money+summary.supplies-summary.withdrawals;
   $('#cashClosingAmount').value=expected.toFixed(2);
   $('#cashClosingNote').value='';
   $('#cashClosePreview').innerHTML=`<p>Dinheiro esperado: <strong>${money(expected)}</strong></p><p>Vendas totais do período: <strong>${money(summary.gross)}</strong></p>`;
@@ -1510,7 +1599,7 @@ $('#cashCloseForm')?.addEventListener('submit',async e=>{
   const session=currentCashSession;
   const declared=Number($('#cashClosingAmount').value||0);
   const summary=cashSummary(session);
-  const expected=Number(session.openingAmount||0)+summary.money;
+  const expected=Number(session.openingAmount||0)+summary.money+summary.supplies-summary.withdrawals;
   const stateRef=doc(db,'cashState','current');
   const sessionRef=doc(db,'cashSessions',session.id);
 
