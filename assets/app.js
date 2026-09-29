@@ -1,7 +1,8 @@
 import {
   auth, authPersistenceReady, db, watchCustomer, loginWithGoogle, loginWithEmail, registerWithEmail,
   resetCustomerPassword, friendlyAuthError, lookupBrazilianZip, getCustomerProfile, saveCustomerProfile, getAddresses,
-  saveAddress, setDefaultAddress, getFavorites, setFavorite
+  saveAddress, setDefaultAddress, getFavorites, setFavorite, saveCustomerIdentity,
+  formatCpf, validCpf, formatPhone, validFullName
 } from './customer-auth.js';
 import {
   collection, doc, getDoc, getDocs, runTransaction, addDoc, serverTimestamp, query, where
@@ -19,6 +20,7 @@ let selectedCategory='all';
 let currentProduct=null,currentQty=1,currentSecondFlavorId='';
 let customer=null,customerProfile=null,addresses=[],selectedAddressId=localStorage.getItem('deliverySelectedAddress')||'';
 let favorites=new Set(),afterAuthAction=null,selectedPayment='',activeCoupon=null,customerOrderStats={count:0,spent:0};
+let deferredInstallPrompt=null;
 let pendingCouponCode=normalizeCouponCode(new URLSearchParams(location.search).get('coupon')||'');
 
 const defaultSettings={
@@ -27,7 +29,17 @@ const defaultSettings={
   phone:'',
   storeAddress:'',
   storeZip:'',
+  storeStreet:'',
+  storeNumber:'',
+  storeNeighborhood:'',
+  storeComplement:'',
+  storeCity:'',
+  storeState:'',
   storeLocation:null,
+  storeLogo:'',
+  googleMapsUrl:'',
+  whatsapp:'',
+  customerCancelMinutes:2,
   deliveryPricingMode:'fixed',
   deliveryFee:5,
   deliveryZones:[],
@@ -169,13 +181,85 @@ function isOpen(){
   return now>=day.open||now<=day.close;
 }
 
+function storeAddressText(){
+  const structured=[
+    [settings?.storeStreet,settings?.storeNumber].filter(Boolean).join(', '),
+    settings?.storeNeighborhood,
+    [settings?.storeCity,settings?.storeState].filter(Boolean).join('/')
+  ].filter(Boolean).join(' • ');
+  return structured||settings?.storeAddress||'';
+}
+
+function normalizedWhatsapp(){
+  const digits=String(settings?.whatsapp||settings?.phone||'').replace(/\D/g,'');
+  if(!digits) return '';
+  return digits.startsWith('55')?digits:'55'+digits;
+}
+
+function storeMapsUrl(){
+  if(settings?.googleMapsUrl) return settings.googleMapsUrl;
+  const address=storeAddressText();
+  return address?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address):'';
+}
+
+function renderStoreIdentity(){
+  const logo=settings?.storeLogo||'';
+  const headerLogo=$('#headerStoreLogo');
+  const headerFallback=$('#headerStoreLogoFallback');
+  if(headerLogo&&headerFallback){
+    headerLogo.classList.toggle('hidden',!logo);
+    headerFallback.classList.toggle('hidden',!!logo);
+    if(logo){
+      headerLogo.src=pathImage(logo);
+      headerLogo.onerror=()=>{headerLogo.classList.add('hidden');headerFallback.classList.remove('hidden');};
+    }
+  }
+
+  const aboutLogo=$('#aboutStoreLogo');
+  const aboutFallback=$('#aboutStoreLogoFallback');
+  if(aboutLogo&&aboutFallback){
+    aboutLogo.classList.toggle('hidden',!logo);
+    aboutFallback.classList.toggle('hidden',!!logo);
+    if(logo){
+      aboutLogo.src=pathImage(logo);
+      aboutLogo.onerror=()=>{aboutLogo.classList.add('hidden');aboutFallback.classList.remove('hidden');};
+    }
+  }
+
+  const address=storeAddressText();
+  const maps=storeMapsUrl();
+  const whatsapp=normalizedWhatsapp();
+
+  $('#aboutStoreName').textContent=settings?.storeName||'Pizzaria';
+  $('#aboutStoreSubtitle').textContent=settings?.subtitle||'';
+  $('#aboutStoreAddress').textContent=address||'Não informado';
+  $('#aboutStorePhone').textContent=settings?.whatsapp||settings?.phone||'Não informado';
+
+  const mapsLink=$('#aboutMapsLink');
+  mapsLink.classList.toggle('hidden',!maps);
+  if(maps) mapsLink.href=maps;
+
+  const footerLink=$('#footerAddressLink');
+  $('#footerAddress').textContent=address;
+  footerLink.classList.toggle('is-disabled',!maps);
+  if(maps) footerLink.href=maps; else footerLink.removeAttribute('href');
+
+  const waMessage='Olá! Vim pelo site da '+(settings?.storeName||'pizzaria')+'.';
+  const waUrl=whatsapp?'https://wa.me/'+whatsapp+'?text='+encodeURIComponent(waMessage):'';
+  const aboutWa=$('#aboutWhatsappLink');
+  const floatingWa=$('#floatingWhatsapp');
+  aboutWa.classList.toggle('hidden',!waUrl);
+  floatingWa.classList.toggle('hidden',!waUrl);
+  if(waUrl){aboutWa.href=waUrl;floatingWa.href=waUrl;}
+}
+
 function renderStore(){
   document.title=`${settings.storeName} • Delivery`;
   $('#storeName').textContent=settings.storeName;
   $('#headerStoreName').textContent=settings.storeName;
   $('#storeSubtitle').textContent=settings.subtitle||'';
   $('#footerStore').textContent=settings.storeName;
-  $('#footerAddress').textContent=settings.storeAddress||'';
+  renderStoreIdentity();
   $('#minimumOrderText').textContent=Number(settings.minimumOrder||0)>0?`Pedido mínimo ${money(settings.minimumOrder)}`:'';
   const open=isOpen();
   $('#storeStatus').textContent=open?'● Aberto agora':'● Fechado agora';
@@ -395,15 +479,48 @@ $('#removeCouponBtn')?.addEventListener('click',()=>{
   renderCart();
 });
 
-function renderCategories(){
-  const items=[{id:'all',name:'Todos'},...categories];
-  $('#categoryChips').innerHTML=items.map(c=>`<button class="chip ${selectedCategory===c.id?'active':''}" data-id="${c.id}">${esc(c.name)}</button>`).join('');
-  $$('.chip').forEach(b=>b.onclick=()=>{
-    selectedCategory=b.dataset.id;
-    renderCategories();
-    renderCatalog();
-    $('#catalogTitle').textContent=b.dataset.id==='all'?'Todos os produtos':categories.find(c=>c.id===b.dataset.id)?.name||'Cardápio';
+function categoryRank(category){
+  const name=String(category?.name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  if(name.includes('combo')) return 0;
+  if(name.includes('pizza')&&!name.includes('doce')) return 1;
+  if(name.includes('pizza')&&name.includes('doce')) return 2;
+  if(name.includes('bebida')||name.includes('refrigerante')) return 3;
+  return 20+Number(category?.order||0);
+}
+
+function orderedCategories(){
+  return [...categories].sort((a,b)=>{
+    const rank=categoryRank(a)-categoryRank(b);
+    if(rank) return rank;
+    const order=Number(a.order||0)-Number(b.order||0);
+    return order||String(a.name||'').localeCompare(String(b.name||''),'pt-BR');
   });
+}
+
+function renderCategories(){
+  const items=[{id:'all',name:'Todos'},...orderedCategories()];
+  $('#categoryChips').innerHTML=items.map(cat=>`<button class="chip ${selectedCategory===cat.id?'active':''}" data-id="${cat.id}">${esc(cat.name)}</button>`).join('');
+  $$('.chip').forEach(b=>b.onclick=()=>{
+    const id=b.dataset.id;
+    selectedCategory=id;
+    renderCategories();
+
+    const term=$('#searchInput').value.trim();
+    if(term){
+      renderCatalog();
+      return;
+    }
+
+    if(id==='all'){
+      $('#catalogRoot').scrollIntoView({behavior:'smooth',block:'start'});
+      return;
+    }
+
+    document.getElementById('category-section-'+id)?.scrollIntoView({behavior:'smooth',block:'start'});
+  });
+
+  const active=$('#categoryChips .chip.active');
+  active?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
 }
 
 function productCard(p){
@@ -434,19 +551,78 @@ function bindProductCards(scope=document){
   });
 }
 
+let categoryObserver=null;
+
 function renderFeatured(){
-  const list=products.filter(p=>p.featured).slice(0,6);
-  $('#featuredSection').classList.toggle('hidden',!list.length||selectedCategory!=='all'||$('#searchInput').value.trim());
+  const term=$('#searchInput').value.trim();
+  const list=products.filter(p=>p.featured).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'pt-BR')).slice(0,6);
+  $('#featuredSection').classList.toggle('hidden',!list.length||!!term);
   $('#featuredCatalog').innerHTML=list.map(productCard).join('');
   bindProductCards($('#featuredCatalog'));
 }
 
+function bindCategoryScrollSpy(){
+  categoryObserver?.disconnect();
+  const sections=[...document.querySelectorAll('[data-catalog-category]')];
+  if(!sections.length) return;
+
+  categoryObserver=new IntersectionObserver(entries=>{
+    const visible=entries
+      .filter(entry=>entry.isIntersecting)
+      .sort((a,b)=>Math.abs(a.boundingClientRect.top)-Math.abs(b.boundingClientRect.top))[0];
+    if(!visible) return;
+    const id=visible.target.dataset.catalogCategory;
+    if(id&&id!==selectedCategory){
+      selectedCategory=id;
+      renderCategories();
+    }
+  },{rootMargin:'-150px 0px -55% 0px',threshold:[0,.05,.2]});
+
+  sections.forEach(section=>categoryObserver.observe(section));
+}
+
 function renderCatalog(){
   const term=$('#searchInput').value.trim().toLowerCase();
-  const list=products.filter(p=>(selectedCategory==='all'||p.categoryId===selectedCategory)&&(!term||`${p.name} ${p.description||''}`.toLowerCase().includes(term)));
-  $('#catalogEmpty').classList.toggle('hidden',list.length>0);
-  $('#catalog').innerHTML=list.map(productCard).join('');
-  bindProductCards($('#catalog'));
+  const flat=$('#catalog');
+  const sections=$('#catalogSections');
+
+  if(term){
+    categoryObserver?.disconnect();
+    sections.innerHTML='';
+    sections.classList.add('hidden');
+    flat.classList.remove('hidden');
+    const list=products
+      .filter(p=>(selectedCategory==='all'||p.categoryId===selectedCategory)&&`${p.name} ${p.description||''}`.toLowerCase().includes(term))
+      .sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'pt-BR'));
+    $('#catalogTitle').textContent=selectedCategory==='all'?'Resultados da busca':categories.find(x=>x.id===selectedCategory)?.name||'Resultados';
+    $('#catalogEmpty').classList.toggle('hidden',list.length>0);
+    flat.innerHTML=list.map(productCard).join('');
+    bindProductCards(flat);
+  }else{
+    flat.classList.add('hidden');
+    flat.innerHTML='';
+    sections.classList.remove('hidden');
+    $('#catalogTitle').textContent='Cardápio';
+
+    const groups=orderedCategories().map(category=>({
+      category,
+      items:products.filter(p=>p.categoryId===category.id)
+        .sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'pt-BR'))
+    })).filter(group=>group.items.length);
+
+    $('#catalogEmpty').classList.toggle('hidden',groups.length>0);
+    sections.innerHTML=groups.map(({category,items})=>`
+      <section id="category-section-${category.id}" class="catalog-category-section" data-catalog-category="${category.id}">
+        <div class="section-heading category-section-heading">
+          <div><span class="eyebrow">CARDÁPIO</span><h2>${esc(category.name)}</h2></div>
+          <span class="category-count">${items.length} item(ns)</span>
+        </div>
+        <div class="catalog-grid">${items.map(productCard).join('')}</div>
+      </section>`).join('');
+    bindProductCards(sections);
+    requestAnimationFrame(bindCategoryScrollSpy);
+  }
+
   renderFeatured();
 }
 
@@ -545,7 +721,9 @@ function currentPromotionSnapshot(){
     id:best.promo.id,
     name:best.promo.name||'Promoção',
     discountType:best.promo.discountType,
-    discountValue:Number(best.promo.discountValue||0)
+    discountValue:Number(best.promo.discountValue||0),
+    originalBasePrice:raw,
+    promotedBasePrice:best.price
   };
 }
 function chosenUnitPrice(){
@@ -783,6 +961,19 @@ function setAuthMode(mode){
 $('#authCloseBtn').onclick=()=>{$('#authDialog').close();afterAuthAction=null;};
 $('#showRegisterBtn').onclick=()=>setAuthMode('register');
 $('#showLoginBtn').onclick=()=>setAuthMode('login');
+async function redirectIncompleteCustomerProfile(user){
+  if(!user) return false;
+  try{
+    const profile=await getCustomerProfile(user.uid);
+    if(profile?.identityComplete===true&&validFullName(profile?.name||user.displayName||'')) return false;
+  }catch(err){
+    console.warn('Não foi possível conferir se o cadastro está completo.',err);
+  }
+  localStorage.setItem('deliveryReturnAfterProfile','../');
+  location.href='./account/#profile';
+  return true;
+}
+
 let googleLoginBusy=false;
 
 $('#googleLoginBtn').onclick=async()=>{
@@ -795,9 +986,10 @@ $('#googleLoginBtn').onclick=async()=>{
   $('#customerAuthError').classList.add('hidden');
 
   try{
-    await loginWithGoogle();
+    const user=await loginWithGoogle();
     if($('#authDialog').open) $('#authDialog').close();
     clearLoginQuery();
+    if(await redirectIncompleteCustomerProfile(user)) return;
   }catch(err){
     console.error('Falha no login Google:',err);
     showAuthError(friendlyAuthError(err));
@@ -811,9 +1003,10 @@ $('#googleLoginBtn').onclick=async()=>{
 $('#loginCustomerForm').onsubmit=async e=>{
   e.preventDefault();
   try{
-    await loginWithEmail($('#customerLoginEmail').value,$('#customerLoginPassword').value);
+    const user=await loginWithEmail($('#customerLoginEmail').value,$('#customerLoginPassword').value);
     if($('#authDialog').open) $('#authDialog').close();
     clearLoginQuery();
+    if(await redirectIncompleteCustomerProfile(user)) return;
   }catch(err){
     showAuthError(friendlyAuthError(err));
   }
@@ -821,17 +1014,48 @@ $('#loginCustomerForm').onsubmit=async e=>{
 
 $('#registerCustomerForm').onsubmit=async e=>{
   e.preventDefault();
+  const name=$('#registerName').value.trim();
+  const phone=$('#registerPhone').value.trim();
+  const cpf=$('#registerCpf').value.trim();
+
+  if(!validFullName(name)){
+    $('#registerAuthError').textContent='Informe seu nome completo, com pelo menos nome e sobrenome.';
+    $('#registerAuthError').classList.remove('hidden');
+    return;
+  }
+  if(!validCpf(cpf)){
+    $('#registerAuthError').textContent='Informe um CPF válido.';
+    $('#registerAuthError').classList.remove('hidden');
+    return;
+  }
+
   try{
-    await registerWithEmail({
-      name:$('#registerName').value,
-      phone:$('#registerPhone').value,
+    const user=await registerWithEmail({
+      name,
+      phone,
       email:$('#registerEmail').value,
       password:$('#registerPassword').value
     });
+    await saveCustomerIdentity({name,phone,cpf});
+    customerProfile=await getCustomerProfile(user.uid);
     if($('#authDialog').open) $('#authDialog').close();
     clearLoginQuery();
   }catch(err){
-    $('#registerAuthError').textContent=friendlyAuthError(err);
+    console.error('Falha no cadastro:',err);
+    const code=String(err?.code||'');
+    const message=code.includes('cpf_already_registered')
+      ?'Este CPF já está vinculado a outra conta.'
+      :code.includes('invalid_cpf')
+        ?'Informe um CPF válido.'
+        :friendlyAuthError(err);
+
+    if(auth.currentUser&&!code.startsWith('auth/')){
+      alert(message+' Sua conta foi criada, mas o cadastro precisa ser concluído em Minha Conta.');
+      location.href='./account/#profile';
+      return;
+    }
+
+    $('#registerAuthError').textContent=message;
     $('#registerAuthError').classList.remove('hidden');
   }
 };
@@ -849,6 +1073,8 @@ $('#forgotPasswordBtn').onclick=async()=>{
   }catch(err){showAuthError(friendlyAuthError(err));}
 };
 
+$('#aboutBtn')?.addEventListener('click',()=>$('#aboutDialog').showModal());
+$('#footerAboutBtn')?.addEventListener('click',()=>$('#aboutDialog').showModal());
 $('#accountBtn').onclick=()=>customer?location.href='./account/':openAuth();
 $('#addressSelectorBtn').onclick=openAddressSelector;
 $('#addressSelectorClose').onclick=()=>$('#addressSelectorDialog').close();
@@ -992,7 +1218,11 @@ $('#addressEditorForm').onsubmit=async e=>{
   }
 };
 
-$('#searchInput').addEventListener('input',renderCatalog);
+$('#searchInput').addEventListener('input',()=>{
+  if(!$('#searchInput').value.trim()) selectedCategory='all';
+  renderCategories();
+  renderCatalog();
+});
 $('#desktopCartBtn').onclick=()=>$('#cartPanel').scrollIntoView({behavior:'smooth',block:'start'});
 $('#mobileHomeBtn')?.addEventListener('click',()=>window.scrollTo({top:0,behavior:'smooth'}));
 $('#mobileSearchBtn')?.addEventListener('click',()=>{
@@ -1015,7 +1245,7 @@ $('#floatingCart').onclick=()=>$('#cartPanel').classList.toggle('open');
 $('#checkoutBtn').onclick=async()=>{
   if(!cart.length) return;
   if(!isOpen()){
-    alert('A pizzaria está fechada para novos pedidos neste momento. No painel administrativo, use Configurações → Modo de funcionamento → Forçar aberto para realizar testes fora do horário.');
+    alert('A pizzaria está fechada para novos pedidos neste momento. No painel administrativo, use Dados da Pizzaria → Modo de funcionamento → Forçar aberto para realizar testes fora do horário.');
     return;
   }
   if(!customer){
@@ -1033,6 +1263,14 @@ async function openCheckout(){
     return;
   }
   if(!cart.length) return;
+
+  if(!customerProfile?.identityComplete||!validFullName(customerProfile?.name||customer.displayName||'')){
+    localStorage.setItem('deliveryReturnToCheckout','1');
+    alert('Antes de fazer o primeiro pedido, complete seu nome, telefone e CPF em Minha Conta.');
+    location.href='./account/#profile';
+    return;
+  }
+
   try{
     if(fulfillment()==='delivery'){
       const address=activeAddress();
@@ -1141,7 +1379,10 @@ function secureOrderErrorMessage(code,data={}){
     delivery_not_supported:'Esse endereço está fora da área de entrega.',
     invalid_payment:'Escolha uma forma de pagamento válida.',
     invalid_change:'O valor informado para troco é menor que o total.',
-    phone_required:'Informe um telefone de contato.'
+    phone_required:'Informe um telefone de contato.',
+    invalid_phone:'Informe um telefone válido com DDD.',
+    profile_incomplete:'Complete seu cadastro com nome, telefone e CPF antes de pedir.',
+    full_name_required:'Informe seu nome completo, com nome e sobrenome.'
   };
   return map[code]||data?.message||'Não foi possível validar o pedido no servidor.';
 }
@@ -1346,6 +1587,67 @@ function showCheckoutError(message){
 }
 $('#successClose').onclick=()=>$('#successDialog').close();
 
+function bindFormattedInput(selector,formatter){
+  const input=$(selector);
+  if(!input) return;
+  const apply=()=>{input.value=formatter(input.value);};
+  input.addEventListener('input',apply);
+  input.addEventListener('blur',apply);
+}
+
+function formatCepInput(value){
+  const d=String(value||'').replace(/\D/g,'').slice(0,8);
+  return d.length>5?d.slice(0,5)+'-'+d.slice(5):d;
+}
+
+bindFormattedInput('#registerPhone',formatPhone);
+bindFormattedInput('#registerCpf',formatCpf);
+bindFormattedInput('#addressPhone',formatPhone);
+bindFormattedInput('#checkoutPhone',formatPhone);
+bindFormattedInput('#addressZip',formatCepInput);
+
+function isStandalonePwa(){
+  return window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
+}
+
+function isIosDevice(){
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+    (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+}
+
+function updateInstallButton(){
+  const button=$('#installAppBtn');
+  if(!button) return;
+  const canOffer=!isStandalonePwa()&&(!!deferredInstallPrompt||isIosDevice());
+  button.classList.toggle('hidden',!canOffer);
+  button.textContent=isIosDevice()&&!deferredInstallPrompt?'▣ Adicionar à Tela de Início':'▣ Instalar aplicativo';
+}
+
+window.addEventListener('beforeinstallprompt',event=>{
+  event.preventDefault();
+  deferredInstallPrompt=event;
+  updateInstallButton();
+});
+
+window.addEventListener('appinstalled',()=>{
+  deferredInstallPrompt=null;
+  updateInstallButton();
+});
+
+$('#installAppBtn')?.addEventListener('click',async()=>{
+  if(isStandalonePwa()) return;
+  if(deferredInstallPrompt){
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice.catch(()=>null);
+    deferredInstallPrompt=null;
+    updateInstallButton();
+    return;
+  }
+  if(isIosDevice()) $('#iosInstallDialog').showModal();
+});
+
+updateInstallButton();
+
 function installDialogDismissal(){
   $$('dialog').forEach(dialog=>{
     dialog.querySelectorAll('.dialog-close').forEach(btn=>{
@@ -1364,12 +1666,24 @@ installDialogDismissal();
 
 loadStore().then(async()=>{
   await authPersistenceReady;
-  if(new URLSearchParams(location.search).get('login')==='1'){
-    if(auth.currentUser){
-      clearLoginQuery();
-    }else{
-      openAuth();
-    }
+  const params=new URLSearchParams(location.search);
+  if(params.get('login')==='1'){
+    if(auth.currentUser) clearLoginQuery();
+    else openAuth();
+  }
+  if(params.get('checkout')==='1'&&auth.currentUser){
+    const url=new URL(location.href);
+    url.searchParams.delete('checkout');
+    history.replaceState(null,'',url.pathname+(url.search?url.search:'')+url.hash);
+    let tries=0;
+    const resume=()=>{
+      if(customer&&customerProfile?.identityComplete){
+        openCheckout();
+        return;
+      }
+      if(++tries<12) setTimeout(resume,150);
+    };
+    resume();
   }
 });
 setInterval(()=>{

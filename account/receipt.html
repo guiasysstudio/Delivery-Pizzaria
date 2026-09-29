@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#b91c1c">
+  <title>Comprovante do pedido</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body class="receipt-body">
+  <main class="receipt-shell">
+    <div class="receipt-toolbar no-print">
+      <a class="btn btn-secondary" href="./#orders">← Meus pedidos</a>
+      <button id="printReceiptBtn" class="btn btn-primary" type="button">Imprimir / Salvar PDF</button>
+    </div>
+    <article id="customerReceipt" class="customer-receipt panel">
+      <div id="receiptLoading">Carregando comprovante...</div>
+    </article>
+  </main>
+  <script type="module" src="./receipt.js"></script>
+</body>
+</html>

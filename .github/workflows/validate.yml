@@ -20,6 +20,7 @@ jobs:
           node --check assets/app.js
           node --check assets/customer-auth.js
           node --check account/account.js
+          node --check account/receipt.js
           node --check admin/admin.js
           node --check admin/print.js
           node --check service-worker.js
@@ -52,6 +53,7 @@ jobs:
           pairs = [
               (Path('assets/app.js'), Path('index.html')),
               (Path('account/account.js'), Path('account/index.html')),
+              (Path('account/receipt.js'), Path('account/receipt.html')),
               (Path('admin/admin.js'), Path('admin/index.html')),
               (Path('admin/print.js'), Path('admin/print.html')),
           ]
@@ -97,6 +99,8 @@ jobs:
           test -f index.html
           test -f admin/index.html
           test -f account/index.html
+          test -f account/receipt.html
+          test -f account/receipt.js
           test -f firebase-config.js
           test -f firestore.rules
           test -f manifest.webmanifest

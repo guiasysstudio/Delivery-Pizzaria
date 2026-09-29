@@ -80,23 +80,37 @@ const defaultRoleTemplates={
 };
 
 let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=[],promotions=[],coupons=[],cashSessions=[],cashMovements=[],currentCashSession=null,currentProfile=null;
-let unsubscribeOrders=null,soundEnabled=false,knownOrderIds=new Set();
+let unsubscribeOrders=null,soundEnabled=localStorage.getItem('deliverySoundEnabled')==='1',knownOrderIds=new Set();
 let printConfig={
   printer:localStorage.getItem('deliveryPrinter')||'',
   autoPrint:localStorage.getItem('deliveryAutoPrint')==='1',
-  printPending:localStorage.getItem('deliveryPrintPending')==='1'
+  printPending:localStorage.getItem('deliveryPrintPending')==='1',
+  model:localStorage.getItem('deliveryPrintModel')||'thermal80'
 };
 const PRINT_AGENT='http://127.0.0.1:17329';
 const IMAGE_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadProductImage';
+const STORE_LOGO_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadStoreLogo';
 const printedOrderIds=new Set(JSON.parse(sessionStorage.getItem('deliveryPrintedOrders')||'[]'));
 
 const defaults={
   storeName:'Delivery Pizzaria',
   subtitle:'Pizza quentinha, do forno para sua casa.',
   phone:'',
+  whatsapp:'',
   storeAddress:'',
   storeZip:'',
+  storeStreet:'',
+  storeNumber:'',
+  storeNeighborhood:'',
+  storeComplement:'',
+  storeCity:'',
+  storeState:'',
   storeLocation:null,
+  storeLogo:'',
+  googleMapsUrl:'',
+  customerCancelMinutes:2,
+  notificationSound:'bell',
+  notificationVolume:70,
   deliveryPricingMode:'fixed',
   deliveryFee:5,
   deliveryZones:[],
@@ -318,6 +332,7 @@ async function initializeAdmin(){
   }
 
   if(hasPermission('cashView')) renderCash();
+  if($('#soundBtn')) $('#soundBtn').textContent=soundEnabled?'🔔 Som ativado':'🔕 Ativar som';
 }
 async function loadRoles(){
   try{
@@ -435,15 +450,11 @@ function notifyNewOrder(o){
   }
 }
 
-function beep(){
-  const c=new AudioContext(),osc=c.createOscillator(),gain=c.createGain();
-  osc.connect(gain); gain.connect(c.destination);
-  osc.frequency.value=880; gain.gain.value=.08; osc.start();
-  setTimeout(()=>{osc.stop();c.close();},400);
-}
+function beep(){playNotificationSound();}
 
 $('#soundBtn').onclick=async()=>{
   soundEnabled=!soundEnabled;
+  localStorage.setItem('deliverySoundEnabled',soundEnabled?'1':'0');
   if(soundEnabled&&'Notification' in window&&Notification.permission==='default'){
     await Notification.requestPermission();
   }
@@ -498,7 +509,7 @@ function switchView(v){
     printing:['ESTAÇÃO','Impressão'],
     users:['SEGURANÇA','Usuários'],
     roles:['SEGURANÇA','Perfis de acesso'],
-    settings:['SISTEMA','Configurações']
+    settings:['PIZZARIA','Dados da Pizzaria']
   };
 
   $('#viewEyebrow').textContent=titles[v][0];
@@ -508,6 +519,148 @@ function switchView(v){
   if(v==='cash') renderCash();
   if(v==='roles') renderRoles();
 }
+
+function formatPhoneInput(value){
+  const d=String(value||'').replace(/\D/g,'').slice(0,11);
+  if(d.length<=2) return d?('('+d):'';
+  if(d.length<=6) return '('+d.slice(0,2)+') '+d.slice(2);
+  if(d.length<=10) return '('+d.slice(0,2)+') '+d.slice(2,6)+'-'+d.slice(6);
+  return '('+d.slice(0,2)+') '+d.slice(2,7)+'-'+d.slice(7);
+}
+
+function formatCepInput(value){
+  const d=String(value||'').replace(/\D/g,'').slice(0,8);
+  return d.length>5?d.slice(0,5)+'-'+d.slice(5):d;
+}
+
+function bindAdminFormattedInput(selector,formatter){
+  const input=$(selector);
+  if(!input) return;
+  input.addEventListener('input',()=>{input.value=formatter(input.value);});
+}
+
+bindAdminFormattedInput('#setPhone',formatPhoneInput);
+bindAdminFormattedInput('#setWhatsapp',formatPhoneInput);
+bindAdminFormattedInput('#setStoreZip',formatCepInput);
+bindAdminFormattedInput('#deliveryTestZip',formatCepInput);
+
+function renderStoreLogoPreview(){
+  const host=$('#storeLogoPreview');
+  if(!host) return;
+  const value=$('#setStoreLogo')?.value?.trim()||'';
+  host.replaceChildren();
+  if(!value){
+    host.textContent='🍕';
+    host.classList.remove('has-image');
+    return;
+  }
+  const img=document.createElement('img');
+  img.alt='Logo da pizzaria';
+  img.src=/^https?:\/\//i.test(value)?value:'../'+value.replace(/^\.?\//,'').replace(/^\//,'');
+  img.onerror=()=>{
+    host.replaceChildren(document.createTextNode('🍕'));
+    host.classList.remove('has-image');
+  };
+  host.appendChild(img);
+  host.classList.add('has-image');
+}
+
+$('#chooseStoreLogoBtn')?.addEventListener('click',()=>$('#storeLogoFile').click());
+$('#removeStoreLogoBtn')?.addEventListener('click',()=>{
+  $('#setStoreLogo').value='';
+  $('#storeLogoStatus').textContent='Logo padrão selecionada.';
+  renderStoreLogoPreview();
+});
+
+$('#storeLogoFile')?.addEventListener('change',async e=>{
+  const file=e.target.files?.[0];
+  if(!file) return;
+  if(file.size>8*1024*1024){
+    alert('Escolha uma imagem de até 8 MB.');
+    e.target.value='';
+    return;
+  }
+
+  const button=$('#chooseStoreLogoBtn');
+  button.disabled=true;
+  $('#storeLogoStatus').textContent='Preparando logo...';
+
+  try{
+    const dataUrl=await new Promise((resolve,reject)=>{
+      const reader=new FileReader();
+      reader.onload=()=>resolve(String(reader.result||''));
+      reader.onerror=reject;
+      reader.readAsDataURL(file);
+    });
+
+    const img=await new Promise((resolve,reject)=>{
+      const image=new Image();
+      image.onload=()=>resolve(image);
+      image.onerror=reject;
+      image.src=dataUrl;
+    });
+
+    const size=512;
+    const canvas=document.createElement('canvas');
+    canvas.width=size;canvas.height=size;
+    const ctx=canvas.getContext('2d');
+    ctx.clearRect(0,0,size,size);
+    const scale=Math.min(size/img.naturalWidth,size/img.naturalHeight);
+    const w=img.naturalWidth*scale,h=img.naturalHeight*scale;
+    ctx.drawImage(img,(size-w)/2,(size-h)/2,w,h);
+    const base64=canvas.toDataURL('image/webp',.9).split(',')[1];
+
+    const token=await auth.currentUser.getIdToken();
+    const response=await fetch(STORE_LOGO_UPLOAD_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({base64})
+    });
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(result?.message||result?.error||'upload');
+
+    $('#setStoreLogo').value=result.path;
+    $('#storeLogoStatus').textContent='Logo enviada com sucesso.';
+    renderStoreLogoPreview();
+  }catch(err){
+    console.error(err);
+    $('#storeLogoStatus').textContent='Não foi possível enviar a logo. Verifique se as Firebase Functions estão publicadas.';
+  }finally{
+    button.disabled=false;
+    e.target.value='';
+  }
+});
+
+function playNotificationSound(name=settings.notificationSound||'bell',volume=settings.notificationVolume??70){
+  if(name==='none') return;
+  const ctx=new (window.AudioContext||window.webkitAudioContext)();
+  const gain=ctx.createGain();
+  gain.gain.value=Math.max(0,Math.min(1,Number(volume||0)/100))*.16;
+  gain.connect(ctx.destination);
+
+  const patterns={
+    bell:[[880,0,.12],[1174,.13,.18]],
+    chime:[[659,0,.12],[784,.12,.12],[988,.24,.22]],
+    pop:[[520,0,.08],[740,.08,.11]],
+    alert:[[880,0,.1],[880,.16,.1],[1046,.32,.16]],
+    classic:[[523,0,.12],[659,.14,.12],[784,.28,.2]]
+  };
+  const pattern=patterns[name]||patterns.bell;
+  const now=ctx.currentTime;
+  for(const [frequency,offset,duration] of pattern){
+    const osc=ctx.createOscillator();
+    osc.type='sine';
+    osc.frequency.value=frequency;
+    osc.connect(gain);
+    osc.start(now+offset);
+    osc.stop(now+offset+duration);
+  }
+  setTimeout(()=>ctx.close().catch(()=>{}),900);
+}
+
+$('#previewNotificationSoundBtn')?.addEventListener('click',()=>{
+  playNotificationSound($('#setNotificationSound').value,$('#setNotificationVolume').value);
+});
 
 function normalizePriceKey(value){
   return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
@@ -555,16 +708,37 @@ function deliveryFeeFromSettings(address){
 
 function expectedDeliveryFee(order){
   if(order.fulfillment==='pickup') return 0;
+  const snapshotFee=Number(order.deliveryPricing?.fee);
+  if(Number.isFinite(snapshotFee)&&snapshotFee>=0) return snapshotFee;
   return deliveryFeeFromSettings(order.address).fee;
 }
 
 function applyOrderPromotion(base,item){
   if(!item?.promotion) return {ok:true,value:base};
-  const promo=promotions.find(p=>p.id===item.promotion.id);
-  if(!promo) return {ok:false,reason:`Promoção inválida em ${item.name}.`,value:base};
-  const sameType=promo.discountType===item.promotion.discountType;
-  const sameValue=Math.abs(Number(promo.discountValue||0)-Number(item.promotion.discountValue||0))<0.009;
-  if(!sameType||!sameValue) return {ok:false,reason:`Dados da promoção divergentes em ${item.name}.`,value:base};
+
+  // A promoção gravada no pedido é um snapshot histórico. Uma promoção pode
+  // expirar, ser editada ou excluída depois da compra sem invalidar a comanda.
+  const snapshot=item.promotion||{};
+  const promo=promotions.find(p=>p.id===snapshot.id);
+  const sameCurrent=promo &&
+    promo.discountType===snapshot.discountType &&
+    Math.abs(Number(promo.discountValue||0)-Number(snapshot.discountValue||0))<0.009;
+
+  const historicalBase=Number(snapshot.originalBasePrice);
+  if(Number.isFinite(historicalBase)&&historicalBase>=0){
+    const discounted=snapshot.discountType==='percentage'
+      ?Math.max(0,historicalBase-(historicalBase*Number(snapshot.discountValue||0)/100))
+      :Math.max(0,historicalBase-Number(snapshot.discountValue||0));
+    return {ok:true,value:discounted,historical:!sameCurrent};
+  }
+
+  if(!sameCurrent){
+    // Pedidos antigos não tinham originalBasePrice. Neles, o preço final
+    // armazenado no próprio pedido é a referência histórica segura para
+    // impressão e auditoria visual.
+    return {ok:true,value:Number(item.unitPrice||0),historical:true,useStoredUnit:true};
+  }
+
   const discounted=promo.discountType==='percentage'
     ?Math.max(0,base-(base*Number(promo.discountValue||0)/100))
     :Math.max(0,base-Number(promo.discountValue||0));
@@ -596,6 +770,7 @@ function expectedItemUnitPrice(item){
 
   const promoted=applyOrderPromotion(base,item);
   if(!promoted.ok) return promoted;
+  if(promoted.useStoredUnit) return {ok:true,value:Number(item.unitPrice||0),historical:true};
   base=promoted.value;
 
   let extras=0;
@@ -636,20 +811,22 @@ function verifyOrderPricing(order){
 
   let expectedDiscount=0;
   if(order.coupon){
-    const coupon=coupons.find(cp=>cp.id===order.coupon.id||cp.code===order.coupon.code);
-    if(!coupon){
-      issues.push('Cupom do pedido não existe no cadastro atual.');
+    const snapshotAmount=Number(order.coupon.amount);
+    if(Number.isFinite(snapshotAmount)&&snapshotAmount>=0){
+      expectedDiscount=Math.max(0,Math.min(expectedSubtotal,snapshotAmount));
     }else{
-      const sameType=coupon.type===order.coupon.type;
-      const sameValue=Math.abs(Number(coupon.value||0)-Number(order.coupon.value||0))<0.009;
-      if(!sameType||!sameValue){
-        issues.push('Dados do cupom divergem do cadastro.');
+      // Compatibilidade com pedidos antigos que não gravavam o valor final do
+      // cupom. Para pedidos novos, o snapshot é a fonte histórica.
+      const coupon=coupons.find(cp=>cp.id===order.coupon.id||cp.code===order.coupon.code);
+      if(coupon){
+        expectedDiscount=coupon.type==='percentage'
+          ?expectedSubtotal*Number(coupon.value||0)/100
+          :Number(coupon.value||0);
+        if(Number(coupon.maxDiscount||0)>0) expectedDiscount=Math.min(expectedDiscount,Number(coupon.maxDiscount));
+        expectedDiscount=Math.max(0,Math.min(expectedSubtotal,expectedDiscount));
+      }else{
+        expectedDiscount=Number(order.discount||0);
       }
-      expectedDiscount=coupon.type==='percentage'
-        ?expectedSubtotal*Number(coupon.value||0)/100
-        :Number(coupon.value||0);
-      if(Number(coupon.maxDiscount||0)>0) expectedDiscount=Math.min(expectedDiscount,Number(coupon.maxDiscount));
-      expectedDiscount=Math.max(0,Math.min(expectedSubtotal,expectedDiscount));
     }
   }
   if(Math.abs(expectedDiscount-Number(order.discount||0))>0.009){
@@ -884,26 +1061,28 @@ function loadPrintSettingsUI(){
   if(!$('#localAutoPrint')) return;
   $('#localAutoPrint').checked=printConfig.autoPrint;
   $('#localPrintPending').checked=printConfig.printPending;
+  const model=document.querySelector(`input[name="printModel"][value="${printConfig.model}"]`);
+  if(model) model.checked=true;
   if($('#cashierAutoAccept')) $('#cashierAutoAccept').checked=!!settings.autoAcceptOrders;
 }
 
 function savePrintSettings(){
-  if(!$('#localPrinterSelect')) return;
   printConfig={
-    printer:$('#localPrinterSelect').value,
-    autoPrint:$('#localAutoPrint').checked,
-    printPending:$('#localPrintPending').checked
+    ...printConfig,
+    autoPrint:$('#localAutoPrint')?.checked===true,
+    printPending:$('#localPrintPending')?.checked===true,
+    model:document.querySelector('input[name="printModel"]:checked')?.value||'thermal80'
   };
 
-  localStorage.setItem('deliveryPrinter',printConfig.printer);
+  localStorage.setItem('deliveryPrinter',printConfig.printer||'');
   localStorage.setItem('deliveryAutoPrint',printConfig.autoPrint?'1':'0');
   localStorage.setItem('deliveryPrintPending',printConfig.printPending?'1':'0');
+  localStorage.setItem('deliveryPrintModel',printConfig.model);
 }
 
 async function checkPrintAgent(){
   const status=$('#printerAgentStatus');
-  const select=$('#localPrinterSelect');
-  if(!status||!select) return false;
+  if(!status) return false;
 
   try{
     const response=await fetch(PRINT_AGENT+'/printers',{cache:'no-store'});
@@ -912,27 +1091,43 @@ async function checkPrintAgent(){
     const data=await response.json();
     const printers=Array.isArray(data.printers)?data.printers:[];
 
-    select.innerHTML='<option value="">Selecione...</option>'+
-      printers.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
-
-    if(printConfig.printer&&printers.includes(printConfig.printer)){
-      select.value=printConfig.printer;
+    // Compatibilidade com a versão atual do Agent: a seleção física deixou de
+    // aparecer no site, mas enquanto o Agent novo não estiver instalado usamos
+    // internamente a impressora previamente salva ou a primeira detectada.
+    if(!printConfig.printer||!printers.includes(printConfig.printer)){
+      printConfig.printer=printers[0]||'';
+      localStorage.setItem('deliveryPrinter',printConfig.printer);
     }
 
-    status.textContent='● Print Agent conectado • '+printers.length+' impressora(s)';
+    status.textContent='● Print Agent conectado';
     status.classList.add('ok');
     status.classList.remove('off');
+    if($('#printerAgentInfoState')){
+      $('#printerAgentInfoState').textContent=printers.length?'Pronto':'Configure uma impressora no Agent';
+    }
+    if($('#printerAgentVersion')) $('#printerAgentVersion').textContent=data.version||data.agentVersion||'Conectado';
     return true;
   }catch(err){
     status.textContent='● Print Agent desconectado';
     status.classList.add('off');
     status.classList.remove('ok');
-    select.innerHTML='<option value="">Print Agent não encontrado</option>';
+    if($('#printerAgentInfoState')) $('#printerAgentInfoState').textContent='Sem conexão';
+    if($('#printerAgentVersion')) $('#printerAgentVersion').textContent='—';
     return false;
   }
 }
 
-function centerText(text,width=42){
+function printModelWidth(){
+  return {
+    thermal80:42,
+    thermal58:32,
+    a4:64,
+    compact:32,
+    label:28
+  }[printConfig.model]||42;
+}
+
+function centerText(text,width=printModelWidth()){
   text=String(text||'');
   if(text.length>=width) return text;
   const left=Math.floor((width-text.length)/2);
@@ -940,25 +1135,40 @@ function centerText(text,width=42){
 }
 
 function receiptText(o){
-  const width=42;
+  const width=printModelWidth();
   const divider='-'.repeat(width);
   const lines=[];
+  const model=printConfig.model||'thermal80';
 
-  lines.push(centerText(settings.storeName||'PIZZARIA',width));
-  if(settings.phone) lines.push(centerText(settings.phone,width));
+  if(model==='label'){
+    lines.push(centerText(settings.storeName||'PIZZARIA',width));
+    lines.push(centerText('PEDIDO #'+String(o.orderNumber||0).padStart(4,'0'),width));
+    lines.push(divider);
+    lines.push((o.customer?.name||'CLIENTE').slice(0,width));
+    for(const item of (o.items||[])){
+      lines.push((String(item.qty)+'x '+String(item.name||'')).slice(0,width));
+      if(item.size?.name) lines.push(('  '+item.size.name).slice(0,width));
+    }
+    lines.push(divider);
+    lines.push(centerText('TOTAL '+money(o.total),width));
+    lines.push('');
+    return lines.join('\n');
+  }
+
+  if(model!=='compact') lines.push(centerText(settings.storeName||'PIZZARIA',width));
+  if(model!=='compact'&&settings.phone) lines.push(centerText(settings.phone,width));
   lines.push(divider);
   lines.push(centerText('PEDIDO #'+String(o.orderNumber||0).padStart(4,'0'),width));
   const pricing=verifyOrderPricing(o);
-  if(!pricing.valid){
-    lines.push(centerText('*** ATENCAO: VALORES DIVERGENTES ***',width));
-  }
+  if(!pricing.valid) lines.push(centerText('*** REVISAR VALORES ***',width));
   lines.push(formatDate(o.createdAt));
   lines.push('STATUS: '+(statusLabels[o.status]||o.status));
   lines.push(divider);
   lines.push('CLIENTE: '+(o.customer?.name||''));
   lines.push('FONE: '+(o.customer?.phone||''));
   lines.push(o.fulfillment==='pickup'?'RETIRADA NO LOCAL':'ENTREGA: '+orderAddressText(o));
-  if(o.fulfillment!=='pickup'){
+
+  if(o.fulfillment!=='pickup'&&model!=='compact'){
     const deliverySnap=o.deliveryPricing||{};
     if(deliverySnap.mode==='km'&&Number.isFinite(Number(deliverySnap.distanceKm))){
       lines.push('FRETE: POR KM • '+Number(deliverySnap.distanceKm).toFixed(1).replace('.',',')+' KM');
@@ -968,13 +1178,13 @@ function receiptText(o){
       lines.push('FRETE: VALOR FIXO');
     }
   }
+
   lines.push(divider);
   lines.push('ITENS');
-
   for(const item of (o.items||[])){
     lines.push(String(item.qty)+'x '+String(item.name||''));
     if(item.size?.name) lines.push('  Tamanho: '+item.size.name);
-    if(item.extras?.length) lines.push('  Adic.: '+item.extras.map(x=>x.name).join(', '));
+    if(model!=='compact'&&item.extras?.length) lines.push('  Adic.: '+item.extras.map(x=>x.name).join(', '));
     if(item.note) lines.push('  OBS: '+item.note);
     lines.push('  '+money(Number(item.unitPrice||0)*Number(item.qty||0)));
   }
@@ -1002,23 +1212,25 @@ function receiptText(o){
   }
 
   lines.push(divider);
-  lines.push(centerText('*** FIM DA COMANDA ***',width));
+  if(model!=='compact') lines.push(centerText('*** FIM DA COMANDA ***',width));
   lines.push('');
   lines.push('');
   return lines.join('\n');
 }
 
 async function sendToPrintAgent(text){
-  if(!printConfig.printer) throw new Error('printer-not-selected');
+  const payload={
+    text,
+    copies:1,
+    model:printConfig.model,
+    storeLogo:settings.storeLogo||''
+  };
+  if(printConfig.printer) payload.printer=printConfig.printer;
 
   const response=await fetch(PRINT_AGENT+'/print',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      printer:printConfig.printer,
-      text,
-      copies:1
-    })
+    body:JSON.stringify(payload)
   });
 
   if(!response.ok){
@@ -1032,7 +1244,7 @@ async function printOrder(order,automatic=false){
 
   const connected=await checkPrintAgent();
 
-  if(connected&&printConfig.printer){
+  if(connected){
     try{
       await sendToPrintAgent(receiptText(order));
       if(order?.id){
@@ -1046,7 +1258,7 @@ async function printOrder(order,automatic=false){
   }
 
   if(automatic){
-    showSystemAlert('Pedido recebido, mas a impressão automática não foi realizada. Abra “Impressão” e verifique o Print Agent e a impressora selecionada.');
+    showSystemAlert('Pedido recebido, mas a impressão automática não foi realizada. Abra “Impressão” e verifique a conexão e a impressora configurada no Print Agent.');
     return false;
   }
 
@@ -1069,38 +1281,41 @@ $('#saveAutoAcceptBtn')?.addEventListener('click',async()=>{
   }
 });
 
-$('#refreshPrintersBtn')?.addEventListener('click',checkPrintAgent);
+$('#connectPrintAgentBtn')?.addEventListener('click',checkPrintAgent);
 
 $('#savePrintSettingsBtn')?.addEventListener('click',()=>{
   savePrintSettings();
   checkPrintAgent();
-  alert('Configuração desta estação salva.');
+  alert('Configuração deste terminal salva.');
 });
+
+$$('input[name="printModel"]').forEach(input=>input.addEventListener('change',savePrintSettings));
 
 $('#testPrintBtn')?.addEventListener('click',async()=>{
   savePrintSettings();
   try{
-    const text=[
-      centerText(settings.storeName||'DELIVERY PIZZARIA'),
-      '------------------------------------------',
-      centerText('TESTE DE IMPRESSAO'),
-      '',
-      'Impressora: '+(printConfig.printer||''),
-      'Data: '+new Date().toLocaleString('pt-BR'),
-      '',
-      centerText('Print Agent funcionando'),
-      '',
-      ''
-    ].join('\n');
+    const sample={
+      orderNumber:1,
+      status:'accepted',
+      createdAt:{toDate:()=>new Date()},
+      customer:{name:'Cliente de teste',phone:'(00) 00000-0000'},
+      fulfillment:'pickup',
+      items:[{qty:1,name:'Produto de teste',unitPrice:25,size:{name:'Grande'},extras:[]}],
+      subtotal:25,
+      discount:0,
+      deliveryFee:0,
+      total:25,
+      payment:{method:'PIX na entrega'}
+    };
 
-    await sendToPrintAgent(text);
-    alert('Teste enviado para a impressora.');
+    await checkPrintAgent();
+    await sendToPrintAgent(receiptText(sample));
+    alert('Teste enviado ao Print Agent usando o modelo selecionado.');
   }catch(err){
     console.error(err);
-    alert('Não foi possível imprimir. Verifique se o Print Agent está aberto e se uma impressora foi selecionada.');
+    alert('Não foi possível imprimir. Verifique se o Print Agent está aberto e se há uma impressora configurada nele.');
   }
 });
-
 
 
 /* ===== Perfis de acesso ===== */
@@ -1201,6 +1416,7 @@ async function loadPromotions(){
     promotions=[];
   }
   renderPromotions();
+  if(products.length) renderProducts();
 }
 
 function promotionTargetLabel(p){
@@ -1234,21 +1450,22 @@ function refreshPromotionTarget(){
 }
 $('#promotionTargetType')?.addEventListener('change',refreshPromotionTarget);
 
-function editPromotion(id=null){
+function editPromotion(id=null,prefill={}){
   if(!hasPermission('promotionsManage')) return;
   const p=promotions.find(x=>x.id===id);
+  const source=p||prefill||{};
   $('#promotionEditorTitle').textContent=p?'Editar promoção':'Nova promoção';
   $('#promotionId').value=p?.id||'';
-  $('#promotionName').value=p?.name||'';
-  $('#promotionDescription').value=p?.description||'';
-  $('#promotionDiscountType').value=p?.discountType||'percentage';
-  $('#promotionDiscountValue').value=p?.discountValue??'';
-  $('#promotionTargetType').value=p?.targetType||'all';
+  $('#promotionName').value=source.name||'';
+  $('#promotionDescription').value=source.description||'';
+  $('#promotionDiscountType').value=source.discountType||'percentage';
+  $('#promotionDiscountValue').value=source.discountValue??'';
+  $('#promotionTargetType').value=source.targetType||'all';
   refreshPromotionTarget();
-  $('#promotionTargetId').value=p?.targetId||'';
-  $('#promotionStartsAt').value=p?.startsAt||'';
-  $('#promotionEndsAt').value=p?.endsAt||'';
-  $('#promotionActive').checked=p?.active!==false;
+  $('#promotionTargetId').value=source.targetId||'';
+  $('#promotionStartsAt').value=source.startsAt||'';
+  $('#promotionEndsAt').value=source.endsAt||'';
+  $('#promotionActive').checked=source.active!==false;
   $('#promotionEditorError').classList.add('hidden');
   $('#promotionEditor').showModal();
 }
@@ -1423,8 +1640,24 @@ async function loadCashMovements(sessionId){
   }
 }
 
+function businessDateFor(value=new Date()){
+  let date=value;
+  if(value?.toDate) date=value.toDate();
+  else if(typeof value==='number') date=new Date(value);
+  return new Intl.DateTimeFormat('en-CA',{timeZone:settings.timezone||'America/Porto_Velho'}).format(date);
+}
+
 function orderWithinCash(order,session){
   if(!session||order.status!=='completed') return false;
+
+  // Caixas novos são diários: a hora em que o operador clicou em "Abrir"
+  // não exclui pedidos realizados antes naquele mesmo dia.
+  if(session.businessDate){
+    const orderDay=businessDateFor(order.createdAt?.toDate?.()||new Date(order.createdAt?.toMillis?.()||0));
+    return orderDay===session.businessDate;
+  }
+
+  // Compatibilidade com sessões antigas, anteriores ao conceito de dia operacional.
   const ts=order.completedAt?.toMillis?.()||order.createdAt?.toMillis?.()||0;
   const start=session.openedAt?.toMillis?.()||0;
   const end=session.closedAt?.toMillis?.()||Date.now();
@@ -1474,7 +1707,11 @@ function renderCash(){
 
   if(currentCashSession){
     const expected=Number(currentCashSession.openingAmount||0)+summary.money+summary.supplies-summary.withdrawals;
+    const today=businessDateFor();
+    const overdue=currentCashSession.businessDate&&currentCashSession.businessDate!==today;
     $('#cashSessionMeta').innerHTML=`
+      ${overdue?'<div class="alert alert-error"><strong>Caixa anterior pendente.</strong> Feche o caixa de '+esc(currentCashSession.businessDate)+' antes de iniciar o caixa de hoje.</div>':''}
+      <p><strong>Dia operacional:</strong> ${esc(currentCashSession.businessDate||'Sessão antiga')}</p>
       <p><strong>Aberto por:</strong> ${esc(currentCashSession.openedByName||'Usuário')}</p>
       <p><strong>Valor inicial:</strong> ${money(currentCashSession.openingAmount)}</p>
       <p><strong>Suprimentos:</strong> ${money(summary.supplies)} • <strong>Sangrias:</strong> ${money(summary.withdrawals)}</p>
@@ -1491,7 +1728,7 @@ function renderCash(){
 
   $('#cashHistory').innerHTML=cashSessions.length?cashSessions.slice(0,20).map(s=>{
     const sum=s.summary||cashSummary(s);
-    return `<div class="data-row"><div class="data-main"><strong>${s.status==='open'?'Caixa aberto':'Caixa fechado'}</strong><small>${formatDate(s.openedAt)} • ${esc(s.openedByName||'')}</small></div><span>${Number(sum.count||0)} pedido(s)</span><div><strong>${money(sum.gross||0)}</strong>${s.difference!=null?`<small class="muted" style="display:block">Diferença: ${money(s.difference)}</small>`:''}</div></div>`;
+    return `<div class="data-row"><div class="data-main"><strong>${s.status==='open'?'Caixa aberto':'Caixa fechado'}</strong><small>${esc(s.businessDate||'')} • ${formatDate(s.openedAt)} • ${esc(s.openedByName||'')}</small></div><span>${Number(sum.count||0)} pedido(s)</span><div><strong>${money(sum.gross||0)}</strong>${s.difference!=null?`<small class="muted" style="display:block">Diferença: ${money(s.difference)}</small>`:''}</div></div>`;
   }).join(''):'<div class="empty-state">Nenhum caixa registrado.</div>';
 }
 
@@ -1509,6 +1746,7 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
 
       tx.set(sessionRef,{
         status:'open',
+        businessDate:businessDateFor(),
         openingAmount,
         openingNote,
         openedBy:auth.currentUser.uid,
@@ -1634,23 +1872,68 @@ $('#cashCloseForm')?.addEventListener('submit',async e=>{
 });
 
 
+function adminPromotionActive(promo){
+  if(!promo||promo.active===false) return false;
+  const now=Date.now();
+  const start=promo.startsAt?new Date(promo.startsAt).getTime():0;
+  const end=promo.endsAt?new Date(promo.endsAt).getTime():0;
+  if(start&&Number.isFinite(start)&&now<start) return false;
+  if(end&&Number.isFinite(end)&&now>end) return false;
+  return true;
+}
+
+function promotionsForProduct(product){
+  return promotions.filter(promo=>{
+    if(!adminPromotionActive(promo)) return false;
+    if(promo.targetType==='all') return true;
+    if(promo.targetType==='category') return promo.targetId===product.categoryId;
+    if(promo.targetType==='product') return promo.targetId===product.id;
+    return false;
+  });
+}
+
+function promotionSummaryForProduct(product){
+  const list=promotionsForProduct(product);
+  if(!list.length) return '';
+  return list.map(p=>p.discountType==='percentage'
+    ?`${Number(p.discountValue||0)}% OFF`
+    :`${money(p.discountValue)} OFF`
+  ).join(' • ');
+}
+
 function renderProducts(){
   const canEdit=hasPermission('productsEdit');
   const canDelete=hasPermission('productsDelete');
+  const canPromote=hasPermission('promotionsManage');
   $('#newProductBtn')?.classList.toggle('hidden',!hasPermission('productsCreate'));
   $('#seedBtn')?.classList.toggle('hidden',!(hasPermission('productsCreate')&&hasPermission('categoriesManage')));
 
-  $('#productsTable').innerHTML=products.length?products.map(p=>`<div class="data-row">
-    <div class="data-main"><strong>${esc(p.name)}</strong><small>${esc(categories.find(c=>c.id===p.categoryId)?.name||'Sem categoria')} • ${p.active===false?'Indisponível':'Disponível'} • ${p.sizes?.length?`${p.sizes.length} tamanhos`:money(p.price)}</small></div>
-    <span>${p.featured?'Destaque':''}</span>
-    <div class="data-actions">
-      ${canEdit?`<button class="btn btn-secondary edit-product" data-id="${p.id}" type="button">Editar</button>`:''}
-      ${canDelete?`<button class="btn btn-danger delete-product" data-id="${p.id}" type="button">Excluir</button>`:''}
-    </div>
-  </div>`).join(''):'<div class="empty-state">Nenhum produto cadastrado.</div>';
+  $('#productsTable').innerHTML=products.length?products.map(p=>{
+    const promoSummary=promotionSummaryForProduct(p);
+    return `<div class="data-row">
+      <div class="data-main">
+        <strong>${esc(p.name)}</strong>
+        <small>${esc(categories.find(cat=>cat.id===p.categoryId)?.name||'Sem categoria')} • ${p.active===false?'Indisponível':'Disponível'} • ${p.sizes?.length?`${p.sizes.length} tamanhos`:money(p.price)}</small>
+        ${promoSummary?`<small class="product-promotion-line">🏷️ Em promoção • ${esc(promoSummary)}</small>`:''}
+      </div>
+      <span>${p.featured?'Destaque':''}</span>
+      <div class="data-actions">
+        ${canPromote?`<button class="btn btn-secondary promote-product" data-id="${p.id}" type="button">${promoSummary?'Ver promoção':'Criar promoção'}</button>`:''}
+        ${canEdit?`<button class="btn btn-secondary edit-product" data-id="${p.id}" type="button">Editar</button>`:''}
+        ${canDelete?`<button class="btn btn-danger delete-product" data-id="${p.id}" type="button">Excluir</button>`:''}
+      </div>
+    </div>`;
+  }).join(''):'<div class="empty-state">Nenhum produto cadastrado.</div>';
 
   $$('.edit-product').forEach(b=>b.onclick=()=>editProduct(b.dataset.id));
   $$('.delete-product').forEach(b=>b.onclick=()=>deleteProduct(b.dataset.id));
+  $$('.promote-product').forEach(b=>b.onclick=()=>{
+    const product=products.find(p=>p.id===b.dataset.id);
+    if(!product) return;
+    const existing=promotions.find(p=>p.targetType==='product'&&p.targetId===product.id&&adminPromotionActive(p));
+    if(existing) editPromotion(existing.id);
+    else editPromotion(null,{targetType:'product',targetId:product.id,name:'Oferta • '+product.name});
+  });
 }
 $('#newProductBtn').onclick=()=>{if(hasPermission('productsCreate')) editProduct(null);};
 
@@ -1838,7 +2121,7 @@ function editProduct(id){
   $('#productDescription').value=p?.description||'';
   $('#productPrice').value=p?.price??'';
   $('#productOrder').value=p?.order??0;
-  $('#productImage').value=p?.image||'';
+  $('#productImage').value=p?.image||'assets/products/placeholder.svg';
   renderPriceRows('productSizesEditor','productSizesEmpty',p?.sizes||[]);
   renderPriceRows('productExtrasEditor','productExtrasEmpty',p?.extras||[]);
   const inferredPizza=p?.isPizza??/pizza/i.test(categories.find(cat=>cat.id===(p?.categoryId||$('#productCategory').value))?.name||'');
@@ -1847,8 +2130,8 @@ function editProduct(id){
   $('#productActive').checked=p?.active!==false;
   $('#productFeatured').checked=!!p?.featured;
   $('#productEditorError').classList.add('hidden');
-  const preview=previewProductImagePath(p?.image);
-  if(preview) loadImageIntoEditor(preview); else resetImageEditor();
+  const preview=previewProductImagePath(p?.image||'assets/products/placeholder.svg');
+  loadImageIntoEditor(preview);
   $('#productEditor').showModal();
 }
 
@@ -2089,9 +2372,10 @@ async function refreshStoreLocationPreview(){
     return null;
   }
   $('#setStoreZip').value=data.zip;
-  if(!$('#setStoreAddress').value.trim()){
-    $('#setStoreAddress').value=[data.street,data.neighborhood,data.city,data.state].filter(Boolean).join(', ');
-  }
+  if(data.street&&!$('#setStoreStreet').value.trim()) $('#setStoreStreet').value=data.street;
+  if(data.neighborhood&&!$('#setStoreNeighborhood').value.trim()) $('#setStoreNeighborhood').value=data.neighborhood;
+  if(data.city&&!$('#setStoreCity').value.trim()) $('#setStoreCity').value=data.city;
+  if(data.state&&!$('#setStoreState').value.trim()) $('#setStoreState').value=data.state;
   status.textContent=`CEP localizado • ${data.city||''}/${data.state||''} • pronto para cálculo por km.`;
   return data.location;
 }
@@ -2234,9 +2518,21 @@ function renderSchedules(){
 function renderSettings(){
   $('#setStoreName').value=settings.storeName||'';
   $('#setSubtitle').value=settings.subtitle||'';
-  $('#setPhone').value=settings.phone||'';
-  $('#setStoreZip').value=settings.storeZip||'';
-  $('#setStoreAddress').value=settings.storeAddress||'';
+  $('#setPhone').value=formatPhoneInput(settings.phone||'');
+  $('#setWhatsapp').value=formatPhoneInput(settings.whatsapp||settings.phone||'');
+  $('#setStoreZip').value=formatCepInput(settings.storeZip||'');
+  $('#setStoreStreet').value=settings.storeStreet||settings.storeAddress||'';
+  $('#setStoreNumber').value=settings.storeNumber||'';
+  $('#setStoreNeighborhood').value=settings.storeNeighborhood||'';
+  $('#setStoreComplement').value=settings.storeComplement||'';
+  $('#setStoreCity').value=settings.storeCity||'';
+  $('#setStoreState').value=settings.storeState||'';
+  $('#setStoreLogo').value=settings.storeLogo||'';
+  $('#setGoogleMapsUrl').value=settings.googleMapsUrl||'';
+  $('#setCustomerCancelMinutes').value=settings.customerCancelMinutes??2;
+  $('#setNotificationSound').value=settings.notificationSound||'bell';
+  $('#setNotificationVolume').value=settings.notificationVolume??70;
+  renderStoreLogoPreview();
   $('#setOpenMode').value=settings.openMode||'schedule';
   $('#setDeliveryFee').value=settings.deliveryFee??0;
   const mode=settings.deliveryPricingMode||'fixed';
@@ -2314,9 +2610,25 @@ $('#settingsForm').onsubmit=async e=>{
     storeName:$('#setStoreName').value.trim(),
     subtitle:$('#setSubtitle').value.trim(),
     phone:$('#setPhone').value.trim(),
+    whatsapp:$('#setWhatsapp').value.trim(),
     storeZip,
     storeLocation,
-    storeAddress:$('#setStoreAddress').value.trim(),
+    storeStreet:$('#setStoreStreet').value.trim(),
+    storeNumber:$('#setStoreNumber').value.trim(),
+    storeNeighborhood:$('#setStoreNeighborhood').value.trim(),
+    storeComplement:$('#setStoreComplement').value.trim(),
+    storeCity:$('#setStoreCity').value.trim(),
+    storeState:$('#setStoreState').value.trim().toUpperCase(),
+    storeLogo:$('#setStoreLogo').value.trim(),
+    googleMapsUrl:$('#setGoogleMapsUrl').value.trim(),
+    storeAddress:[
+      [$('#setStoreStreet').value.trim(),$('#setStoreNumber').value.trim()].filter(Boolean).join(', '),
+      $('#setStoreNeighborhood').value.trim(),
+      [$('#setStoreCity').value.trim(),$('#setStoreState').value.trim().toUpperCase()].filter(Boolean).join('/')
+    ].filter(Boolean).join(' • '),
+    customerCancelMinutes:Math.max(0,Math.min(30,Number($('#setCustomerCancelMinutes').value||2))),
+    notificationSound:$('#setNotificationSound').value,
+    notificationVolume:Math.max(0,Math.min(100,Number($('#setNotificationVolume').value||70))),
     openMode:$('#setOpenMode').value,
     deliveryPricingMode,
     deliveryFee:Number($('#setDeliveryFee').value||0),

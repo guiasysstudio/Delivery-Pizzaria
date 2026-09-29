@@ -14,10 +14,8 @@
   <header class="public-header">
     <div class="shell public-header-row">
       <a class="public-brand" href="../"><span class="public-brand-mark">🍕</span><span><strong id="accountStoreName">Pizzaria</strong><small>Voltar ao cardápio</small></span></a>
-      <div class="public-header-actions">
+      <div class="public-header-actions account-header-actions">
         <a class="header-action" href="../"><span>←</span><span class="header-action-copy"><small>Continuar comprando</small><strong>Cardápio</strong></span></a>
-        <button id="switchAccountBtn" class="header-action" type="button"><span>⇄</span><span class="header-action-copy"><small>Conta</small><strong>Trocar usuário</strong></span></button>
-        <button id="accountLogoutBtn" class="header-action" type="button"><span>↪</span><span class="header-action-copy"><small>Sessão</small><strong>Sair</strong></span></button>
       </div>
     </div>
   </header>
@@ -35,6 +33,9 @@
         <button class="account-nav-item" data-section="orders">🧾 <span>Meus pedidos</span></button>
         <button class="account-nav-item" data-section="coupons">🎟️ <span>Cupons</span></button>
         <button class="account-nav-item" data-section="favorites">♥ <span>Favoritos</span></button>
+        <div class="account-nav-divider"></div>
+        <button id="switchAccountBtn" class="account-nav-item account-nav-action" type="button">⇄ <span>Trocar usuário</span></button>
+        <button id="accountLogoutBtn" class="account-nav-item account-nav-action danger" type="button">↪ <span>Sair</span></button>
       </nav>
     </aside>
 
@@ -61,10 +62,14 @@
             </div>
           </div>
           <div class="form-grid">
-            <label class="field"><span>Nome completo</span><input id="profileName" required maxlength="100"></label>
-            <label class="field"><span>Telefone / WhatsApp</span><input id="profilePhone" required maxlength="30" inputmode="tel"></label>
+            <label class="field"><span>Nome completo</span><input id="profileName" required maxlength="100" autocomplete="name"></label>
+            <label class="field"><span>Telefone / WhatsApp</span><input id="profilePhone" required maxlength="15" inputmode="tel" autocomplete="tel" placeholder="(00) 00000-0000"></label>
           </div>
-          <label class="field"><span>E-mail</span><input id="profileEmail" disabled></label>
+          <div class="form-grid">
+            <label class="field"><span>E-mail</span><input id="profileEmail" disabled><small id="profileEmailStatus" class="muted"></small><button id="resendEmailVerificationBtn" class="link-button hidden" type="button">Reenviar verificação</button></label>
+            <label class="field"><span>CPF</span><input id="profileCpf" required maxlength="14" inputmode="numeric" placeholder="000.000.000-00" autocomplete="off"><small id="profileCpfHint" class="muted">Obrigatório para realizar pedidos. A pizzaria não visualiza este dado.</small></label>
+          </div>
+          <div id="identityStatus" class="identity-status"></div>
           <div class="section-actions"><button class="btn btn-primary" type="submit">Salvar alterações</button><span id="profileSaved" class="saved-note hidden">Salvo ✓</span></div>
         </form>
       </section>
