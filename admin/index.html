@@ -85,6 +85,10 @@
       </section>
 
       <section id="view-promotions" class="admin-view">
+        <div class="panel settings-card promotion-explainer">
+          <strong>Promoções do cardápio</strong>
+          <p class="muted">Toda oferta de preço é administrada aqui. “Destaque / Mais pedidos” é apenas posição visual e não altera preço.</p>
+        </div>
         <div class="section-actions"><button id="newPromotionBtn" class="btn btn-primary" type="button">+ Nova promoção</button></div>
         <div class="panel"><div id="promotionsTable" class="data-list"></div></div>
       </section>
@@ -324,7 +328,7 @@
       </div>
       <div class="form-grid">
         <label class="check-row"><input id="productActive" type="checkbox" checked /><span>Produto disponível</span></label>
-        <label class="check-row"><input id="productFeatured" type="checkbox" /><span>Exibir como destaque</span></label>
+        <label class="check-row"><input id="productFeatured" type="checkbox" /><span>Exibir em “Destaques / Mais pedidos” <small class="muted">(não altera o preço)</small></span></label>
       </div>
 
       <div id="productEditorError" class="alert alert-error hidden"></div>
