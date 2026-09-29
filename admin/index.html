@@ -33,7 +33,7 @@
         <button class="nav-item cashier-feature" data-view="printing">🖨️ <span>Impressão</span></button>
         <button class="nav-item master-only hidden" data-view="users">👥 <span>Usuários</span></button>
         <button class="nav-item master-only hidden" data-view="roles">🔐 <span>Perfis</span></button>
-        <button class="nav-item" data-view="settings">⚙️ <span>Configurações</span></button>
+        <button class="nav-item" data-view="settings">🏪 <span>Dados da Pizzaria</span></button>
       </nav>
       <div class="sidebar-bottom"><small id="currentUserDisplay" class="muted" style="text-align:center"></small><a class="btn btn-secondary btn-block" href="../" target="_blank">Abrir cardápio</a><button id="logoutBtn" class="btn btn-ghost btn-block">Sair</button></div>
     </aside>
@@ -111,32 +111,46 @@
 
       <section id="view-printing" class="admin-view">
         <div class="settings-grid">
-          <div class="panel settings-card print-agent-card">
-            <span class="eyebrow">ESTAÇÃO DE IMPRESSÃO</span><h2>Print Agent do Windows</h2>
-            <p class="muted">Esta configuração vale somente neste computador. O Print Agent permite usar qualquer impressora instalada no Windows sem abrir a janela de impressão.</p>
+          <div class="panel settings-card print-agent-card settings-wide">
+            <span class="eyebrow">TERMINAL DE IMPRESSÃO</span><h2>Print Agent do Windows</h2>
+            <p class="muted">O site define o modelo da comanda. A impressora física é administrada pelo Print Agent instalado neste computador.</p>
             <div id="printerAgentStatus" class="printer-status off">● Print Agent desconectado</div>
-            <div class="alert" style="margin:12px 0">
-              <strong>Primeira conexão neste computador:</strong> o Chrome/Edge pode pedir permissão para acessar dispositivos ou serviços na rede local. Clique em <strong>Permitir</strong> para que o painel converse com o Print Agent em 127.0.0.1. Nenhum outro computador da rede recebe acesso.
+            <div id="printerAgentInfo" class="agent-info-grid">
+              <div><small>Endereço local</small><strong>127.0.0.1</strong></div>
+              <div><small>Porta</small><strong>17329</strong></div>
+              <div><small>Estado</small><strong id="printerAgentInfoState">Aguardando conexão</strong></div>
             </div>
             <div class="section-actions">
-              <button id="refreshPrintersBtn" class="btn btn-secondary" type="button">Procurar impressoras</button>
+              <button id="connectPrintAgentBtn" class="btn btn-secondary" type="button">Conectar ao agente</button>
               <button id="testPrintBtn" class="btn btn-secondary" type="button">Imprimir teste</button>
               <a class="btn btn-secondary" href="https://github.com/guiasysstudio/Delivery-Pizzaria/releases/download/print-agent-latest/DeliveryPizzaria-PrintAgent-win-x64.zip" target="_blank" rel="noopener">Baixar Print Agent</a>
             </div>
           </div>
+
           <div class="panel settings-card">
             <h2>Aceite de pedidos</h2>
             <label class="check-row"><input id="cashierAutoAccept" type="checkbox"><span>Confirmar pedidos automaticamente</span></label>
-            <p class="muted">Ligado: o pedido já entra confirmado. Desligado: fica aguardando um Caixa, Gerente ou Master aceitar.</p>
+            <p class="muted">Ligado: o pedido já entra confirmado. Desligado: fica aguardando um operador com permissão aceitar.</p>
             <button id="saveAutoAcceptBtn" class="btn btn-primary" type="button">Salvar aceite</button>
           </div>
+
           <div class="panel settings-card">
-            <h2>Impressora deste caixa</h2>
-            <label class="field"><span>Impressora</span><select id="localPrinterSelect"><option value="">Selecione...</option></select></label>
+            <h2>Este terminal</h2>
             <label class="check-row"><input id="localAutoPrint" type="checkbox"><span>Imprimir automaticamente quando o pedido for confirmado</span></label>
             <label class="check-row"><input id="localPrintPending" type="checkbox"><span>Imprimir também pedidos aguardando confirmação</span></label>
-            <p class="muted">Recomendado: deixe “pedidos aguardando” desmarcado quando o aceite for manual. Assim a comanda sai somente depois de aceitar.</p>
-            <button id="savePrintSettingsBtn" class="btn btn-primary" type="button">Salvar nesta estação</button>
+            <p class="muted">A seleção da impressora não é mais feita aqui. O Print Agent é responsável pela impressora deste terminal.</p>
+            <button id="savePrintSettingsBtn" class="btn btn-primary" type="button">Salvar neste terminal</button>
+          </div>
+
+          <div class="panel settings-card settings-wide">
+            <div class="editor-section-head"><div><h2>Modelos de impressão</h2><p class="muted">Escolha como a comanda será formatada. A prévia abaixo é aproximada.</p></div></div>
+            <div id="printModelGrid" class="print-model-grid">
+              <label class="print-model-card"><input type="radio" name="printModel" value="thermal80"><span class="print-preview thermal80"><b>LOGO / PIZZARIA</b><i>Pedido #0001</i><i>2x Produto</i><strong>TOTAL R$ 00,00</strong></span><strong>Térmica 80 mm</strong><small>Detalhada, recomendada para balcão/cozinha.</small></label>
+              <label class="print-model-card"><input type="radio" name="printModel" value="thermal58"><span class="print-preview thermal58"><b>PIZZARIA</b><i>#0001</i><i>2x Produto</i><strong>R$ 00,00</strong></span><strong>Térmica 58 mm</strong><small>Compacta para bobina estreita.</small></label>
+              <label class="print-model-card"><input type="radio" name="printModel" value="a4"><span class="print-preview a4"><b>COMANDA</b><i>Cliente e endereço</i><i>Itens detalhados</i><strong>Total</strong></span><strong>A4</strong><small>Layout mais espaçado para impressora comum.</small></label>
+              <label class="print-model-card"><input type="radio" name="printModel" value="compact"><span class="print-preview compact"><b>#0001</b><i>Itens</i><strong>Total</strong></span><strong>Compacto sem logo</strong><small>Menos papel e leitura rápida.</small></label>
+              <label class="print-model-card"><input type="radio" name="printModel" value="label"><span class="print-preview label"><b>#0001</b><i>Cliente</i><i>1x Produto</i></span><strong>Etiqueta</strong><small>Resumo para identificação de embalagem.</small></label>
+            </div>
           </div>
         </div>
       </section>
@@ -153,8 +167,49 @@
 
       <section id="view-settings" class="admin-view">
         <form id="settingsForm" class="settings-grid">
-          <div class="panel settings-card"><h2>Dados da pizzaria</h2><label class="field"><span>Nome</span><input id="setStoreName" required /></label><label class="field"><span>Subtítulo</span><input id="setSubtitle" /></label><label class="field"><span>Telefone</span><input id="setPhone" /></label><label class="field"><span>CEP da loja</span><input id="setStoreZip" inputmode="numeric" maxlength="9" placeholder="00000-000" /></label><label class="field"><span>Endereço da loja</span><input id="setStoreAddress" /></label><div id="storeLocationStatus" class="muted small-copy">O CEP será usado para calcular frete por km quando essa opção estiver ativa.</div></div>
-          <div class="panel settings-card"><h2>Operação</h2><label class="field"><span>Modo de funcionamento</span><select id="setOpenMode"><option value="schedule">Seguir horários</option><option value="open">Forçar aberto</option><option value="closed">Forçar fechado</option></select></label><label class="field"><span>Pedido mínimo (R$)</span><input id="setMinimumOrder" type="number" min="0" step="0.01" /></label><label class="check-row"><input id="setAllowPickup" type="checkbox" /><span>Permitir retirada no local</span></label><label class="check-row"><input id="setAutoAccept" type="checkbox" /><span>Confirmar pedidos automaticamente</span></label><p class="muted">Desmarcado: o pedido entra como “Aguardando confirmação” e precisa ser aceito. Marcado: ele já entra confirmado.</p></div>
+          <div class="panel settings-card settings-wide">
+            <div class="editor-section-head"><div><h2>Identidade da pizzaria</h2><p class="muted">Esses dados aparecem no site público, comprovantes e impressão.</p></div></div>
+            <div class="store-brand-editor">
+              <div id="storeLogoPreview" class="store-logo-preview">🍕</div>
+              <div>
+                <input id="setStoreLogo" type="hidden">
+                <input id="storeLogoFile" class="hidden" type="file" accept="image/png,image/jpeg,image/webp">
+                <div class="section-actions"><button id="chooseStoreLogoBtn" class="btn btn-secondary" type="button">Escolher logo</button><button id="removeStoreLogoBtn" class="btn btn-ghost" type="button">Usar logo padrão</button></div>
+                <small id="storeLogoStatus" class="muted">Se nenhuma logo for enviada, o sistema usa a logo padrão.</small>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label class="field"><span>Nome da pizzaria</span><input id="setStoreName" required maxlength="100" /></label>
+              <label class="field"><span>Subtítulo</span><input id="setSubtitle" maxlength="160" /></label>
+            </div>
+            <div class="form-grid">
+              <label class="field"><span>Telefone</span><input id="setPhone" inputmode="tel" maxlength="15" placeholder="(00) 00000-0000" /></label>
+              <label class="field"><span>WhatsApp</span><input id="setWhatsapp" inputmode="tel" maxlength="15" placeholder="(00) 00000-0000" /></label>
+            </div>
+            <div class="form-grid">
+              <label class="field"><span>CEP</span><input id="setStoreZip" inputmode="numeric" maxlength="9" placeholder="00000-000" /></label>
+              <label class="field"><span>Rua / Avenida</span><input id="setStoreStreet" maxlength="160" /></label>
+            </div>
+            <div class="form-grid">
+              <label class="field field-small"><span>Número</span><input id="setStoreNumber" maxlength="20" /></label>
+              <label class="field"><span>Bairro</span><input id="setStoreNeighborhood" maxlength="80" /></label>
+              <label class="field"><span>Complemento</span><input id="setStoreComplement" maxlength="100" /></label>
+            </div>
+            <div class="form-grid">
+              <label class="field"><span>Cidade</span><input id="setStoreCity" maxlength="80" /></label>
+              <label class="field field-small"><span>UF</span><input id="setStoreState" maxlength="2" /></label>
+            </div>
+            <label class="field"><span>Link do Google Maps (opcional)</span><input id="setGoogleMapsUrl" type="url" placeholder="https://maps.google.com/..." /></label>
+            <div id="storeLocationStatus" class="muted small-copy">O CEP será usado para localizar a loja e calcular frete por km.</div>
+          </div>
+          <div class="panel settings-card"><h2>Operação</h2><label class="field"><span>Modo de funcionamento</span><select id="setOpenMode"><option value="schedule">Seguir horários</option><option value="open">Forçar aberto</option><option value="closed">Forçar fechado</option></select></label><div class="form-grid"><label class="field"><span>Pedido mínimo (R$)</span><input id="setMinimumOrder" type="number" min="0" step="0.01" inputmode="decimal" /></label><label class="field"><span>Cliente pode cancelar por</span><div class="input-suffix"><input id="setCustomerCancelMinutes" type="number" min="0" max="30" step="1" /><span>min</span></div></label></div><label class="check-row"><input id="setAllowPickup" type="checkbox" /><span>Permitir retirada no local</span></label><label class="check-row"><input id="setAutoAccept" type="checkbox" /><span>Confirmar pedidos automaticamente</span></label><p class="muted">Desmarcado: o pedido entra como “Aguardando confirmação” e precisa ser aceito. Marcado: ele já entra confirmado.</p></div>
+          <div class="panel settings-card">
+            <h2>Sons de notificação</h2>
+            <label class="field"><span>Novo pedido</span><select id="setNotificationSound"><option value="bell">Campainha</option><option value="chime">Sino</option><option value="pop">Pop</option><option value="alert">Alerta</option><option value="classic">Clássico</option><option value="none">Sem som</option></select></label>
+            <label class="field"><span>Volume</span><input id="setNotificationVolume" type="range" min="0" max="100" step="5" value="70"></label>
+            <button id="previewNotificationSoundBtn" class="btn btn-secondary" type="button">▶ Ouvir som</button>
+          </div>
+
           <div class="panel settings-card settings-wide">
             <div class="editor-section-head"><div><h2>Frete / entrega</h2><p class="muted">Escolha como a taxa do motoboy será calculada.</p></div></div>
             <div class="delivery-mode-grid">
