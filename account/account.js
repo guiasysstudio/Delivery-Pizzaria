@@ -191,6 +191,10 @@ function renderProfile(){
   $('#profileEmail').value=user.email||'';
   $('#profileCpf').value=identity?.cpf?formatCpf(identity.cpf):'';
   $('#profileCpf').placeholder=identity?.cpfMasked||'000.000.000-00';
+  $('#profileCpf').disabled=identity?.identityComplete===true;
+  $('#profileCpfHint').textContent=identity?.identityComplete
+    ?'CPF confirmado. Por segurança, ele não pode ser trocado pelo site e não fica visível para a pizzaria.'
+    :'Obrigatório para realizar pedidos. A pizzaria não visualiza este dado.';
   $('#identityStatus').innerHTML=identity?.identityComplete
     ?'<span class="status-pill status-completed">✓ Cadastro pronto para pedidos</span>'
     :'<span class="status-pill status-pending">Complete nome, telefone e CPF para poder pedir.</span>';
@@ -266,6 +270,7 @@ $('#profileForm').onsubmit=async e=>{
     console.error(err);
     const code=String(err?.code||'');
     if(code.includes('cpf_already_registered')) alert('Este CPF já está vinculado a outra conta.');
+    else if(code.includes('cpf_change_not_allowed')) alert('O CPF confirmado desta conta não pode ser alterado pelo site.');
     else if(code.includes('invalid_phone')) alert('Informe um telefone válido com DDD.');
     else alert('Não foi possível salvar seus dados. Tente novamente.');
   }
