@@ -293,6 +293,163 @@ function normalizeText(value, max = 200) {
   return String(value || "").trim().slice(0, max);
 }
 
+const staffAdminCors=[
+  "https://guiasysstudio.github.io",
+  "https://guiasys.online",
+  /https:\/\/.*\.guiasys\.online$/
+];
+
+async function verifyStaffAdminRequest(req) {
+  const authHeader=req.headers.authorization||"";
+  const match=authHeader.match(/^Bearer\s+(.+)$/i);
+  if(!match) throw Object.assign(new Error("missing_auth"),{status:401,code:"missing_auth"});
+
+  const decoded=await getAuth().verifyIdToken(match[1]);
+  const db=getFirestore();
+  const callerSnap=await db.doc(`users/${decoded.uid}`).get();
+  if(!callerSnap.exists) throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
+
+  const caller=callerSnap.data()||{};
+  if(caller.active===false) throw Object.assign(new Error("user_disabled"),{status:403,code:"user_disabled"});
+
+  const permissions=await staffPermissions(decoded.uid);
+  if(!permissions || !(permissions.master===true || permissions.usersManage===true)) {
+    throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
+  }
+
+  return {decoded,caller,isMaster:caller.role==="master"};
+}
+
+async function ensureMasterCanBeChanged(db,targetUid,target) {
+  if(target?.role!=="master") return;
+
+  const snap=await db.collection("users").get();
+  const otherActiveMasters=snap.docs.filter(docSnap=>{
+    if(docSnap.id===targetUid) return false;
+    const data=docSnap.data()||{};
+    return data.role==="master" && data.active!==false;
+  });
+
+  if(!otherActiveMasters.length) {
+    throw Object.assign(new Error("last_master"),{status:409,code:"last_master"});
+  }
+}
+
+export const manageStaffUser = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:staffAdminCors,
+    timeoutSeconds:30,
+    memory:"256MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    try{
+      const {decoded,isMaster}=await verifyStaffAdminRequest(req);
+      const action=normalizeText(req.body?.action,40);
+      const targetUid=normalizeText(req.body?.uid,160);
+
+      if(!targetUid){
+        res.status(400).json({error:"user_required"});
+        return;
+      }
+
+      const db=getFirestore();
+      const targetRef=db.doc(`users/${targetUid}`);
+      const targetSnap=await targetRef.get();
+      if(!targetSnap.exists){
+        res.status(404).json({error:"user_not_found"});
+        return;
+      }
+
+      const target=targetSnap.data()||{};
+      if(target.role==="master" && !isMaster){
+        res.status(403).json({error:"master_protected"});
+        return;
+      }
+
+      if(action==="setPassword"){
+        const password=String(req.body?.password||"");
+        if(password.length<6 || password.length>128){
+          res.status(400).json({error:"invalid_password"});
+          return;
+        }
+
+        await getAuth().updateUser(targetUid,{password});
+        await targetRef.set({
+          passwordChangedAt:new Date(),
+          passwordChangedBy:decoded.uid,
+          updatedAt:new Date()
+        },{merge:true});
+
+        res.json({ok:true});
+        return;
+      }
+
+      if(action==="setActive"){
+        if(targetUid===decoded.uid){
+          res.status(409).json({error:"self_status_change"});
+          return;
+        }
+
+        const active=req.body?.active===true;
+        if(!active && target.role==="master"){
+          await ensureMasterCanBeChanged(db,targetUid,target);
+        }
+
+        await getAuth().updateUser(targetUid,{disabled:!active});
+        await targetRef.set({
+          active,
+          statusChangedAt:new Date(),
+          statusChangedBy:decoded.uid,
+          updatedAt:new Date()
+        },{merge:true});
+
+        res.json({ok:true,active});
+        return;
+      }
+
+      if(action==="delete"){
+        if(targetUid===decoded.uid){
+          res.status(409).json({error:"self_delete"});
+          return;
+        }
+
+        if(target.role==="master"){
+          await ensureMasterCanBeChanged(db,targetUid,target);
+        }
+
+        const username=normalizeText(target.username,32);
+        const batch=db.batch();
+        batch.delete(targetRef);
+        if(username) batch.delete(db.doc(`staffLogins/${username}`));
+        await batch.commit();
+
+        try{
+          await getAuth().deleteUser(targetUid);
+        }catch(err){
+          console.error("Authentication user deletion failed after profile removal",err);
+          throw Object.assign(new Error("auth_delete_failed"),{status:500,code:"auth_delete_failed"});
+        }
+
+        res.json({ok:true,deleted:true});
+        return;
+      }
+
+      res.status(400).json({error:"invalid_action"});
+    }catch(err){
+      console.error("manageStaffUser failed",err);
+      res.status(Number(err?.status)||500).json({
+        error:err?.code||err?.message||"staff_user_action_failed"
+      });
+    }
+  }
+);
+
 function normalizeKey(value) {
   return String(value || "")
     .trim()
