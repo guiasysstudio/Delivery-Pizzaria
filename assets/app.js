@@ -5,7 +5,7 @@ import {
   formatCpf, validCpf, formatPhone, validPhone, validFullName
 } from './customer-auth.js';
 import {
-  collection, doc, getDoc, getDocs, runTransaction, addDoc, serverTimestamp, query, where
+  collection, doc, getDoc, getDocs, query, where
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 
 const $=s=>document.querySelector(s);
