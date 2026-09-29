@@ -2,6 +2,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/fireba
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, deleteUser } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, runTransaction } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig } from '../firebase-config.js';
+import { showToast, confirmAction, emptyStateHtml, iconHtml, skeletonListHtml } from '../assets/ui.js';
 
 const app=initializeApp(firebaseConfig);
 const auth=getAuth(app);
@@ -120,6 +121,31 @@ const defaultRoleTemplates={
 
 let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=[],promotions=[],coupons=[],cashSessions=[],cashMovements=[],currentCashSession=null,currentProfile=null;
 let unsubscribeOrders=null,soundEnabled=localStorage.getItem('deliverySoundEnabled')==='1',knownOrderIds=new Set();
+
+function renderSoundButton(){
+  const button=$('#soundBtn');
+  if(!button) return;
+  button.innerHTML=iconHtml('bell-ring')+`<span>${soundEnabled?'Som ativado':'Ativar som'}</span>`;
+  button.setAttribute('aria-pressed',soundEnabled?'true':'false');
+}
+
+function showAdminSkeletons(){
+  const targets=[
+    ['#ordersList',5],
+    ['#productsTable',4],
+    ['#categoriesTable',3],
+    ['#promotionsTable',3],
+    ['#couponsTable',3],
+    ['#customersTable',4],
+    ['#usersTable',3],
+    ['#rolesTable',3],
+    ['#cashHistory',3]
+  ];
+  for(const [selector,count] of targets){
+    const host=$(selector);
+    if(host&&!host.children.length) host.innerHTML=skeletonListHtml(count);
+  }
+}
 let printConfig={
   autoPrint:localStorage.getItem('deliveryAutoPrint')==='1',
   printPending:localStorage.getItem('deliveryPrintPending')==='1',
@@ -375,6 +401,7 @@ async function initializeAdmin(){
 
   await loadSettings();
 
+  showAdminSkeletons();
   const tasks=[];
 
   // Produtos também são carregados para quem trabalha com pedidos, pois o
@@ -412,7 +439,7 @@ async function initializeAdmin(){
   }
 
   if(hasPermission('cashView')) renderCash();
-  if($('#soundBtn')) $('#soundBtn').textContent=soundEnabled?'🔔 Som ativado':'🔕 Ativar som';
+  renderSoundButton();
 }
 async function loadRoles(){
   try{
@@ -538,7 +565,7 @@ $('#soundBtn').onclick=async()=>{
   if(soundEnabled&&'Notification' in window&&Notification.permission==='default'){
     await Notification.requestPermission();
   }
-  $('#soundBtn').textContent=soundEnabled?'🔔 Som ativado':'🔕 Ativar som';
+  renderSoundButton();
   if(soundEnabled) beep();
 };
 
@@ -630,7 +657,7 @@ function renderStoreLogoPreview(){
   const value=$('#setStoreLogo')?.value?.trim()||'';
   host.replaceChildren();
   if(!value){
-    host.textContent='🍕';
+    host.innerHTML=iconHtml('pizza');
     host.classList.remove('has-image');
     return;
   }
@@ -638,7 +665,7 @@ function renderStoreLogoPreview(){
   img.alt='Logo da pizzaria';
   img.src=/^https?:\/\//i.test(value)?value:'../'+value.replace(/^\.?\//,'').replace(/^\//,'');
   img.onerror=()=>{
-    host.replaceChildren(document.createTextNode('🍕'));
+    host.innerHTML=iconHtml('pizza');
     host.classList.remove('has-image');
   };
   host.appendChild(img);
@@ -656,7 +683,7 @@ $('#storeLogoFile')?.addEventListener('change',async e=>{
   const file=e.target.files?.[0];
   if(!file) return;
   if(file.size>8*1024*1024){
-    alert('Escolha uma imagem de até 8 MB.');
+    showToast('Escolha uma imagem de até 8 MB.');
     e.target.value='';
     return;
   }
@@ -961,7 +988,7 @@ async function updateOrderStatus(order,status){
   if(status==='accepted'){
     const pricing=verifyOrderPricing(order);
     if(!pricing.valid){
-      const proceed=confirm('Os valores deste pedido divergem do cardápio atual. Deseja aceitar mesmo assim?\n\n'+pricing.issues.join('\n'));
+      const proceed=await confirmAction('Os valores deste pedido divergem do cardápio atual. Deseja aceitar mesmo assim?\n\n'+pricing.issues.join('\n'),{title:'Valores divergentes',confirmText:'Aceitar mesmo assim',danger:true});
       if(!proceed) return;
     }
   }
@@ -1000,7 +1027,7 @@ function renderOrders(){
         <button class="btn btn-secondary order-details-action" data-id="${o.id}" type="button">Detalhes</button>
       </div>
     </article>`;
-  }).join(''):'<div class="empty-state">Nenhum pedido encontrado.</div>';
+  }).join(''):emptyStateHtml({icon:'clipboard-list',title:'Nenhum pedido encontrado',description:'Os pedidos aparecerão aqui assim que entrarem ou quando corresponderem aos filtros.'});
 
   $$('[data-open-order]').forEach(b=>b.onclick=()=>openOrder(b.dataset.openOrder));
   $$('.order-details-action').forEach(b=>b.onclick=()=>openOrder(b.dataset.id));
@@ -1011,7 +1038,7 @@ function renderOrders(){
       await updateOrderStatus(order,b.dataset.status);
     }catch(err){
       console.error(err);
-      alert('Não foi possível atualizar o pedido.');
+      showToast('Não foi possível atualizar o pedido.');
     }finally{
       b.disabled=false;
     }
@@ -1123,7 +1150,7 @@ function openOrder(id){
     </div>
 
     <div class="section-actions" style="margin-top:16px">
-      <button class="btn btn-secondary" id="printOrderBtn">🖨️ Imprimir comanda</button>
+      <button class="btn btn-secondary icon-button-label" id="printOrderBtn" type="button">${iconHtml('printer')}<span>Imprimir comanda</span></button>
     </div>
   `;
 
@@ -1386,10 +1413,10 @@ $('#saveAutoAcceptBtn')?.addEventListener('click',async()=>{
       updatedAt:serverTimestamp()
     });
     settings.autoAcceptOrders=value;
-    alert('Modo de confirmação atualizado.');
+    showToast('Modo de confirmação atualizado.','success');
   }catch(err){
     console.error(err);
-    alert('Você não tem permissão para alterar o modo de confirmação.');
+    showToast('Você não tem permissão para alterar o modo de confirmação.');
   }
 });
 
@@ -1398,7 +1425,7 @@ $('#connectPrintAgentBtn')?.addEventListener('click',checkPrintAgent);
 $('#savePrintSettingsBtn')?.addEventListener('click',()=>{
   savePrintSettings();
   checkPrintAgent();
-  alert('Configuração deste terminal salva.');
+  showToast('Configuração deste terminal salva.','success');
 });
 
 $$('input[name="printModel"]').forEach(input=>input.addEventListener('change',savePrintSettings));
@@ -1422,10 +1449,10 @@ $('#testPrintBtn')?.addEventListener('click',async()=>{
 
     await checkPrintAgent();
     await sendToPrintAgent(receiptText(sample));
-    alert('Teste enviado ao Print Agent usando o modelo selecionado.');
+    showToast('Teste enviado ao Print Agent usando o modelo selecionado.','success');
   }catch(err){
     console.error(err);
-    alert('Não foi possível imprimir. Verifique se o Print Agent está aberto e se há uma impressora configurada nele.');
+    showToast('Não foi possível imprimir. Verifique se o Print Agent está aberto e se há uma impressora configurada nele.');
   }
 });
 
@@ -1446,7 +1473,7 @@ function renderRoles(){
         ${r.system?'':`<button class="btn btn-danger delete-role" data-id="${r.id}" type="button">Excluir</button>`}
       </div>
     </div>`;
-  }).join(''):'<div class="empty-state">Nenhum perfil personalizado.</div>';
+  }).join(''):emptyStateHtml({icon:'shield-check',title:'Nenhum perfil personalizado',description:'Crie um perfil para definir exatamente o que cada funcionário pode acessar.'});
 
   $$('.edit-role').forEach(b=>b.onclick=()=>editRole(b.dataset.id));
   $$('.delete-role').forEach(b=>b.onclick=()=>deleteRole(b.dataset.id));
@@ -1528,10 +1555,10 @@ $('#roleEditorForm')?.addEventListener('submit',async e=>{
 
 async function deleteRole(id){
   if(!hasPermission('rolesManage')) return;
-  if(users.some(u=>u.role===id)) return alert('Este perfil está sendo usado por um ou mais usuários. Troque o perfil desses usuários antes de excluir.');
+  if(users.some(u=>u.role===id)) return showToast('Este perfil está sendo usado por um ou mais usuários. Troque o perfil desses usuários antes de excluir.');
   const role=roles.find(r=>r.id===id);
   if(!role||role.system) return;
-  if(!confirm(`Excluir o perfil “${role.name}”?`)) return;
+  if(!await confirmAction(`Excluir o perfil “${role.name}”?`,{title:'Excluir perfil',confirmText:'Excluir',danger:true})) return;
   await deleteDoc(doc(db,'roles',id));
   await loadRoles();
 }
@@ -1564,7 +1591,7 @@ function renderPromotions(){
       <span class="status-pill ${p.active===false?'status-cancelled':'status-completed'}">${p.active===false?'Inativa':'Ativa'}</span>
       <div class="data-actions"><button class="btn btn-secondary edit-promotion" data-id="${p.id}" type="button">Editar</button><button class="btn btn-danger delete-promotion" data-id="${p.id}" type="button">Excluir</button></div>
     </div>
-  `).join(''):'<div class="empty-state">Nenhuma promoção cadastrada.</div>';
+  `).join(''):emptyStateHtml({icon:'badge-percent',title:'Nenhuma promoção cadastrada',description:'Crie uma promoção para destacar ofertas do cardápio.'});
   $$('.edit-promotion').forEach(b=>b.onclick=()=>editPromotion(b.dataset.id));
   $$('.delete-promotion').forEach(b=>b.onclick=()=>deletePromotion(b.dataset.id));
 }
@@ -1636,7 +1663,7 @@ $('#promotionEditorForm')?.addEventListener('submit',async e=>{
 async function deletePromotion(id){
   if(!hasPermission('promotionsManage')) return;
   const p=promotions.find(x=>x.id===id);
-  if(!confirm(`Excluir a promoção “${p?.name||''}”?`)) return;
+  if(!await confirmAction(`Excluir a promoção “${p?.name||''}”?`,{title:'Excluir promoção',confirmText:'Excluir',danger:true})) return;
   await deleteDoc(doc(db,'promotions',id));
   await loadPromotions();
 }
@@ -1662,7 +1689,7 @@ function renderCoupons(){
       <span class="status-pill ${cp.active===false?'status-cancelled':'status-completed'}">${cp.active===false?'Inativo':'Ativo'}</span>
       <div class="data-actions"><button class="btn btn-secondary edit-coupon" data-id="${cp.id}" type="button">Editar</button><button class="btn btn-danger delete-coupon" data-id="${cp.id}" type="button">Excluir</button></div>
     </div>
-  `).join(''):'<div class="empty-state">Nenhum cupom cadastrado.</div>';
+  `).join(''):emptyStateHtml({icon:'ticket-percent',title:'Nenhum cupom cadastrado',description:'Os cupons criados para clientes aparecerão aqui.'});
   $$('.edit-coupon').forEach(b=>b.onclick=()=>editCoupon(b.dataset.id));
   $$('.delete-coupon').forEach(b=>b.onclick=()=>deleteCoupon(b.dataset.id));
 }
@@ -1734,7 +1761,7 @@ $('#couponEditorForm')?.addEventListener('submit',async e=>{
 async function deleteCoupon(id){
   if(!hasPermission('couponsManage')) return;
   const cp=coupons.find(x=>x.id===id);
-  if(!confirm(`Excluir o cupom “${cp?.code||id}”?`)) return;
+  if(!await confirmAction(`Excluir o cupom “${cp?.code||id}”?`,{title:'Excluir cupom',confirmText:'Excluir',danger:true})) return;
   await deleteDoc(doc(db,'coupons',id));
   await loadCoupons();
 }
@@ -1857,14 +1884,14 @@ function renderCash(){
   const movementsHost=$('#cashMovements');
   if(movementsHost){
     movementsHost.innerHTML=currentCashSession
-      ?(cashMovements.length?cashMovements.map(m=>`<div class="data-row"><div class="data-main"><strong>${m.type==='supply'?'Suprimento':'Sangria'}</strong><small>${esc(m.note||'Sem observação')} • ${formatDate(m.createdAt)} • ${esc(m.createdByName||'')}</small></div><span class="status-pill ${m.type==='supply'?'status-completed':'status-cancelled'}">${m.type==='supply'?'+':'−'}</span><strong>${money(m.amount)}</strong></div>`).join(''):'<div class="empty-state">Nenhum suprimento ou sangria neste caixa.</div>')
-      :'<div class="empty-state">Abra um caixa para registrar movimentos.</div>';
+      ?(cashMovements.length?cashMovements.map(m=>`<div class="data-row"><div class="data-main"><strong>${m.type==='supply'?'Suprimento':'Sangria'}</strong><small>${esc(m.note||'Sem observação')} • ${formatDate(m.createdAt)} • ${esc(m.createdByName||'')}</small></div><span class="status-pill ${m.type==='supply'?'status-completed':'status-cancelled'}">${m.type==='supply'?'+':'−'}</span><strong>${money(m.amount)}</strong></div>`).join(''):emptyStateHtml({icon:'wallet-cards',title:'Nenhum movimento neste caixa',description:'Suprimentos e sangrias aparecerão aqui.'}))
+      :emptyStateHtml({icon:'wallet-cards',title:'Caixa fechado',description:'Abra o caixa para registrar suprimentos e sangrias.'});
   }
 
   $('#cashHistory').innerHTML=cashSessions.length?cashSessions.slice(0,20).map(s=>{
     const sum=s.summary||cashSummary(s);
     return `<div class="data-row"><div class="data-main"><strong>${s.status==='open'?'Caixa aberto':'Caixa fechado'}</strong><small>${esc(s.businessDate||'')} • ${formatDate(s.openedAt)} • ${esc(s.openedByName||'')}</small></div><span>${Number(sum.count||0)} pedido(s)</span><div><strong>${money(sum.gross||0)}</strong>${s.difference!=null?`<small class="muted" style="display:block">Diferença: ${money(s.difference)}</small>`:''}</div></div>`;
-  }).join(''):'<div class="empty-state">Nenhum caixa registrado.</div>';
+  }).join(''):emptyStateHtml({icon:'wallet-cards',title:'Nenhum caixa registrado',description:'O histórico de aberturas e fechamentos aparecerá aqui.'});
 }
 
 $('#openCashBtn')?.addEventListener('click',async()=>{
@@ -1873,19 +1900,19 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
   // Atualiza antes de abrir para não trabalhar com estado antigo de outra estação.
   await loadCashSessions();
   if(currentCashSession){
-    alert('Já existe um caixa aberto. A tela foi atualizada com a sessão atual.');
+    showToast('Já existe um caixa aberto. A tela foi atualizada com a sessão atual.');
     return;
   }
 
   const businessDate=businessDateFor();
   if(cashSessions.some(session=>session.businessDate===businessDate&&session.status==='closed')){
-    alert('O caixa deste dia operacional já foi encerrado. Para evitar duplicidade financeira, não é possível abrir uma segunda sessão no mesmo dia.');
+    showToast('O caixa deste dia operacional já foi encerrado. Para evitar duplicidade financeira, não é possível abrir uma segunda sessão no mesmo dia.');
     return;
   }
 
   const openingAmount=Number($('#cashOpeningAmount').value||0);
   if(!Number.isFinite(openingAmount)||openingAmount<0){
-    alert('Informe um valor inicial válido, igual ou maior que zero.');
+    showToast('Informe um valor inicial válido, igual ou maior que zero.');
     $('#cashOpeningAmount').focus();
     return;
   }
@@ -1922,11 +1949,11 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
   }catch(err){
     console.error(err);
     if(err?.message==='cash-already-open'){
-      alert('Já existe um caixa aberto. Atualize a tela para visualizar a sessão atual.');
+      showToast('Já existe um caixa aberto. Atualize a tela para visualizar a sessão atual.');
       await loadCashSessions();
       return;
     }
-    alert('Não foi possível abrir o caixa.');
+    showToast('Não foi possível abrir o caixa.');
   }
 });
 
@@ -2074,7 +2101,7 @@ function renderProducts(){
       <div class="data-main">
         <strong>${esc(p.name)}</strong>
         <small>${esc(categories.find(cat=>cat.id===p.categoryId)?.name||'Sem categoria')} • ${p.active===false?'Indisponível':'Disponível'} • ${p.sizes?.length?`${p.sizes.length} tamanhos`:money(p.price)}</small>
-        ${promoSummary?`<small class="product-promotion-line">🏷️ Em promoção • ${esc(promoSummary)}</small>`:''}
+        ${promoSummary?`<small class="product-promotion-line">${iconHtml('badge-percent')} <span>Em promoção • ${esc(promoSummary)}</span></small>`:''}
       </div>
       <span>${p.featured?'Destaque':''}</span>
       <div class="data-actions">
@@ -2083,7 +2110,7 @@ function renderProducts(){
         ${canDelete?`<button class="btn btn-danger delete-product" data-id="${p.id}" type="button">Excluir</button>`:''}
       </div>
     </div>`;
-  }).join(''):'<div class="empty-state">Nenhum produto cadastrado.</div>';
+  }).join(''):emptyStateHtml({icon:'pizza',title:'Nenhum produto cadastrado',description:'Cadastre o primeiro item para montar o cardápio.'});
 
   $$('.edit-product').forEach(b=>b.onclick=()=>editProduct(b.dataset.id));
   $$('.delete-product').forEach(b=>b.onclick=()=>deleteProduct(b.dataset.id));
@@ -2221,7 +2248,7 @@ productCanvas?.addEventListener('pointerup',()=>{productImageDragging=false;});
 productCanvas?.addEventListener('pointercancel',()=>{productImageDragging=false;});
 
 $('#uploadProductImageBtn')?.addEventListener('click',async()=>{
-  if(!productImageSource) return alert('Selecione uma imagem primeiro.');
+  if(!productImageSource) return showToast('Selecione uma imagem primeiro.');
   const button=$('#uploadProductImageBtn');
   const status=$('#productImageUploadStatus');
   const canvas=$('#productImageCanvas');
@@ -2260,7 +2287,7 @@ $('#uploadProductImageBtn')?.addEventListener('click',async()=>{
 });
 
 $('#downloadPreparedImageBtn')?.addEventListener('click',()=>{
-  if(!productImageSource) return alert('Selecione uma imagem primeiro.');
+  if(!productImageSource) return showToast('Selecione uma imagem primeiro.');
   const canvas=$('#productImageCanvas');
   canvas.toBlob(blob=>{
     if(!blob) return;
@@ -2350,14 +2377,15 @@ $('#productEditorForm').onsubmit=async e=>{
 async function deleteProduct(id){
   if(!hasPermission('productsDelete')) return;
   const p=products.find(x=>x.id===id);
-  if(confirm(`Excluir o produto “${p?.name}”?`)){
+  if(await confirmAction(`Excluir o produto “${p?.name}”?`,{title:'Excluir produto',confirmText:'Excluir',danger:true})){
     await deleteDoc(doc(db,'products',id));
     await loadProducts();
+    showToast('Produto excluído com sucesso.','success');
   }
 }
 
 function renderCategories(){
-  $('#categoriesTable').innerHTML=categories.length?categories.map(c=>`<div class="data-row"><div class="data-main"><strong>${esc(c.name)}</strong><small>Ordem ${c.order||0} • ${c.active===false?'Inativa':'Ativa'}</small></div><span></span><div class="data-actions"><button class="btn btn-secondary edit-category" data-id="${c.id}">Editar</button><button class="btn btn-danger delete-category" data-id="${c.id}">Excluir</button></div></div>`).join(''):'<div class="empty-state">Nenhuma categoria cadastrada.</div>';
+  $('#categoriesTable').innerHTML=categories.length?categories.map(c=>`<div class="data-row"><div class="data-main"><strong>${esc(c.name)}</strong><small>Ordem ${c.order||0} • ${c.active===false?'Inativa':'Ativa'}</small></div><span></span><div class="data-actions"><button class="btn btn-secondary edit-category" data-id="${c.id}">Editar</button><button class="btn btn-danger delete-category" data-id="${c.id}">Excluir</button></div></div>`).join(''):emptyStateHtml({icon:'folders',title:'Nenhuma categoria cadastrada',description:'Crie categorias para organizar o cardápio.'});
 
   $$('.edit-category').forEach(b=>b.onclick=()=>editCategory(b.dataset.id));
   $$('.delete-category').forEach(b=>b.onclick=()=>deleteCategory(b.dataset.id));
@@ -2407,12 +2435,13 @@ $('#categoryEditorForm').onsubmit=async e=>{
 async function deleteCategory(id){
   if(!hasPermission('categoriesManage')) return;
   if(products.some(p=>p.categoryId===id)){
-    return alert('Essa categoria possui produtos. Mova ou exclua os produtos antes.');
+    return showToast('Essa categoria possui produtos. Mova ou exclua os produtos antes.');
   }
   const c=categories.find(x=>x.id===id);
-  if(confirm(`Excluir a categoria “${c?.name}”?`)){
+  if(await confirmAction(`Excluir a categoria “${c?.name}”?`,{title:'Excluir categoria',confirmText:'Excluir',danger:true})){
     await deleteDoc(doc(db,'categories',id));
     await loadCategories();
+    showToast('Categoria excluída com sucesso.','success');
   }
 }
 
@@ -2744,23 +2773,23 @@ $('#settingsForm').onsubmit=async e=>{
   const storeZip=$('#setStoreZip').value.trim();
 
   if(deliveryPricingMode==='neighborhood'&&$('#setRestrictDeliveryZones').checked&&!deliveryZones.length){
-    alert('Cadastre pelo menos um bairro antes de restringir a entrega por bairro.');
+    showToast('Cadastre pelo menos um bairro antes de restringir a entrega por bairro.');
     return;
   }
 
   if(deliveryPricingMode==='km'){
     if(!deliveryKmBands.length){
-      alert('Cadastre pelo menos uma faixa de km e seu valor.');
+      showToast('Cadastre pelo menos uma faixa de km e seu valor.');
       return;
     }
     if(storeZip.replace(/\D/g,'').length!==8){
-      alert('Informe o CEP da pizzaria para calcular o frete por km.');
+      showToast('Informe o CEP da pizzaria para calcular o frete por km.');
       $('#setStoreZip').focus();
       return;
     }
     const located=await refreshStoreLocationPreview();
     if(!located){
-      alert('Não foi possível localizar o CEP da pizzaria. Confira o CEP antes de salvar o frete por km.');
+      showToast('Não foi possível localizar o CEP da pizzaria. Confira o CEP antes de salvar o frete por km.');
       return;
     }
     storeLocation=located;
@@ -2889,7 +2918,7 @@ $('#seedBtn').onclick=async()=>{
 
   await batch.commit();
   await Promise.all([loadCategories(),loadProducts()]);
-  alert(missing.length
+  showToast(missing.length
     ?`Cardápio demonstrativo atualizado: ${missing.length} item(ns) adicionado(s).`
     :'O cardápio demonstrativo já está completo.');
 };
@@ -2957,7 +2986,7 @@ function renderCustomers(){
       <span>${customerOrders.length} pedido(s)</span>
       <div><strong>${money(spent)}</strong><small class="muted" style="display:block">concluídos</small></div>
     </div>`;
-  }).join(''):'<div class="empty-state">Nenhum cliente encontrado.</div>';
+  }).join(''):emptyStateHtml({icon:'users',title:'Nenhum cliente encontrado',description:'Tente outro termo de busca ou aguarde novos cadastros.'});
 }
 
 $('#customerSearch')?.addEventListener('input',renderCustomers);
@@ -2994,7 +3023,7 @@ function renderUsers(){
         ${u.uid!==auth.currentUser?.uid&&!u.bootstrap?`<button class="btn ${u.active===false?'btn-secondary':'btn-danger'} toggle-user" data-uid="${u.uid}">${u.active===false?'Ativar':'Desativar'}</button>`:''}
         ${u.uid!==auth.currentUser?.uid&&!u.bootstrap?`<button class="btn btn-danger delete-user" data-uid="${u.uid}">Excluir</button>`:''}
       </div>
-    </div>`).join(''):'<div class="empty-state">Nenhum usuário cadastrado.</div>';
+    </div>`).join(''):emptyStateHtml({icon:'users',title:'Nenhum usuário cadastrado',description:'Os funcionários autorizados aparecerão aqui.'});
 
   document.querySelectorAll('.edit-user').forEach(b=>b.onclick=()=>editUser(b.dataset.uid));
   document.querySelectorAll('.password-user').forEach(b=>b.onclick=()=>openUserPasswordDialog(b.dataset.uid));
@@ -3150,14 +3179,14 @@ async function toggleUser(uid){
   if(!u) return;
 
   const next=u.active===false;
-  if(!next&&!confirm(`Desativar o usuário “${u.username}”? O login dele será bloqueado no Firebase Authentication.`)) return;
+  if(!next&&!await confirmAction(`Desativar o usuário “${u.username}”? O login dele será bloqueado no Firebase Authentication.`,{title:'Desativar usuário',confirmText:'Desativar',danger:true})) return;
 
   try{
     await staffUserAdminAction('setActive',uid,{active:next});
     await loadUsers();
   }catch(err){
     console.error(err);
-    alert(staffUserActionMessage(err));
+    showToast(staffUserActionMessage(err));
   }
 }
 
@@ -3199,7 +3228,7 @@ $('#userPasswordForm')?.addEventListener('submit',async e=>{
   try{
     await staffUserAdminAction('setPassword',uid,{password});
     $('#userPasswordDialog').close();
-    alert('Senha alterada com sucesso.');
+    showToast('Senha alterada com sucesso.','success');
   }catch(err){
     console.error(err);
     $('#userPasswordError').textContent=staffUserActionMessage(err);
@@ -3216,13 +3245,13 @@ async function removeUser(uid){
   if(!u||u.bootstrap) return;
 
   const name=u.displayName||u.username||'Usuário';
-  if(!confirm(`Excluir o usuário “${name}”?\n\nA conta de login também será excluída do Firebase Authentication. Esta ação não pode ser desfeita.`)) return;
+  if(!await confirmAction(`Excluir o usuário “${name}”?\n\nA conta de login também será excluída do Firebase Authentication. Esta ação não pode ser desfeita.`,{title:'Excluir usuário',confirmText:'Excluir definitivamente',danger:true})) return;
 
   try{
     await staffUserAdminAction('delete',uid);
     await loadUsers();
   }catch(err){
     console.error(err);
-    alert(staffUserActionMessage(err));
+    showToast(staffUserActionMessage(err));
   }
 }
