@@ -131,6 +131,28 @@ export function skeletonListHtml(count=4){
     </div>`).join('');
 }
 
+export function applyBrandTheme(value){
+  const color=/^#[0-9a-f]{6}$/i.test(String(value||''))?String(value):'#b91c1c';
+  const rgb=[
+    parseInt(color.slice(1,3),16),
+    parseInt(color.slice(3,5),16),
+    parseInt(color.slice(5,7),16)
+  ];
+  const luminance=(0.2126*rgb[0]+0.7152*rgb[1]+0.0722*rgb[2])/255;
+  const adjust=amount=>'#'+rgb.map(channel=>Math.max(0,Math.min(255,channel+amount)).toString(16).padStart(2,'0')).join('');
+  const secondary=adjust(luminance>.55?-26:28);
+  const contrast=luminance>.58?'#111827':'#ffffff';
+  const root=document.documentElement;
+  root.style.setProperty('--primary',color);
+  root.style.setProperty('--primary2',secondary);
+  root.style.setProperty('--primary-soft',`rgba(${rgb[0]},${rgb[1]},${rgb[2]},.12)`);
+  root.style.setProperty('--primary-contrast',contrast);
+  root.style.setProperty('--brand-rgb',rgb.join(','));
+  const themeMeta=document.querySelector('meta[name="theme-color"]');
+  if(themeMeta&&!document.body?.classList.contains('admin-body')) themeMeta.setAttribute('content',color);
+  return color;
+}
+
 export function enhanceAccessibility(root=document){
   root.querySelectorAll('dialog').forEach((dialog,index)=>{
     if(!dialog.hasAttribute('aria-labelledby')&&!dialog.hasAttribute('aria-label')){
