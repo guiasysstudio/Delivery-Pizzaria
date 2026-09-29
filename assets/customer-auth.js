@@ -118,6 +118,22 @@ export async function getAddresses(uid){
 }
 
 export async function saveAddress(uid,address,id=null){
+  let location=address.location||null;
+  if(!location&&address.zip){
+    try{
+      const zipInfo=await lookupBrazilianZip(address.zip);
+      if(zipInfo?.location?.latitude!=null&&zipInfo?.location?.longitude!=null){
+        location={
+          latitude:Number(zipInfo.location.latitude),
+          longitude:Number(zipInfo.location.longitude),
+          source:'cep'
+        };
+      }
+    }catch(err){
+      console.warn('Coordenadas do CEP não disponíveis.',err);
+    }
+  }
+
   const clean={
     label:(address.label||'Casa').trim(),
     recipient:(address.recipient||'').trim(),
@@ -130,6 +146,9 @@ export async function saveAddress(uid,address,id=null){
     city:(address.city||'').trim(),
     state:(address.state||'').trim().toUpperCase(),
     reference:(address.reference||'').trim(),
+    location:location&&Number.isFinite(Number(location.latitude))&&Number.isFinite(Number(location.longitude))
+      ?{latitude:Number(location.latitude),longitude:Number(location.longitude),source:location.source||'cep'}
+      :null,
     updatedAt:serverTimestamp()
   };
   if(id){
@@ -172,6 +191,26 @@ export async function setFavorite(uid,productId,active){
 export async function lookupBrazilianZip(zip){
   const digits=String(zip||'').replace(/\D/g,'');
   if(digits.length!==8) return null;
+
+  try{
+    const response=await fetch(`https://brasilapi.com.br/api/cep/v2/${digits}`,{cache:'no-store'});
+    if(response.ok){
+      const data=await response.json();
+      const lat=Number(data?.location?.coordinates?.latitude);
+      const lng=Number(data?.location?.coordinates?.longitude);
+      return {
+        zip:digits.replace(/^(\d{5})(\d{3})$/,'$1-$2'),
+        street:data.street||'',
+        neighborhood:data.neighborhood||'',
+        city:data.city||'',
+        state:data.state||'',
+        location:Number.isFinite(lat)&&Number.isFinite(lng)?{latitude:lat,longitude:lng,source:'brasilapi-cep-v2'}:null
+      };
+    }
+  }catch(err){
+    console.warn('BrasilAPI CEP v2 indisponível; tentando fallback.',err);
+  }
+
   const response=await fetch(`https://viacep.com.br/ws/${digits}/json/`,{cache:'no-store'});
   if(!response.ok) throw new Error('cep-unavailable');
   const data=await response.json();
@@ -181,7 +220,8 @@ export async function lookupBrazilianZip(zip){
     street:data.logradouro||'',
     neighborhood:data.bairro||'',
     city:data.localidade||'',
-    state:data.uf||''
+    state:data.uf||'',
+    location:null
   };
 }
 
