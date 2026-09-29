@@ -1055,26 +1055,28 @@ function loadPrintSettingsUI(){
   if(!$('#localAutoPrint')) return;
   $('#localAutoPrint').checked=printConfig.autoPrint;
   $('#localPrintPending').checked=printConfig.printPending;
+  const model=document.querySelector(`input[name="printModel"][value="${printConfig.model}"]`);
+  if(model) model.checked=true;
   if($('#cashierAutoAccept')) $('#cashierAutoAccept').checked=!!settings.autoAcceptOrders;
 }
 
 function savePrintSettings(){
-  if(!$('#localPrinterSelect')) return;
   printConfig={
-    printer:$('#localPrinterSelect').value,
-    autoPrint:$('#localAutoPrint').checked,
-    printPending:$('#localPrintPending').checked
+    ...printConfig,
+    autoPrint:$('#localAutoPrint')?.checked===true,
+    printPending:$('#localPrintPending')?.checked===true,
+    model:document.querySelector('input[name="printModel"]:checked')?.value||'thermal80'
   };
 
-  localStorage.setItem('deliveryPrinter',printConfig.printer);
+  localStorage.setItem('deliveryPrinter',printConfig.printer||'');
   localStorage.setItem('deliveryAutoPrint',printConfig.autoPrint?'1':'0');
   localStorage.setItem('deliveryPrintPending',printConfig.printPending?'1':'0');
+  localStorage.setItem('deliveryPrintModel',printConfig.model);
 }
 
 async function checkPrintAgent(){
   const status=$('#printerAgentStatus');
-  const select=$('#localPrinterSelect');
-  if(!status||!select) return false;
+  if(!status) return false;
 
   try{
     const response=await fetch(PRINT_AGENT+'/printers',{cache:'no-store'});
@@ -1083,27 +1085,43 @@ async function checkPrintAgent(){
     const data=await response.json();
     const printers=Array.isArray(data.printers)?data.printers:[];
 
-    select.innerHTML='<option value="">Selecione...</option>'+
-      printers.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
-
-    if(printConfig.printer&&printers.includes(printConfig.printer)){
-      select.value=printConfig.printer;
+    // Compatibilidade com a versão atual do Agent: a seleção física deixou de
+    // aparecer no site, mas enquanto o Agent novo não estiver instalado usamos
+    // internamente a impressora previamente salva ou a primeira detectada.
+    if(!printConfig.printer||!printers.includes(printConfig.printer)){
+      printConfig.printer=printers[0]||'';
+      localStorage.setItem('deliveryPrinter',printConfig.printer);
     }
 
-    status.textContent='● Print Agent conectado • '+printers.length+' impressora(s)';
+    status.textContent='● Print Agent conectado';
     status.classList.add('ok');
     status.classList.remove('off');
+    if($('#printerAgentInfoState')){
+      $('#printerAgentInfoState').textContent=printers.length
+        ?`Conectado • ${printers.length} impressora(s) detectada(s)`
+        :'Conectado • configure uma impressora no Agent';
+    }
     return true;
   }catch(err){
     status.textContent='● Print Agent desconectado';
     status.classList.add('off');
     status.classList.remove('ok');
-    select.innerHTML='<option value="">Print Agent não encontrado</option>';
+    if($('#printerAgentInfoState')) $('#printerAgentInfoState').textContent='Sem conexão';
     return false;
   }
 }
 
-function centerText(text,width=42){
+function printModelWidth(){
+  return {
+    thermal80:42,
+    thermal58:32,
+    a4:64,
+    compact:32,
+    label:28
+  }[printConfig.model]||42;
+}
+
+function centerText(text,width=printModelWidth()){
   text=String(text||'');
   if(text.length>=width) return text;
   const left=Math.floor((width-text.length)/2);
@@ -1111,25 +1129,40 @@ function centerText(text,width=42){
 }
 
 function receiptText(o){
-  const width=42;
+  const width=printModelWidth();
   const divider='-'.repeat(width);
   const lines=[];
+  const model=printConfig.model||'thermal80';
 
-  lines.push(centerText(settings.storeName||'PIZZARIA',width));
-  if(settings.phone) lines.push(centerText(settings.phone,width));
+  if(model==='label'){
+    lines.push(centerText(settings.storeName||'PIZZARIA',width));
+    lines.push(centerText('PEDIDO #'+String(o.orderNumber||0).padStart(4,'0'),width));
+    lines.push(divider);
+    lines.push((o.customer?.name||'CLIENTE').slice(0,width));
+    for(const item of (o.items||[])){
+      lines.push((String(item.qty)+'x '+String(item.name||'')).slice(0,width));
+      if(item.size?.name) lines.push(('  '+item.size.name).slice(0,width));
+    }
+    lines.push(divider);
+    lines.push(centerText('TOTAL '+money(o.total),width));
+    lines.push('');
+    return lines.join('\n');
+  }
+
+  if(model!=='compact') lines.push(centerText(settings.storeName||'PIZZARIA',width));
+  if(model!=='compact'&&settings.phone) lines.push(centerText(settings.phone,width));
   lines.push(divider);
   lines.push(centerText('PEDIDO #'+String(o.orderNumber||0).padStart(4,'0'),width));
   const pricing=verifyOrderPricing(o);
-  if(!pricing.valid){
-    lines.push(centerText('*** ATENCAO: VALORES DIVERGENTES ***',width));
-  }
+  if(!pricing.valid) lines.push(centerText('*** REVISAR VALORES ***',width));
   lines.push(formatDate(o.createdAt));
   lines.push('STATUS: '+(statusLabels[o.status]||o.status));
   lines.push(divider);
   lines.push('CLIENTE: '+(o.customer?.name||''));
   lines.push('FONE: '+(o.customer?.phone||''));
   lines.push(o.fulfillment==='pickup'?'RETIRADA NO LOCAL':'ENTREGA: '+orderAddressText(o));
-  if(o.fulfillment!=='pickup'){
+
+  if(o.fulfillment!=='pickup'&&model!=='compact'){
     const deliverySnap=o.deliveryPricing||{};
     if(deliverySnap.mode==='km'&&Number.isFinite(Number(deliverySnap.distanceKm))){
       lines.push('FRETE: POR KM • '+Number(deliverySnap.distanceKm).toFixed(1).replace('.',',')+' KM');
@@ -1139,13 +1172,13 @@ function receiptText(o){
       lines.push('FRETE: VALOR FIXO');
     }
   }
+
   lines.push(divider);
   lines.push('ITENS');
-
   for(const item of (o.items||[])){
     lines.push(String(item.qty)+'x '+String(item.name||''));
     if(item.size?.name) lines.push('  Tamanho: '+item.size.name);
-    if(item.extras?.length) lines.push('  Adic.: '+item.extras.map(x=>x.name).join(', '));
+    if(model!=='compact'&&item.extras?.length) lines.push('  Adic.: '+item.extras.map(x=>x.name).join(', '));
     if(item.note) lines.push('  OBS: '+item.note);
     lines.push('  '+money(Number(item.unitPrice||0)*Number(item.qty||0)));
   }
@@ -1173,23 +1206,25 @@ function receiptText(o){
   }
 
   lines.push(divider);
-  lines.push(centerText('*** FIM DA COMANDA ***',width));
+  if(model!=='compact') lines.push(centerText('*** FIM DA COMANDA ***',width));
   lines.push('');
   lines.push('');
   return lines.join('\n');
 }
 
 async function sendToPrintAgent(text){
-  if(!printConfig.printer) throw new Error('printer-not-selected');
+  const payload={
+    text,
+    copies:1,
+    model:printConfig.model,
+    storeLogo:settings.storeLogo||''
+  };
+  if(printConfig.printer) payload.printer=printConfig.printer;
 
   const response=await fetch(PRINT_AGENT+'/print',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      printer:printConfig.printer,
-      text,
-      copies:1
-    })
+    body:JSON.stringify(payload)
   });
 
   if(!response.ok){
@@ -1203,7 +1238,7 @@ async function printOrder(order,automatic=false){
 
   const connected=await checkPrintAgent();
 
-  if(connected&&printConfig.printer){
+  if(connected){
     try{
       await sendToPrintAgent(receiptText(order));
       if(order?.id){
@@ -1217,7 +1252,7 @@ async function printOrder(order,automatic=false){
   }
 
   if(automatic){
-    showSystemAlert('Pedido recebido, mas a impressão automática não foi realizada. Abra “Impressão” e verifique o Print Agent e a impressora selecionada.');
+    showSystemAlert('Pedido recebido, mas a impressão automática não foi realizada. Abra “Impressão” e verifique a conexão e a impressora configurada no Print Agent.');
     return false;
   }
 
@@ -1240,38 +1275,41 @@ $('#saveAutoAcceptBtn')?.addEventListener('click',async()=>{
   }
 });
 
-$('#refreshPrintersBtn')?.addEventListener('click',checkPrintAgent);
+$('#connectPrintAgentBtn')?.addEventListener('click',checkPrintAgent);
 
 $('#savePrintSettingsBtn')?.addEventListener('click',()=>{
   savePrintSettings();
   checkPrintAgent();
-  alert('Configuração desta estação salva.');
+  alert('Configuração deste terminal salva.');
 });
+
+$$('input[name="printModel"]').forEach(input=>input.addEventListener('change',savePrintSettings));
 
 $('#testPrintBtn')?.addEventListener('click',async()=>{
   savePrintSettings();
   try{
-    const text=[
-      centerText(settings.storeName||'DELIVERY PIZZARIA'),
-      '------------------------------------------',
-      centerText('TESTE DE IMPRESSAO'),
-      '',
-      'Impressora: '+(printConfig.printer||''),
-      'Data: '+new Date().toLocaleString('pt-BR'),
-      '',
-      centerText('Print Agent funcionando'),
-      '',
-      ''
-    ].join('\n');
+    const sample={
+      orderNumber:1,
+      status:'accepted',
+      createdAt:{toDate:()=>new Date()},
+      customer:{name:'Cliente de teste',phone:'(00) 00000-0000'},
+      fulfillment:'pickup',
+      items:[{qty:1,name:'Produto de teste',unitPrice:25,size:{name:'Grande'},extras:[]}],
+      subtotal:25,
+      discount:0,
+      deliveryFee:0,
+      total:25,
+      payment:{method:'PIX na entrega'}
+    };
 
-    await sendToPrintAgent(text);
-    alert('Teste enviado para a impressora.');
+    await checkPrintAgent();
+    await sendToPrintAgent(receiptText(sample));
+    alert('Teste enviado ao Print Agent usando o modelo selecionado.');
   }catch(err){
     console.error(err);
-    alert('Não foi possível imprimir. Verifique se o Print Agent está aberto e se uma impressora foi selecionada.');
+    alert('Não foi possível imprimir. Verifique se o Print Agent está aberto e se há uma impressora configurada nele.');
   }
 });
-
 
 
 /* ===== Perfis de acesso ===== */
