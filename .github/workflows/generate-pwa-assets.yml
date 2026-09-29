@@ -1,0 +1,59 @@
+name: Generate PWA Assets
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "assets/app-icon.svg"
+      - "assets/pwa/icon-maskable.svg"
+      - "assets/social-card.svg"
+      - ".github/workflows/generate-pwa-assets.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install image renderer
+        run: npm install --no-save sharp@0.34.4
+
+      - name: Generate PNG assets
+        run: |
+          node <<'NODE'
+          const sharp = require('sharp');
+
+          async function main() {
+            await sharp('assets/app-icon.svg').resize(192, 192).png().toFile('assets/pwa/icon-192.png');
+            await sharp('assets/app-icon.svg').resize(512, 512).png().toFile('assets/pwa/icon-512.png');
+            await sharp('assets/pwa/icon-maskable.svg').resize(512, 512).png().toFile('assets/pwa/icon-maskable-512.png');
+            await sharp('assets/app-icon.svg').resize(180, 180).png().toFile('assets/pwa/apple-touch-icon-180.png');
+            await sharp('assets/app-icon.svg').resize(32, 32).png().toFile('assets/pwa/favicon-32.png');
+            await sharp('assets/social-card.svg').resize(1200, 630).png().toFile('assets/social-card.png');
+          }
+
+          main().catch(error => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Commit generated assets
+        run: |
+          if git diff --quiet -- assets/pwa assets/social-card.png; then
+            echo "Generated assets are already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/pwa/*.png assets/social-card.png
+          git commit -m "assets: regenerate PWA raster icons"
+          git push
