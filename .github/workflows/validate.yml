@@ -35,6 +35,8 @@ jobs:
               bad = re.findall(r"(?<!\$)\$\([^\n;]+\)\.forEach\(", text)
               if bad:
                   raise SystemExit(f"{path}: possível uso de seletor único com forEach: {bad[:5]}")
+              if '$$(' in text:
+                  raise SystemExit(f"{path}: seletor inválido $$ encontrado")
           print('selector checks OK')
           PY
 
