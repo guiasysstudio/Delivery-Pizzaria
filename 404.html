@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#b91c1c">
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="icon" href="/Delivery-Pizzaria/assets/app-icon.svg" type="image/svg+xml">
+  <title>Página não encontrada • Delivery Pizzaria</title>
+  <link rel="stylesheet" href="/Delivery-Pizzaria/assets/styles.css">
+</head>
+<body class="public-body">
+  <main class="shell" style="min-height:100vh;display:grid;place-items:center;padding:32px">
+    <section class="panel settings-card" style="max-width:620px;text-align:center">
+      <div style="font-size:56px;margin-bottom:10px">🍕</div>
+      <span class="eyebrow">ERRO 404</span>
+      <h1>Página não encontrada</h1>
+      <p class="muted">O endereço acessado não existe ou foi movido. Volte ao cardápio para continuar.</p>
+      <a id="home404" class="btn btn-primary" href="/Delivery-Pizzaria/">Voltar ao cardápio</a>
+    </section>
+  </main>
+  <script>
+    if(!location.hostname.endsWith('github.io')){
+      const link=document.getElementById('home404');
+      link.href='/';
+      const css=document.querySelector('link[rel="stylesheet"]');
+      const icon=document.querySelector('link[rel="icon"]');
+      if(css) css.href='/assets/styles.css';
+      if(icon) icon.href='/assets/app-icon.svg';
+    }
+  </script>
+</body>
+</html>
