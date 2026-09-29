@@ -287,6 +287,9 @@ As regras devem ser publicadas sempre que esse arquivo mudar.
 A pasta `functions/` contém:
 
 - `uploadProductImage`: envia WebP autenticado ao GitHub.
+- `uploadStoreLogo`: envia a logo da pizzaria ao GitHub com autorização de configuração.
+- `customerIdentity`: valida nome, telefone e CPF no backend, mantém o CPF privado e garante unicidade.
+- `cancelCustomerOrder`: aplica a janela configurável de cancelamento e valida o dono/status do pedido.
 - `createOrder`: valida o pedido no servidor, recalcula cardápio, promoções, cupom, frete e numeração antes de gravar.
 - `grantLoyaltyCoupons`: entrega automaticamente recompensas de fidelidade após pedidos concluídos.
 
@@ -298,25 +301,31 @@ DELIVERY_GITHUB_TOKEN
 
 Esse token deve ser fine-grained, restrito ao repositório Delivery-Pizzaria e com permissão de Contents: Read and write.
 
-Depois, publicar as Functions com Firebase CLI.
+Depois, publique Functions e regras com Firebase CLI:
+
+```bash
+firebase deploy --only functions,firestore:rules
+```
+
+As regras atuais bloqueiam a criação direta de pedidos e a manipulação do contador pelo navegador. Por isso, `createOrder`, `customerIdentity` e `cancelCustomerOrder` precisam estar publicadas no projeto Firebase para o fluxo de cliente funcionar por completo.
 
 > Cloud Functions em produção pode exigir o plano Blaze do Firebase.
 
 ### Criação segura de pedidos
 
-O site público tenta usar a Function `createOrder` antes de qualquer gravação direta. Quando publicada, ela ignora valores enviados pelo navegador e recalcula no servidor:
+O site público usa exclusivamente a Function `createOrder`. Ela ignora valores calculados no navegador e recalcula no servidor:
 
 - produtos e disponibilidade;
 - tamanho e meio a meio;
 - adicionais;
-- promoções;
+- promoções e snapshot histórico;
 - cupom e elegibilidade;
 - pedido mínimo;
 - forma de pagamento e troco;
 - frete fixo, por bairro ou por km;
 - contador sequencial do pedido.
 
-Enquanto a Function ainda não estiver publicada, existe um fallback de compatibilidade para não interromper os testes atuais. Depois da publicação e validação da Function, esse fallback pode ser removido e as regras do Firestore podem bloquear completamente a criação direta pelo navegador.
+Não existe mais fallback de gravação direta pelo navegador. Se a Function segura estiver indisponível, o pedido não é gravado e o cliente recebe uma mensagem para tentar novamente.
 
 ## Validação automática
 
