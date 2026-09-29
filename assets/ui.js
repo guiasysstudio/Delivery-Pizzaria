@@ -28,7 +28,7 @@ export function showToast(message,type='info',options={}){
   toast.innerHTML=`
     ${iconHtml(icons[normalized],'toast-icon')}
     <div class="toast-copy"><strong>${normalized==='success'?'Concluído':normalized==='error'?'Atenção':normalized==='warning'?'Aviso':'Informação'}</strong><span></span></div>
-    <button class="toast-close" type="button" aria-label="Fechar notificação">×</button>`;
+    <button class="toast-close" type="button" aria-label="Fechar notificação">${iconHtml('circle-x')}</button>`;
   toast.querySelector('.toast-copy span').textContent=String(message||'');
   const close=()=>{
     toast.classList.add('toast-leave');
