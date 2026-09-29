@@ -233,7 +233,7 @@ onAuthStateChanged(auth,async user=>{
     $('#loginView').classList.add('hidden');
     $('#adminApp').classList.remove('hidden');
     $('#currentUserDisplay').textContent=`${currentProfile.displayName||currentProfile.username||username} • ${roleLabel(currentProfile.role)}`;
-    $('.master-only').forEach(el=>el.classList.toggle('hidden',!isMaster()));
+    $$('.master-only').forEach(el=>el.classList.toggle('hidden',!isMaster()));
     applyRoleUI();
 
     try{
@@ -451,7 +451,7 @@ $('#soundBtn').onclick=async()=>{
   if(soundEnabled) beep();
 };
 
-$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
+$$('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
 
 function allowedViews(){
   const views=[];
@@ -484,7 +484,7 @@ function switchView(v){
   const allowed=allowedViews();
   if(!allowed.includes(v)) return;
 
-  $('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
+  $$('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===v));
   $$('.admin-view').forEach(x=>x.classList.toggle('active',x.id===`view-${v}`));
 
   const titles={
