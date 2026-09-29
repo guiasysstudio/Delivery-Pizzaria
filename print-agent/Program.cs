@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Drawing.Printing;
 using System.Text.Json;
+using System.Runtime.InteropServices;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -16,6 +17,46 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
         Application.Run(new TrayContext());
+    }
+}
+
+internal static class BrandIconFactory
+{
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(IntPtr hIcon);
+
+    public static Icon Create()
+    {
+        using var bitmap = new Bitmap(64, 64);
+        using (var g = Graphics.FromImage(bitmap))
+        {
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(Color.Transparent);
+
+            using var red = new SolidBrush(Color.FromArgb(185, 28, 28));
+            using var cheese = new SolidBrush(Color.FromArgb(251, 191, 36));
+            using var crust = new Pen(Color.FromArgb(180, 83, 9), 5);
+            using var pepperoni = new SolidBrush(Color.FromArgb(153, 27, 27));
+
+            g.FillEllipse(red, 2, 2, 60, 60);
+            var pizza = new PointF[] { new(32, 10), new(53, 47), new(11, 47) };
+            g.FillPolygon(cheese, pizza);
+            g.DrawLine(crust, 12, 47, 52, 47);
+            g.FillEllipse(pepperoni, 25, 25, 8, 8);
+            g.FillEllipse(pepperoni, 36, 35, 7, 7);
+            g.FillEllipse(pepperoni, 20, 37, 7, 7);
+        }
+
+        var handle = bitmap.GetHicon();
+        try
+        {
+            using var temp = Icon.FromHandle(handle);
+            return (Icon)temp.Clone();
+        }
+        finally
+        {
+            DestroyIcon(handle);
+        }
     }
 }
 
@@ -55,7 +96,7 @@ internal sealed class TrayContext : ApplicationContext
 
         _tray = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = BrandIconFactory.Create(),
             Text = "Delivery Pizzaria Print Agent",
             Visible = true,
             ContextMenuStrip = menu
@@ -174,6 +215,7 @@ internal sealed class AgentSettingsForm : Form
         _setStartup = setStartup;
 
         Text = "Delivery Pizzaria • Print Agent";
+        Icon = BrandIconFactory.Create();
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
