@@ -2,7 +2,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/fireba
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, deleteUser } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, runTransaction } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig } from '../firebase-config.js';
-import { showToast, confirmAction, emptyStateHtml, iconHtml, skeletonListHtml } from '../assets/ui.js';
+import { showToast, confirmAction, emptyStateHtml, iconHtml, skeletonListHtml, applyBrandTheme } from '../assets/ui.js';
 
 const app=initializeApp(firebaseConfig);
 const auth=getAuth(app);
@@ -174,6 +174,7 @@ const defaults={
   storeState:'',
   storeLocation:null,
   storeLogo:'',
+  primaryColor:'#b91c1c',
   googleMapsUrl:'',
   customerCancelMinutes:2,
   notificationSound:'bell',
@@ -486,6 +487,7 @@ async function loadSettings(){
     await setDoc(doc(db,'settings','store'),settings);
   }
   $('#adminStoreName').textContent=settings.storeName||'Pizzaria';
+  applyBrandTheme(settings.primaryColor||'#b91c1c');
 }
 
 async function loadCategories(){
@@ -650,6 +652,11 @@ bindAdminFormattedInput('#setPhone',formatPhoneInput);
 bindAdminFormattedInput('#setWhatsapp',formatPhoneInput);
 bindAdminFormattedInput('#setStoreZip',formatCepInput);
 bindAdminFormattedInput('#deliveryTestZip',formatCepInput);
+
+$('#setPrimaryColor')?.addEventListener('input',e=>{
+  const color=applyBrandTheme(e.target.value);
+  $('#primaryColorValue').textContent=color.toUpperCase();
+});
 
 function renderStoreLogoPreview(){
   const host=$('#storeLogoPreview');
@@ -2721,6 +2728,9 @@ function renderSettings(){
   $('#setStoreCity').value=settings.storeCity||'';
   $('#setStoreState').value=settings.storeState||'';
   $('#setStoreLogo').value=settings.storeLogo||'';
+  const primaryColor=applyBrandTheme(settings.primaryColor||'#b91c1c');
+  $('#setPrimaryColor').value=primaryColor;
+  $('#primaryColorValue').textContent=primaryColor.toUpperCase();
   $('#setGoogleMapsUrl').value=settings.googleMapsUrl||'';
   $('#setCustomerCancelMinutes').value=settings.customerCancelMinutes??2;
   $('#setNotificationSound').value=settings.notificationSound||'bell';
@@ -2813,6 +2823,7 @@ $('#settingsForm').onsubmit=async e=>{
     storeCity:$('#setStoreCity').value.trim(),
     storeState:$('#setStoreState').value.trim().toUpperCase(),
     storeLogo:$('#setStoreLogo').value.trim(),
+    primaryColor:$('#setPrimaryColor').value||'#b91c1c',
     googleMapsUrl:$('#setGoogleMapsUrl').value.trim(),
     storeAddress:[
       [$('#setStoreStreet').value.trim(),$('#setStoreNumber').value.trim()].filter(Boolean).join(', '),
