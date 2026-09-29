@@ -1,6 +1,7 @@
 import {
   db, watchCustomer, logoutCustomer, getCustomerProfile, saveCustomerProfile,
-  getAddresses, saveAddress, deleteAddress, setDefaultAddress, getFavorites, setFavorite, lookupBrazilianZip
+  getAddresses, saveAddress, deleteAddress, setDefaultAddress, getFavorites, setFavorite, lookupBrazilianZip,
+  getCustomerIdentity, saveCustomerIdentity, cancelCustomerOrder, formatCpf, validCpf, formatPhone, validFullName
 } from '../assets/customer-auth.js';
 import {
   collection, doc, getDoc, getDocs, query, where, onSnapshot
@@ -12,7 +13,7 @@ const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const placeholder='../assets/products/placeholder.svg';
 
-let user=null,profile=null,addresses=[],orders=[],favorites=new Set(),products=[],couponRewards=[],settings={},pendingCustomPhotoURL=undefined;
+let user=null,profile=null,identity=null,addresses=[],orders=[],favorites=new Set(),products=[],couponRewards=[],settings={},pendingCustomPhotoURL=undefined;
 let unsubscribeOrders=null;
 
 const statusLabels={
@@ -62,7 +63,11 @@ async function loadAll(){
     getDocs(collection(db,'products')),
     getDoc(doc(db,'settings','store')),
     getDocs(query(collection(db,'orders'),where('customerId','==',user.uid))),
-    getDocs(collection(db,'customers',user.uid,'coupons')).catch(err=>{console.warn('Cupons ainda não disponíveis.',err);return null;})
+    getDocs(collection(db,'customers',user.uid,'coupons')).catch(err=>{console.warn('Cupons ainda não disponíveis.',err);return null;}),
+    getCustomerIdentity().catch(err=>{
+      console.warn('Identidade privada ainda não disponível.',err);
+      return {identityComplete:!!profile?.identityComplete,cpf:'',cpfMasked:''};
+    })
   ]);
 
   profile=results[0];
@@ -76,6 +81,7 @@ async function loadAll(){
     return bd-ad;
   });
   couponRewards=results[6]?.docs?.map(d=>({id:d.id,...d.data()}))||[];
+  identity=results[7]||{identityComplete:!!profile?.identityComplete,cpf:'',cpfMasked:''};
 }
 
 function effectiveProfilePhoto(){
@@ -153,7 +159,17 @@ function renderHeader(){
   renderProfilePhoto();
 }
 
-$$('.account-nav-item').forEach(b=>b.onclick=()=>openSection(b.dataset.section));
+function bindAccountMask(selector,formatter){
+  const input=$(selector);
+  if(!input) return;
+  input.addEventListener('input',()=>{input.value=formatter(input.value);});
+}
+
+bindAccountMask('#profilePhone',formatPhone);
+bindAccountMask('#profileCpf',formatCpf);
+bindAccountMask('#accAddressPhone',formatPhone);
+
+$('.account-nav-item').forEach(b=>b.onclick=()=>openSection(b.dataset.section));
 
 function openSection(section){
   const valid=['profile','addresses','orders','coupons','favorites'];
@@ -165,8 +181,13 @@ function openSection(section){
 
 function renderProfile(){
   $('#profileName').value=profile?.name||user.displayName||'';
-  $('#profilePhone').value=profile?.phone||'';
+  $('#profilePhone').value=formatPhone(profile?.phone||'');
   $('#profileEmail').value=user.email||'';
+  $('#profileCpf').value=identity?.cpf?formatCpf(identity.cpf):'';
+  $('#profileCpf').placeholder=identity?.cpfMasked||'000.000.000-00';
+  $('#identityStatus').innerHTML=identity?.identityComplete
+    ?'<span class="status-pill status-completed">✓ Cadastro pronto para pedidos</span>'
+    :'<span class="status-pill status-pending">Complete nome, telefone e CPF para poder pedir.</span>';
   pendingCustomPhotoURL=undefined;
   renderProfilePhoto();
 }
@@ -202,21 +223,46 @@ $('#useGooglePhotoBtn')?.addEventListener('click',()=>{
 
 $('#profileForm').onsubmit=async e=>{
   e.preventDefault();
-  const payload={
-    name:$('#profileName').value,
-    phone:$('#profilePhone').value
-  };
-  if(pendingCustomPhotoURL!==undefined){
-    payload.customPhotoURL=pendingCustomPhotoURL;
+  const name=$('#profileName').value.trim();
+  const phone=$('#profilePhone').value.trim();
+  const cpf=$('#profileCpf').value.trim();
+
+  if(!validFullName(name)){
+    alert('Informe seu nome completo, com pelo menos nome e sobrenome.');
+    $('#profileName').focus();
+    return;
+  }
+  if(!validCpf(cpf)){
+    alert('Informe um CPF válido.');
+    $('#profileCpf').focus();
+    return;
   }
 
-  await saveCustomerProfile(user.uid,payload);
-  profile=await getCustomerProfile(user.uid);
-  pendingCustomPhotoURL=undefined;
-  renderHeader();
-  renderProfilePhoto();
-  $('#profileSaved').classList.remove('hidden');
-  setTimeout(()=>$('#profileSaved').classList.add('hidden'),1800);
+  try{
+    identity=await saveCustomerIdentity({name,phone,cpf});
+
+    const payload={name,phone};
+    if(pendingCustomPhotoURL!==undefined) payload.customPhotoURL=pendingCustomPhotoURL;
+    await saveCustomerProfile(user.uid,payload);
+
+    profile=await getCustomerProfile(user.uid);
+    pendingCustomPhotoURL=undefined;
+    renderHeader();
+    renderProfile();
+    $('#profileSaved').classList.remove('hidden');
+    setTimeout(()=>$('#profileSaved').classList.add('hidden'),1800);
+
+    if(localStorage.getItem('deliveryReturnToCheckout')==='1'){
+      localStorage.removeItem('deliveryReturnToCheckout');
+      setTimeout(()=>location.href='../?checkout=1',450);
+    }
+  }catch(err){
+    console.error(err);
+    const code=String(err?.code||'');
+    if(code.includes('cpf_already_registered')) alert('Este CPF já está vinculado a outra conta.');
+    else if(code.includes('invalid_phone')) alert('Informe um telefone válido com DDD.');
+    else alert('Não foi possível salvar seus dados. Tente novamente.');
+  }
 };
 
 function addressText(a){
@@ -383,6 +429,30 @@ function formatDate(ts){
   }
 }
 
+function whatsappDigits(){
+  const digits=String(settings?.whatsapp||settings?.phone||'').replace(/\D/g,'');
+  if(!digits) return '';
+  return digits.startsWith('55')?digits:'55'+digits;
+}
+
+function orderWhatsappUrl(order){
+  const number=whatsappDigits();
+  if(!number) return '';
+  const message=[
+    'Olá! Gostaria de falar sobre o pedido #'+String(order.orderNumber||0).padStart(4,'0')+'.',
+    'Status: '+(statusLabels[order.status]||order.status),
+    'Total: '+money(order.total)
+  ].join('\n');
+  return 'https://wa.me/'+number+'?text='+encodeURIComponent(message);
+}
+
+function canCustomerCancel(order){
+  if(!['pending','accepted'].includes(order.status)) return false;
+  const minutes=Math.max(0,Number(settings?.customerCancelMinutes??2));
+  const created=order.createdAt?.toMillis?.()||0;
+  return created>0&&(Date.now()-created)<=minutes*60*1000;
+}
+
 function renderOrders(){
   if(!orders.length){
     $('#accountOrdersList').innerHTML='<div class="panel empty-state">Você ainda não fez nenhum pedido.</div>';
@@ -391,8 +461,14 @@ function renderOrders(){
 
   $('#accountOrdersList').innerHTML=orders.map(o=>{
     const items=(o.items||[]).map(i=>'<span>'+i.qty+'× '+esc(i.name)+'</span>').join('');
-    const reorder=o.status!=='cancelled'
+    const reorderButton=o.status!=='cancelled'
       ?'<button class="btn btn-secondary reorder-btn" data-id="'+o.id+'" type="button">Pedir novamente</button>'
+      :'';
+    const receipt='<a class="btn btn-secondary" href="./receipt.html?id='+encodeURIComponent(o.id)+'" target="_blank" rel="noopener">Comprovante</a>';
+    const wa=orderWhatsappUrl(o);
+    const whatsapp=wa?'<a class="btn btn-whatsapp" href="'+esc(wa)+'" target="_blank" rel="noopener">WhatsApp</a>':'';
+    const cancel=canCustomerCancel(o)
+      ?'<button class="btn btn-danger cancel-order-btn" data-id="'+o.id+'" type="button">Cancelar pedido</button>'
       :'';
 
     return '<article class="account-order-card panel">'+
@@ -400,13 +476,32 @@ function renderOrders(){
       '<h3>'+esc(statusLabels[o.status]||o.status)+'</h3><small class="muted">'+formatDate(o.createdAt)+'</small></div>'+
       '<strong class="account-order-total">'+money(o.total)+'</strong></div>'+
       '<div class="account-order-items">'+items+'</div>'+
-      '<div class="account-order-footer"><span class="status-pill status-'+esc(o.status)+'">'+esc(statusLabels[o.status]||o.status)+'</span>'+reorder+'</div>'+
+      '<div class="account-order-footer"><span class="status-pill status-'+esc(o.status)+'">'+esc(statusLabels[o.status]||o.status)+'</span>'+
+      '<div class="order-customer-actions">'+receipt+whatsapp+cancel+reorderButton+'</div></div>'+
       '</article>';
   }).join('');
 
   $$('.reorder-btn').forEach(b=>b.onclick=()=>reorder(b.dataset.id));
+  $$('.cancel-order-btn').forEach(b=>b.onclick=async()=>{
+    const order=orders.find(x=>x.id===b.dataset.id);
+    if(!order||!confirm('Cancelar o pedido #'+String(order.orderNumber||0).padStart(4,'0')+'?')) return;
+    b.disabled=true;
+    b.textContent='Cancelando...';
+    try{
+      await cancelCustomerOrder(order.id);
+    }catch(err){
+      console.error(err);
+      const code=String(err?.code||'');
+      alert(code.includes('cancel_window_expired')
+        ?'O prazo para cancelamento deste pedido terminou.'
+        :code.includes('cancel_not_allowed')
+          ?'Este pedido já avançou e não pode mais ser cancelado pelo site.'
+          :'Não foi possível cancelar o pedido.');
+      b.disabled=false;
+      b.textContent='Cancelar pedido';
+    }
+  });
 }
-
 function reorder(id){
   const o=orders.find(x=>x.id===id);
   if(!o) return;
@@ -511,3 +606,5 @@ $('#accountLogoutBtn').onclick=async()=>{
   await logoutCustomer();
   location.href='../';
 };
+
+setInterval(()=>{if(user&&orders.length) renderOrders();},30000);
