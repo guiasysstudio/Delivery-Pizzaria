@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, deleteUser } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, writeBatch } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, runTransaction } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig } from '../firebase-config.js';
 
 const app=initializeApp(firebaseConfig);
@@ -1390,21 +1390,38 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
   if(!hasPermission('cashOperate')||currentCashSession) return;
   const openingAmount=Number($('#cashOpeningAmount').value||0);
   const openingNote=$('#cashOpeningNote').value.trim();
+  const stateRef=doc(db,'cashState','current');
+  const sessionRef=doc(collection(db,'cashSessions'));
+
   try{
-    const ref=await addDoc(collection(db,'cashSessions'),{
-      status:'open',
-      openingAmount,
-      openingNote,
-      openedBy:auth.currentUser.uid,
-      openedByName:currentProfile.displayName||currentProfile.username||'Usuário',
-      openedAt:serverTimestamp(),
-      updatedAt:serverTimestamp()
+    await runTransaction(db,async tx=>{
+      const state=await tx.get(stateRef);
+      if(state.exists()&&state.data()?.sessionId) throw new Error('cash-already-open');
+
+      tx.set(sessionRef,{
+        status:'open',
+        openingAmount,
+        openingNote,
+        openedBy:auth.currentUser.uid,
+        openedByName:currentProfile.displayName||currentProfile.username||'Usuário',
+        openedAt:serverTimestamp(),
+        updatedAt:serverTimestamp()
+      });
+      tx.set(stateRef,{
+        sessionId:sessionRef.id,
+        openedBy:auth.currentUser.uid,
+        openedAt:serverTimestamp()
+      });
     });
     await loadCashSessions();
-    currentCashSession=cashSessions.find(s=>s.id===ref.id)||currentCashSession;
     renderCash();
   }catch(err){
     console.error(err);
+    if(err?.message==='cash-already-open'){
+      alert('Já existe um caixa aberto. Atualize a tela para visualizar a sessão atual.');
+      await loadCashSessions();
+      return;
+    }
     alert('Não foi possível abrir o caixa.');
   }
 });
@@ -1423,27 +1440,39 @@ $('#closeCashBtn')?.addEventListener('click',()=>{
 $('#cashCloseForm')?.addEventListener('submit',async e=>{
   e.preventDefault();
   if(!currentCashSession) return;
+  const session=currentCashSession;
   const declared=Number($('#cashClosingAmount').value||0);
-  const summary=cashSummary();
-  const expected=Number(currentCashSession.openingAmount||0)+summary.money;
+  const summary=cashSummary(session);
+  const expected=Number(session.openingAmount||0)+summary.money;
+  const stateRef=doc(db,'cashState','current');
+  const sessionRef=doc(db,'cashSessions',session.id);
+
   try{
-    await updateDoc(doc(db,'cashSessions',currentCashSession.id),{
-      status:'closed',
-      closingAmount:declared,
-      expectedCash:expected,
-      difference:declared-expected,
-      closingNote:$('#cashClosingNote').value.trim(),
-      closedBy:auth.currentUser.uid,
-      closedByName:currentProfile.displayName||currentProfile.username||'Usuário',
-      closedAt:serverTimestamp(),
-      summary,
-      updatedAt:serverTimestamp()
+    await runTransaction(db,async tx=>{
+      const state=await tx.get(stateRef);
+      if(state.exists()&&state.data()?.sessionId!==session.id) throw new Error('cash-session-changed');
+
+      tx.update(sessionRef,{
+        status:'closed',
+        closingAmount:declared,
+        expectedCash:expected,
+        difference:declared-expected,
+        closingNote:$('#cashClosingNote').value.trim(),
+        closedBy:auth.currentUser.uid,
+        closedByName:currentProfile.displayName||currentProfile.username||'Usuário',
+        closedAt:serverTimestamp(),
+        summary,
+        updatedAt:serverTimestamp()
+      });
+      if(state.exists()) tx.delete(stateRef);
     });
     $('#cashCloseDialog').close();
     await loadCashSessions();
   }catch(err){
     console.error(err);
-    $('#cashCloseError').textContent='Não foi possível fechar o caixa.';
+    $('#cashCloseError').textContent=err?.message==='cash-session-changed'
+      ?'O caixa atual mudou em outro computador. Atualize a página.'
+      :'Não foi possível fechar o caixa.';
     $('#cashCloseError').classList.remove('hidden');
   }
 });
