@@ -1230,7 +1230,7 @@ $('#floatingCart').onclick=()=>$('#cartPanel').classList.toggle('open');
 $('#checkoutBtn').onclick=async()=>{
   if(!cart.length) return;
   if(!isOpen()){
-    alert('A pizzaria está fechada para novos pedidos neste momento. No painel administrativo, use Configurações → Modo de funcionamento → Forçar aberto para realizar testes fora do horário.');
+    alert('A pizzaria está fechada para novos pedidos neste momento. No painel administrativo, use Dados da Pizzaria → Modo de funcionamento → Forçar aberto para realizar testes fora do horário.');
     return;
   }
   if(!customer){
