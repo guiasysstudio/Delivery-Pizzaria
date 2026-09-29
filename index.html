@@ -122,6 +122,14 @@
 
   <button class="floating-cart" id="floatingCart" aria-label="Abrir carrinho">🛒 <span id="floatingCount">0</span></button>
 
+  <nav class="mobile-app-nav" aria-label="Navegação do delivery">
+    <button id="mobileHomeBtn" class="mobile-app-nav-item active" type="button"><span>⌂</span><small>Cardápio</small></button>
+    <button id="mobileSearchBtn" class="mobile-app-nav-item" type="button"><span>⌕</span><small>Buscar</small></button>
+    <button id="mobileOrdersBtn" class="mobile-app-nav-item" type="button"><span>▤</span><small>Pedidos</small></button>
+    <button id="mobileAccountBtn" class="mobile-app-nav-item" type="button"><span>👤</span><small>Conta</small></button>
+    <button id="mobileCartBtn" class="mobile-app-nav-item mobile-cart-nav" type="button"><span>🛒<b id="mobileCartCount">0</b></span><small>Carrinho</small></button>
+  </nav>
+
   <dialog id="productDialog" class="modal modal-wide">
     <form method="dialog" class="modal-card product-modal-card" id="productForm">
       <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
