@@ -25,9 +25,14 @@ const defaultSettings={
   subtitle:'Pizza quentinha, do forno para sua casa.',
   phone:'',
   storeAddress:'',
+  storeZip:'',
+  storeLocation:null,
+  deliveryPricingMode:'fixed',
   deliveryFee:5,
   deliveryZones:[],
   restrictDeliveryZones:false,
+  deliveryKmBands:[],
+  restrictDeliveryKm:true,
   minimumOrder:0,
   allowPickup:true,
   openMode:'schedule',
@@ -577,23 +582,110 @@ function normalizeZoneName(value){
   return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
 }
 
+function distanceKmBetween(a,b){
+  const lat1=Number(a?.latitude),lng1=Number(a?.longitude);
+  const lat2=Number(b?.latitude),lng2=Number(b?.longitude);
+  if(![lat1,lng1,lat2,lng2].every(Number.isFinite)) return null;
+  const toRad=v=>v*Math.PI/180;
+  const R=6371;
+  const dLat=toRad(lat2-lat1),dLng=toRad(lng2-lng1);
+  const q=Math.sin(dLat/2)**2+
+    Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(q),Math.sqrt(1-q));
+}
+
 function deliveryQuote(address=activeAddress()){
-  if(fulfillment()!=='delivery') return {supported:true,fee:0,zone:null};
+  if(fulfillment()!=='delivery') return {supported:true,fee:0,mode:'pickup'};
 
+  const mode=settings?.deliveryPricingMode||'fixed';
   const fallback=Number(settings?.deliveryFee||0);
-  const zones=Array.isArray(settings?.deliveryZones)?settings.deliveryZones:[];
-  const neighborhood=normalizeZoneName(address?.neighborhood);
 
-  if(neighborhood&&zones.length){
+  if(mode==='fixed'){
+    return {supported:true,fee:fallback,mode};
+  }
+
+  if(mode==='neighborhood'){
+    const zones=Array.isArray(settings?.deliveryZones)?settings.deliveryZones:[];
+    const neighborhood=normalizeZoneName(address?.neighborhood);
     const zone=zones.find(z=>normalizeZoneName(z.neighborhood)===neighborhood);
-    if(zone) return {supported:true,fee:Number(zone.fee||0),zone};
+
+    if(zone) return {supported:true,fee:Number(zone.fee||0),mode,zone};
+
+    if(address&&settings?.restrictDeliveryZones===true&&zones.length){
+      return {supported:false,fee:0,mode,reason:'neighborhood_not_served'};
+    }
+
+    return {supported:true,fee:fallback,mode,zone:null};
   }
 
-  if(address&&settings?.restrictDeliveryZones===true&&zones.length){
-    return {supported:false,fee:0,zone:null};
+  if(mode==='km'){
+    if(!address) return {supported:false,fee:0,mode,pending:true,reason:'address_required'};
+    const distance=distanceKmBetween(settings?.storeLocation,address?.location);
+    if(distance==null){
+      return {supported:false,fee:0,mode,pending:true,reason:'location_required'};
+    }
+
+    const bands=(Array.isArray(settings?.deliveryKmBands)?settings.deliveryKmBands:[])
+      .slice().sort((a,b)=>Number(a.maxKm||0)-Number(b.maxKm||0));
+    const band=bands.find(b=>distance<=Number(b.maxKm||0));
+
+    if(band){
+      return {
+        supported:true,
+        fee:Number(band.fee||0),
+        mode,
+        distanceKm:distance,
+        maxKm:Number(band.maxKm||0)
+      };
+    }
+
+    if(settings?.restrictDeliveryKm===true&&bands.length){
+      return {supported:false,fee:0,mode,distanceKm:distance,reason:'distance_not_served'};
+    }
+
+    const last=bands.at(-1);
+    return {
+      supported:true,
+      fee:last?Number(last.fee||0):fallback,
+      mode,
+      distanceKm:distance,
+      maxKm:last?Number(last.maxKm||0):null
+    };
   }
 
-  return {supported:true,fee:fallback,zone:null};
+  return {supported:true,fee:fallback,mode:'fixed'};
+}
+
+async function ensureDeliveryAddressCoordinates(address){
+  if(!address||(settings?.deliveryPricingMode||'fixed')!=='km') return address;
+  if(address.location?.latitude!=null&&address.location?.longitude!=null) return address;
+  if(!address.zip) return address;
+
+  try{
+    const data=await lookupBrazilianZip(address.zip);
+    if(!data?.location) return address;
+    const updated={...address,location:data.location};
+    if(customer&&address.id){
+      await saveAddress(customer.uid,updated,address.id);
+      addresses=addresses.map(a=>a.id===address.id?updated:a);
+    }
+    return updated;
+  }catch(err){
+    console.warn('Não foi possível localizar o CEP do endereço para cálculo por km.',err);
+    return address;
+  }
+}
+
+function deliveryQuoteText(quote){
+  if(quote.pending) return 'Taxa de entrega: calculada após localizar o CEP';
+  if(!quote.supported) return 'Este endereço está fora da área de entrega';
+  if(quote.mode==='km'&&Number.isFinite(quote.distanceKm)){
+    return `Distância aproximada: ${quote.distanceKm.toFixed(1).replace('.',',')} km • Taxa: ${money(quote.fee)}`;
+  }
+  if(quote.mode==='neighborhood'&&quote.zone){
+    return `Taxa para ${quote.zone.neighborhood}: ${money(quote.fee)}`;
+  }
+  return `Taxa de entrega: ${money(quote.fee)}`;
 }
 
 function cartTotals(){
@@ -601,11 +693,11 @@ function cartTotals(){
   const discount=couponDiscount(subtotal);
   const quote=deliveryQuote();
   const fee=subtotal&&fulfillment()==='delivery'&&quote.supported?quote.fee:0;
-  return {subtotal,discount,fee,total:Math.max(0,subtotal-discount+fee),deliverySupported:quote.supported,deliveryZone:quote.zone};
+  return {subtotal,discount,fee,total:Math.max(0,subtotal-discount+fee),deliverySupported:quote.supported,deliveryPending:!!quote.pending,deliveryQuote:quote};
 }
 function renderCart(){
   const count=cart.reduce((a,x)=>a+Number(x.qty||0),0);
-  const {subtotal,discount,fee,total}=cartTotals();
+  const {subtotal,discount,fee,total,deliveryPending}=cartTotals();
   $('#cartCount').textContent=count;
   $('#floatingCount').textContent=count;
   $('#headerCartCount').textContent=count;
@@ -613,7 +705,7 @@ function renderCart(){
   $('#subtotal').textContent=money(subtotal);
   $('#discountRow').classList.toggle('hidden',discount<=0);
   $('#discountTotal').textContent='- '+money(discount);
-  $('#deliveryFee').textContent=money(fee);
+  $('#deliveryFee').textContent=deliveryPending?'A calcular':money(fee);
   $('#total').textContent=money(total);
   $('#checkoutTotal').textContent=money(total);
   const storeOpen=isOpen();
@@ -714,9 +806,12 @@ function renderAddressSelector(){
     localStorage.setItem('deliverySelectedAddress',selectedAddressId);
     await setDefaultAddress(customer.uid,selectedAddressId).catch(console.error);
     customerProfile={...customerProfile,defaultAddressId:selectedAddressId};
+    const selected=addresses.find(a=>a.id===selectedAddressId);
+    if(selected) await ensureDeliveryAddressCoordinates(selected);
     renderAddressSelector();
     renderCustomerHeader();
     renderCheckoutAddress();
+    renderCart();
     $('#addressSelectorDialog').close();
   });
 }
@@ -847,7 +942,7 @@ $('#mobileCartBtn')?.addEventListener('click',()=>{
   $('#cartPanel').scrollIntoView({behavior:'smooth',block:'start'});
 });
 $('#floatingCart').onclick=()=>$('#cartPanel').classList.toggle('open');
-$('#checkoutBtn').onclick=()=>{
+$('#checkoutBtn').onclick=async()=>{
   if(!cart.length) return;
   if(!isOpen()){
     alert('A pizzaria está fechada para novos pedidos neste momento. No painel administrativo, use Configurações → Modo de funcionamento → Forçar aberto para realizar testes fora do horário.');
@@ -858,10 +953,10 @@ $('#checkoutBtn').onclick=()=>{
     openAuth();
     return;
   }
-  openCheckout();
+  await openCheckout();
 };
 
-function openCheckout(){
+async function openCheckout(){
   if(!customer){
     afterAuthAction='checkout';
     openAuth();
@@ -869,6 +964,12 @@ function openCheckout(){
   }
   if(!cart.length) return;
   try{
+    if(fulfillment()==='delivery'){
+      const address=activeAddress();
+      if(address){
+        await ensureDeliveryAddressCoordinates(address);
+      }
+    }
     renderCheckoutAddress();
     $('#checkoutPhone').value=customerProfile?.phone||activeAddress()?.phone||'';
     renderPaymentOptions();
@@ -896,8 +997,8 @@ function renderCheckoutAddress(){
     if(a){
       const quote=deliveryQuote(a);
       const detail=[a.complement,a.reference].filter(Boolean).join(' • ');
-      const feeText=quote.supported?`Taxa de entrega: ${money(quote.fee)}`:'Fora da área de entrega configurada';
-      $('#checkoutAddressCard').innerHTML=`<strong>${esc(a.label||'Endereço')}</strong><span>${esc(a.street)}, ${esc(a.number)} • ${esc(a.neighborhood)}</span><small>${esc(detail)}</small><small class="${quote.supported?'':'danger-text'}">${esc(feeText)}</small>`;
+      const feeText=deliveryQuoteText(quote);
+      $('#checkoutAddressCard').innerHTML=`<strong>${esc(a.label||'Endereço')}</strong><span>${esc(a.street)}, ${esc(a.number)} • ${esc(a.neighborhood)}</span><small>${esc(detail)}</small><small class="${quote.supported||quote.pending?'':'danger-text'}">${esc(feeText)}</small>`;
     }else{
       $('#checkoutAddressCard').innerHTML='<span>Nenhum endereço selecionado.</span>';
     }
@@ -960,7 +1061,12 @@ $('#checkoutForm').addEventListener('submit',async e=>{
   const type=fulfillment();
   const address=activeAddress();
   if(type==='delivery'&&!address) return showCheckoutError('Selecione um endereço de entrega.');
-  const quote=deliveryQuote(address);
+  let quote=deliveryQuote(address);
+  if(type==='delivery'&&quote.pending&&address){
+    await ensureDeliveryAddressCoordinates(address);
+    quote=deliveryQuote(activeAddress());
+  }
+  if(type==='delivery'&&quote.pending) return showCheckoutError('Não foi possível calcular a distância pelo CEP deste endereço. Confira o CEP ou escolha outro endereço.');
   if(type==='delivery'&&!quote.supported) return showCheckoutError('Este endereço está fora da área de entrega da pizzaria.');
   if(!selectedPayment) return showCheckoutError('Escolha a forma de pagamento.');
 
@@ -1018,8 +1124,16 @@ $('#checkoutForm').addEventListener('submit',async e=>{
         address:type==='delivery'?{
           id:address.id,label:address.label||'',recipient:address.recipient||profileName,phone:address.phone||profilePhone,
           zip:address.zip||'',street:address.street||'',number:address.number||'',complement:address.complement||'',
-          neighborhood:address.neighborhood||'',city:address.city||'',state:address.state||'',reference:address.reference||''
+          neighborhood:address.neighborhood||'',city:address.city||'',state:address.state||'',reference:address.reference||'',
+          location:address.location||null
         }:null,
+        deliveryPricing:type==='delivery'?{
+          mode:quote.mode||settings.deliveryPricingMode||'fixed',
+          fee,
+          distanceKm:Number.isFinite(quote.distanceKm)?Number(quote.distanceKm.toFixed(3)):null,
+          zone:quote.zone?.neighborhood||null,
+          maxKm:quote.maxKm??null
+        }:{mode:'pickup',fee:0},
         payment:{
           method:selectedPayment,
           needsChange:changeFor>0,
