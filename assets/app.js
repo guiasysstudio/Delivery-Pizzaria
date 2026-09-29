@@ -1059,12 +1059,12 @@ $('#checkoutForm').addEventListener('submit',async e=>{
   if(!isOpen()) return showCheckoutError('A pizzaria fechou para novos pedidos.');
 
   const type=fulfillment();
-  const address=activeAddress();
+  let address=activeAddress();
   if(type==='delivery'&&!address) return showCheckoutError('Selecione um endereço de entrega.');
   let quote=deliveryQuote(address);
   if(type==='delivery'&&quote.pending&&address){
-    await ensureDeliveryAddressCoordinates(address);
-    quote=deliveryQuote(activeAddress());
+    address=await ensureDeliveryAddressCoordinates(address);
+    quote=deliveryQuote(address);
   }
   if(type==='delivery'&&quote.pending) return showCheckoutError('Não foi possível calcular a distância pelo CEP deste endereço. Confira o CEP ou escolha outro endereço.');
   if(type==='delivery'&&!quote.supported) return showCheckoutError('Este endereço está fora da área de entrega da pizzaria.');
