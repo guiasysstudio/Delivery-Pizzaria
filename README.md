@@ -243,13 +243,18 @@ O **Delivery Pizzaria Print Agent** roda apenas no computador da pizzaria e conv
 http://127.0.0.1:17329
 ```
 
-Recursos:
+Recursos (Print Agent 1.4.0):
 
 - detecta impressoras instaladas no Windows;
+- recupera automaticamente a impressora quando a selecionada foi removida ou renomeada;
 - imprime diretamente pela fila do Windows;
-- seleção de impressora por estação;
+- seleção de impressora por estação no próprio Agent;
+- modelos físicos para térmica 80 mm, térmica 58 mm, A4, compacto e etiqueta;
+- tamanho de papel, margens e fonte ajustados por modelo;
+- impressão da logo da pizzaria nos modelos compatíveis;
 - impressão de teste;
 - impressão automática;
+- instância única para impedir duas cópias disputando a porta local;
 - janela de configuração ao clicar no ícone da bandeja;
 - iniciar com o Windows;
 - início automático habilitado no primeiro uso;
