@@ -1275,6 +1275,7 @@ function editCoupon(id=null){
   $('#couponMinSpent').value=cp?.minSpent??0;
   $('#couponStartsAt').value=cp?.startsAt||'';
   $('#couponEndsAt').value=cp?.endsAt||'';
+  $('#couponAutoReward').checked=!!cp?.autoReward;
   $('#couponActive').checked=cp?.active!==false;
   $('#couponEditorError').classList.add('hidden');
   $('#couponEditor').showModal();
@@ -1296,6 +1297,7 @@ $('#couponEditorForm')?.addEventListener('submit',async e=>{
     minSpent:Number($('#couponMinSpent').value||0),
     startsAt:$('#couponStartsAt').value,
     endsAt:$('#couponEndsAt').value,
+    autoReward:$('#couponAutoReward').checked,
     active:$('#couponActive').checked,
     updatedAt:serverTimestamp()
   };
