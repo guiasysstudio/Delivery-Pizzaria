@@ -347,7 +347,7 @@ function refreshUserRoleSelect(){
   if(!select) return;
   const current=select.value;
   const opts=roles.filter(r=>r.active!==false).map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('');
-  select.innerHTML=opts+`<option value="master">Master</option>`;
+  select.innerHTML=opts+(isMaster()?'<option value="master">Master</option>':'');
   if([...select.options].some(o=>o.value===current)) select.value=current;
 }
 
@@ -1450,13 +1450,24 @@ $('#cashCloseForm')?.addEventListener('submit',async e=>{
 
 
 function renderProducts(){
-  $('#productsTable').innerHTML=products.length?products.map(p=>`<div class="data-row"><div class="data-main"><strong>${esc(p.name)}</strong><small>${esc(categories.find(c=>c.id===p.categoryId)?.name||'Sem categoria')} • ${p.active===false?'Indisponível':'Disponível'} • ${p.sizes?.length?`${p.sizes.length} tamanhos`:money(p.price)}</small></div><span>${p.featured?'Destaque':''}</span><div class="data-actions"><button class="btn btn-secondary edit-product" data-id="${p.id}">Editar</button><button class="btn btn-danger delete-product" data-id="${p.id}">Excluir</button></div></div>`).join(''):'<div class="empty-state">Nenhum produto cadastrado.</div>';
+  const canEdit=hasPermission('productsEdit');
+  const canDelete=hasPermission('productsDelete');
+  $('#newProductBtn')?.classList.toggle('hidden',!hasPermission('productsCreate'));
+  $('#seedBtn')?.classList.toggle('hidden',!(hasPermission('productsCreate')&&hasPermission('categoriesManage')));
+
+  $('#productsTable').innerHTML=products.length?products.map(p=>`<div class="data-row">
+    <div class="data-main"><strong>${esc(p.name)}</strong><small>${esc(categories.find(c=>c.id===p.categoryId)?.name||'Sem categoria')} • ${p.active===false?'Indisponível':'Disponível'} • ${p.sizes?.length?`${p.sizes.length} tamanhos`:money(p.price)}</small></div>
+    <span>${p.featured?'Destaque':''}</span>
+    <div class="data-actions">
+      ${canEdit?`<button class="btn btn-secondary edit-product" data-id="${p.id}" type="button">Editar</button>`:''}
+      ${canDelete?`<button class="btn btn-danger delete-product" data-id="${p.id}" type="button">Excluir</button>`:''}
+    </div>
+  </div>`).join(''):'<div class="empty-state">Nenhum produto cadastrado.</div>';
 
   $$('.edit-product').forEach(b=>b.onclick=()=>editProduct(b.dataset.id));
   $$('.delete-product').forEach(b=>b.onclick=()=>deleteProduct(b.dataset.id));
 }
-
-$('#newProductBtn').onclick=()=>editProduct(null);
+$('#newProductBtn').onclick=()=>{if(hasPermission('productsCreate')) editProduct(null);};
 
 function refreshCategorySelect(){
   $('#productCategory').innerHTML=categories.filter(c=>c.active!==false).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
@@ -1632,6 +1643,8 @@ $('#downloadPreparedImageBtn')?.addEventListener('click',()=>{
 });
 
 function editProduct(id){
+  if(id&&!hasPermission('productsEdit')) return;
+  if(!id&&!hasPermission('productsCreate')) return;
   const p=products.find(x=>x.id===id);
   $('#productEditorTitle').textContent=p?'Editar produto':'Novo produto';
   $('#productId').value=p?.id||'';
@@ -1688,6 +1701,8 @@ $('#productEditorForm').onsubmit=async e=>{
     $('#productEditorError').classList.remove('hidden');
     return;
   }
+  if(id&&!hasPermission('productsEdit')) return;
+  if(!id&&!hasPermission('productsCreate')) return;
   try{
     if(id) await updateDoc(doc(db,'products',id),data);
     else await addDoc(collection(db,'products'),{...data,createdAt:serverTimestamp()});
@@ -1701,6 +1716,7 @@ $('#productEditorForm').onsubmit=async e=>{
 };
 
 async function deleteProduct(id){
+  if(!hasPermission('productsDelete')) return;
   const p=products.find(x=>x.id===id);
   if(confirm(`Excluir o produto “${p?.name}”?`)){
     await deleteDoc(doc(db,'products',id));
@@ -1715,9 +1731,10 @@ function renderCategories(){
   $$('.delete-category').forEach(b=>b.onclick=()=>deleteCategory(b.dataset.id));
 }
 
-$('#newCategoryBtn').onclick=()=>editCategory(null);
+$('#newCategoryBtn').onclick=()=>{if(hasPermission('categoriesManage')) editCategory(null);};
 
 function editCategory(id){
+  if(!hasPermission('categoriesManage')) return;
   const c=categories.find(x=>x.id===id);
   $('#categoryEditorTitle').textContent=c?'Editar categoria':'Nova categoria';
   $('#categoryId').value=c?.id||'';
@@ -1729,6 +1746,7 @@ function editCategory(id){
 
 $('#categoryEditorForm').onsubmit=async e=>{
   e.preventDefault();
+  if(!hasPermission('categoriesManage')) return;
   $('#categoryEditorError').classList.add('hidden');
   const id=$('#categoryId').value;
   const data={
@@ -1755,6 +1773,7 @@ $('#categoryEditorForm').onsubmit=async e=>{
 };
 
 async function deleteCategory(id){
+  if(!hasPermission('categoriesManage')) return;
   if(products.some(p=>p.categoryId===id)){
     return alert('Essa categoria possui produtos. Mova ou exclua os produtos antes.');
   }
@@ -1891,6 +1910,7 @@ $('#settingsForm').onsubmit=async e=>{
 };
 
 $('#seedBtn').onclick=async()=>{
+  if(!(hasPermission('productsCreate')&&hasPermission('categoriesManage'))) return;
   const batch=writeBatch(db);
 
   const existingCategory=(...names)=>categories.find(c=>names.some(n=>normalizePriceKey(c.name)===normalizePriceKey(n)));
@@ -2079,6 +2099,7 @@ $('#newUserBtn').onclick=()=>{
 function editUser(uid){
   if(!hasPermission('usersManage')) return;
   const u=users.find(x=>x.uid===uid);
+  if(u?.role==='master'&&!isMaster()) return;
   const isExisting=!!u&&!u.bootstrap;
   $('#userEditorTitle').textContent=u?(u.bootstrap?'Registrar Master':'Editar usuário'):'Novo usuário';
   $('#userUid').value=u?.uid||'';
@@ -2102,7 +2123,10 @@ $('#userEditorForm').onsubmit=async e=>{
   const existingUid=$('#userUid').value;
   const username=normalizeUsername($('#userUsername').value);
   const displayName=$('#userDisplayName').value.trim()||username;
-  const role=existingUid===auth.currentUser?.uid?'master':$('#userRole').value;
+  const requestedRole=$('#userRole').value;
+  const role=existingUid===auth.currentUser?.uid&&isMaster()
+    ?'master'
+    :(requestedRole==='master'&&!isMaster()?currentProfile.role:requestedRole);
   const active=existingUid===auth.currentUser?.uid?true:$('#userActive').checked;
   $('#userEditorError').classList.add('hidden');
 
