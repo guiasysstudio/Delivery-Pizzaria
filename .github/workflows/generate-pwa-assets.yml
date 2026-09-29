@@ -47,7 +47,7 @@ jobs:
 
       - name: Commit generated assets
         run: |
-          if git diff --quiet -- assets/pwa assets/social-card.png; then
+          if [ -z "$(git status --porcelain -- assets/pwa assets/social-card.png)" ]; then
             echo "Generated assets are already up to date."
             exit 0
           fi
