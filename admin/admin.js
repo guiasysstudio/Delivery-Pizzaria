@@ -1594,8 +1594,24 @@ async function loadCashMovements(sessionId){
   }
 }
 
+function businessDateFor(value=new Date()){
+  let date=value;
+  if(value?.toDate) date=value.toDate();
+  else if(typeof value==='number') date=new Date(value);
+  return new Intl.DateTimeFormat('en-CA',{timeZone:settings.timezone||'America/Porto_Velho'}).format(date);
+}
+
 function orderWithinCash(order,session){
   if(!session||order.status!=='completed') return false;
+
+  // Caixas novos são diários: a hora em que o operador clicou em "Abrir"
+  // não exclui pedidos realizados antes naquele mesmo dia.
+  if(session.businessDate){
+    const orderDay=businessDateFor(order.createdAt?.toDate?.()||new Date(order.createdAt?.toMillis?.()||0));
+    return orderDay===session.businessDate;
+  }
+
+  // Compatibilidade com sessões antigas, anteriores ao conceito de dia operacional.
   const ts=order.completedAt?.toMillis?.()||order.createdAt?.toMillis?.()||0;
   const start=session.openedAt?.toMillis?.()||0;
   const end=session.closedAt?.toMillis?.()||Date.now();
@@ -1645,7 +1661,11 @@ function renderCash(){
 
   if(currentCashSession){
     const expected=Number(currentCashSession.openingAmount||0)+summary.money+summary.supplies-summary.withdrawals;
+    const today=businessDateFor();
+    const overdue=currentCashSession.businessDate&&currentCashSession.businessDate!==today;
     $('#cashSessionMeta').innerHTML=`
+      ${overdue?'<div class="alert alert-error"><strong>Caixa anterior pendente.</strong> Feche o caixa de '+esc(currentCashSession.businessDate)+' antes de iniciar o caixa de hoje.</div>':''}
+      <p><strong>Dia operacional:</strong> ${esc(currentCashSession.businessDate||'Sessão antiga')}</p>
       <p><strong>Aberto por:</strong> ${esc(currentCashSession.openedByName||'Usuário')}</p>
       <p><strong>Valor inicial:</strong> ${money(currentCashSession.openingAmount)}</p>
       <p><strong>Suprimentos:</strong> ${money(summary.supplies)} • <strong>Sangrias:</strong> ${money(summary.withdrawals)}</p>
@@ -1662,7 +1682,7 @@ function renderCash(){
 
   $('#cashHistory').innerHTML=cashSessions.length?cashSessions.slice(0,20).map(s=>{
     const sum=s.summary||cashSummary(s);
-    return `<div class="data-row"><div class="data-main"><strong>${s.status==='open'?'Caixa aberto':'Caixa fechado'}</strong><small>${formatDate(s.openedAt)} • ${esc(s.openedByName||'')}</small></div><span>${Number(sum.count||0)} pedido(s)</span><div><strong>${money(sum.gross||0)}</strong>${s.difference!=null?`<small class="muted" style="display:block">Diferença: ${money(s.difference)}</small>`:''}</div></div>`;
+    return `<div class="data-row"><div class="data-main"><strong>${s.status==='open'?'Caixa aberto':'Caixa fechado'}</strong><small>${esc(s.businessDate||'')} • ${formatDate(s.openedAt)} • ${esc(s.openedByName||'')}</small></div><span>${Number(sum.count||0)} pedido(s)</span><div><strong>${money(sum.gross||0)}</strong>${s.difference!=null?`<small class="muted" style="display:block">Diferença: ${money(s.difference)}</small>`:''}</div></div>`;
   }).join(''):'<div class="empty-state">Nenhum caixa registrado.</div>';
 }
 
@@ -1680,6 +1700,7 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
 
       tx.set(sessionRef,{
         status:'open',
+        businessDate:businessDateFor(),
         openingAmount,
         openingNote,
         openedBy:auth.currentUser.uid,
