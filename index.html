@@ -33,7 +33,7 @@
   <header class="public-header">
     <div class="shell public-header-row">
       <a class="public-brand" href="./" aria-label="Início">
-        <span class="public-brand-mark"><img id="headerStoreLogo" class="store-logo-image hidden" alt=""><span id="headerStoreLogoFallback">🍕</span></span>
+        <span class="public-brand-mark"><img id="headerStoreLogo" class="store-logo-image hidden" alt=""><span id="headerStoreLogoFallback"><span class="ui-icon icon-pizza" aria-hidden="true"></span></span></span>
         <span>
           <strong id="headerStoreName">Pizzaria</strong>
           <small id="headerStoreStatus">Carregando...</small>
@@ -41,7 +41,7 @@
       </a>
 
       <button id="addressSelectorBtn" class="location-button" type="button">
-        <span class="location-icon">📍</span>
+        <span class="location-icon"><span class="ui-icon icon-map-pin" aria-hidden="true"></span></span>
         <span class="location-copy">
           <small>Entregar em</small>
           <strong id="activeAddressText">Informe seu endereço</strong>
@@ -51,18 +51,18 @@
 
       <div class="public-header-actions">
         <button id="aboutBtn" class="header-action" type="button">
-          <span>ⓘ</span>
+          <span class="ui-icon icon-info" aria-hidden="true"></span>
           <span class="header-action-copy"><small>Conheça</small><strong>Sobre</strong></span>
         </button>
         <button id="accountBtn" class="header-action" type="button">
-          <span id="accountAvatar" class="avatar-circle">👤</span>
+          <span id="accountAvatar" class="avatar-circle"><span class="ui-icon icon-user-round" aria-hidden="true"></span></span>
           <span class="header-action-copy">
             <small id="accountHello">Olá!</small>
             <strong id="accountLabel">Entrar ou cadastrar</strong>
           </span>
         </button>
         <button id="desktopCartBtn" class="header-action cart-head-button" type="button">
-          <span>🛒</span>
+          <span class="ui-icon icon-shopping-cart" aria-hidden="true"></span>
           <span class="header-action-copy">
             <small>Carrinho</small>
             <strong><span id="headerCartCount">0</span> item(ns)</strong>
@@ -74,7 +74,7 @@
 
   <div id="promotionBanner" class="promotion-banner hidden">
     <div class="shell promotion-banner-inner">
-      <span class="promotion-banner-icon">🏷️</span>
+      <span class="promotion-banner-icon"><span class="ui-icon icon-badge-percent" aria-hidden="true"></span></span>
       <div><strong id="promotionBannerTitle"></strong><small id="promotionBannerText"></small></div>
     </div>
   </div>
@@ -93,7 +93,7 @@
           </div>
         </div>
         <div class="hero-pizza-art" aria-hidden="true">
-          <div class="hero-pizza">🍕</div>
+          <div class="hero-pizza"><img src="./assets/app-icon.svg" alt="" aria-hidden="true"></div>
           <div class="hero-badge">feito na hora</div>
         </div>
       </div>
@@ -143,14 +143,14 @@
     </section>
   </main>
 
-  <button class="floating-cart" id="floatingCart" aria-label="Abrir carrinho">🛒 <span id="floatingCount">0</span></button>
+  <button class="floating-cart" id="floatingCart" type="button" aria-label="Abrir carrinho"><span class="ui-icon icon-shopping-cart" aria-hidden="true"></span><span id="floatingCount">0</span></button>
 
   <nav class="mobile-app-nav" aria-label="Navegação do delivery">
     <button id="mobileHomeBtn" class="mobile-app-nav-item active" type="button"><span>⌂</span><small>Cardápio</small></button>
     <button id="mobileSearchBtn" class="mobile-app-nav-item" type="button"><span>⌕</span><small>Buscar</small></button>
     <button id="mobileOrdersBtn" class="mobile-app-nav-item" type="button"><span>▤</span><small>Pedidos</small></button>
-    <button id="mobileAccountBtn" class="mobile-app-nav-item" type="button"><span>👤</span><small>Conta</small></button>
-    <button id="mobileCartBtn" class="mobile-app-nav-item mobile-cart-nav" type="button"><span>🛒<b id="mobileCartCount">0</b></span><small>Carrinho</small></button>
+    <button id="mobileAccountBtn" class="mobile-app-nav-item" type="button"><span class="ui-icon icon-user-round" aria-hidden="true"></span><small>Conta</small></button>
+    <button id="mobileCartBtn" class="mobile-app-nav-item mobile-cart-nav" type="button"><span><span class="ui-icon icon-shopping-cart" aria-hidden="true"></span><b id="mobileCartCount">0</b></span><small>Carrinho</small></button>
   </nav>
 
   <dialog id="productDialog" class="modal modal-wide">
@@ -209,13 +209,13 @@
       <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
       <div class="about-logo-wrap">
         <img id="aboutStoreLogo" class="about-store-logo hidden" alt="">
-        <div id="aboutStoreLogoFallback" class="about-store-logo-fallback">🍕</div>
+        <div id="aboutStoreLogoFallback" class="about-store-logo-fallback"><span class="ui-icon icon-pizza" aria-hidden="true"></span></div>
       </div>
       <span class="eyebrow">SOBRE</span>
       <h2 id="aboutStoreName">Pizzaria</h2>
       <p id="aboutStoreSubtitle" class="muted"></p>
       <div class="about-info-list">
-        <div><span>📍</span><div><small>Endereço</small><strong id="aboutStoreAddress">Não informado</strong></div></div>
+        <div><span class="ui-icon icon-map-pin" aria-hidden="true"></span><div><small>Endereço</small><strong id="aboutStoreAddress">Não informado</strong></div></div>
         <div><span>☎</span><div><small>Telefone / WhatsApp</small><strong id="aboutStorePhone">Não informado</strong></div></div>
       </div>
       <div class="section-actions">
