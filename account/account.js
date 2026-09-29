@@ -1,7 +1,8 @@
 import {
   db, watchCustomer, logoutCustomer, getCustomerProfile, saveCustomerProfile,
   getAddresses, saveAddress, deleteAddress, setDefaultAddress, getFavorites, setFavorite, lookupBrazilianZip,
-  getCustomerIdentity, saveCustomerIdentity, cancelCustomerOrder, formatCpf, validCpf, formatPhone, validFullName
+  getCustomerIdentity, saveCustomerIdentity, cancelCustomerOrder, formatCpf, validCpf, formatPhone, validFullName,
+  resendCustomerEmailVerification
 } from '../assets/customer-auth.js';
 import {
   collection, doc, getDoc, getDocs, query, where, onSnapshot
@@ -189,6 +190,8 @@ function renderProfile(){
   $('#profileName').value=profile?.name||user.displayName||'';
   $('#profilePhone').value=formatPhone(profile?.phone||'');
   $('#profileEmail').value=user.email||'';
+  $('#profileEmailStatus').textContent=user.emailVerified?'✓ E-mail verificado':'E-mail ainda não verificado';
+  $('#resendEmailVerificationBtn').classList.toggle('hidden',user.emailVerified);
   $('#profileCpf').value=identity?.cpf?formatCpf(identity.cpf):'';
   $('#profileCpf').placeholder=identity?.cpfMasked||'000.000.000-00';
   $('#profileCpf').disabled=identity?.identityComplete===true;
@@ -201,6 +204,20 @@ function renderProfile(){
   pendingCustomPhotoURL=undefined;
   renderProfilePhoto();
 }
+
+$('#resendEmailVerificationBtn')?.addEventListener('click',async()=>{
+  const button=$('#resendEmailVerificationBtn');
+  button.disabled=true;
+  try{
+    await resendCustomerEmailVerification();
+    button.textContent='E-mail enviado ✓';
+    setTimeout(()=>{button.textContent='Reenviar verificação';button.disabled=false;},2500);
+  }catch(err){
+    console.error(err);
+    alert('Não foi possível enviar a verificação agora.');
+    button.disabled=false;
+  }
+});
 
 $('#chooseProfilePhotoBtn')?.addEventListener('click',()=>$('#profilePhotoFile').click());
 
