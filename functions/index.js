@@ -1,4 +1,5 @@
 import { onRequest } from "firebase-functions/v2/https";
+import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -134,3 +135,79 @@ export const uploadProductImage = onRequest(
     }
   }
 );
+
+function couponIsCurrentlyActive(coupon) {
+  if (coupon?.active === false || coupon?.autoReward !== true) return false;
+  const now = Date.now();
+  const start = coupon?.startsAt ? new Date(coupon.startsAt).getTime() : 0;
+  const end = coupon?.endsAt ? new Date(coupon.endsAt).getTime() : 0;
+  if (start && Number.isFinite(start) && now < start) return false;
+  if (end && Number.isFinite(end) && now > end) return false;
+  return true;
+}
+
+export const grantLoyaltyCoupons = onDocumentUpdated(
+  {
+    document: "orders/{orderId}",
+    region: "southamerica-east1",
+    timeoutSeconds: 60,
+    memory: "256MiB"
+  },
+  async event => {
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+
+    if (!after || after.status !== "completed" || before?.status === "completed") {
+      return;
+    }
+
+    const customerId = after.customerId;
+    if (!customerId) return;
+
+    const db = getFirestore();
+
+    const [ordersSnap, couponsSnap] = await Promise.all([
+      db.collection("orders").where("customerId", "==", customerId).get(),
+      db.collection("coupons").get()
+    ]);
+
+    const completedOrders = ordersSnap.docs
+      .map(docSnap => docSnap.data())
+      .filter(order => order.status === "completed");
+
+    const completedCount = completedOrders.length;
+    const spent = completedOrders.reduce(
+      (sum, order) => sum + Number(order.total || 0),
+      0
+    );
+
+    const eligible = couponsSnap.docs
+      .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
+      .filter(coupon => couponIsCurrentlyActive(coupon))
+      .filter(coupon => completedCount >= Number(coupon.minOrders || 0))
+      .filter(coupon => spent >= Number(coupon.minSpent || 0));
+
+    for (const coupon of eligible) {
+      const rewardRef = db.doc(`customers/${customerId}/coupons/${coupon.id}`);
+      const existing = await rewardRef.get();
+      if (existing.exists) continue;
+
+      await rewardRef.set({
+        sourceCouponId: coupon.id,
+        code: coupon.code || coupon.id,
+        description: coupon.description || "",
+        type: coupon.type || "percentage",
+        value: Number(coupon.value || 0),
+        minimumOrder: Number(coupon.minimumOrder || 0),
+        maxDiscount: Number(coupon.maxDiscount || 0),
+        startsAt: coupon.startsAt || "",
+        endsAt: coupon.endsAt || "",
+        earnedAt: new Date(),
+        earnedAfterOrders: completedCount,
+        earnedAfterSpent: spent,
+        active: true
+      });
+    }
+  }
+);
+
