@@ -84,19 +84,33 @@ let unsubscribeOrders=null,soundEnabled=false,knownOrderIds=new Set();
 let printConfig={
   printer:localStorage.getItem('deliveryPrinter')||'',
   autoPrint:localStorage.getItem('deliveryAutoPrint')==='1',
-  printPending:localStorage.getItem('deliveryPrintPending')==='1'
+  printPending:localStorage.getItem('deliveryPrintPending')==='1',
+  model:localStorage.getItem('deliveryPrintModel')||'thermal80'
 };
 const PRINT_AGENT='http://127.0.0.1:17329';
 const IMAGE_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadProductImage';
+const STORE_LOGO_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadStoreLogo';
 const printedOrderIds=new Set(JSON.parse(sessionStorage.getItem('deliveryPrintedOrders')||'[]'));
 
 const defaults={
   storeName:'Delivery Pizzaria',
   subtitle:'Pizza quentinha, do forno para sua casa.',
   phone:'',
+  whatsapp:'',
   storeAddress:'',
   storeZip:'',
+  storeStreet:'',
+  storeNumber:'',
+  storeNeighborhood:'',
+  storeComplement:'',
+  storeCity:'',
+  storeState:'',
   storeLocation:null,
+  storeLogo:'',
+  googleMapsUrl:'',
+  customerCancelMinutes:2,
+  notificationSound:'bell',
+  notificationVolume:70,
   deliveryPricingMode:'fixed',
   deliveryFee:5,
   deliveryZones:[],
@@ -498,7 +512,7 @@ function switchView(v){
     printing:['ESTAÇÃO','Impressão'],
     users:['SEGURANÇA','Usuários'],
     roles:['SEGURANÇA','Perfis de acesso'],
-    settings:['SISTEMA','Configurações']
+    settings:['PIZZARIA','Dados da Pizzaria']
   };
 
   $('#viewEyebrow').textContent=titles[v][0];
@@ -2089,9 +2103,10 @@ async function refreshStoreLocationPreview(){
     return null;
   }
   $('#setStoreZip').value=data.zip;
-  if(!$('#setStoreAddress').value.trim()){
-    $('#setStoreAddress').value=[data.street,data.neighborhood,data.city,data.state].filter(Boolean).join(', ');
-  }
+  if(data.street&&!$('#setStoreStreet').value.trim()) $('#setStoreStreet').value=data.street;
+  if(data.neighborhood&&!$('#setStoreNeighborhood').value.trim()) $('#setStoreNeighborhood').value=data.neighborhood;
+  if(data.city&&!$('#setStoreCity').value.trim()) $('#setStoreCity').value=data.city;
+  if(data.state&&!$('#setStoreState').value.trim()) $('#setStoreState').value=data.state;
   status.textContent=`CEP localizado • ${data.city||''}/${data.state||''} • pronto para cálculo por km.`;
   return data.location;
 }
