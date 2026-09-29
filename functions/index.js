@@ -23,18 +23,31 @@ function safeName(value) {
     .slice(0, 80) || "produto";
 }
 
-async function staffCanUpload(uid) {
+async function staffPermissions(uid) {
   const db = getFirestore();
   const userSnap = await db.doc(`users/${uid}`).get();
-  if (!userSnap.exists) return false;
+  if (!userSnap.exists) return null;
   const user = userSnap.data() || {};
-  if (user.active === false) return false;
-  if (user.role === "master") return true;
+  if (user.active === false) return null;
+  if (user.role === "master") return {master:true};
 
   const roleSnap = await db.doc(`roles/${user.role}`).get();
-  if (!roleSnap.exists) return false;
-  const permissions = roleSnap.data()?.permissions || {};
-  return permissions.productsCreate === true || permissions.productsEdit === true;
+  if (!roleSnap.exists) return null;
+  return roleSnap.data()?.permissions || {};
+}
+
+async function staffCanUpload(uid) {
+  const permissions=await staffPermissions(uid);
+  return !!permissions && (
+    permissions.master===true ||
+    permissions.productsCreate===true ||
+    permissions.productsEdit===true
+  );
+}
+
+async function staffCanManageSettings(uid) {
+  const permissions=await staffPermissions(uid);
+  return !!permissions && (permissions.master===true||permissions.settingsManage===true);
 }
 
 async function githubJson(url, options = {}) {
@@ -146,6 +159,68 @@ function couponIsCurrentlyActive(coupon) {
   if (end && Number.isFinite(end) && now > end) return false;
   return true;
 }
+
+export const uploadStoreLogo = onRequest(
+  {
+    region: "southamerica-east1",
+    secrets: [githubToken],
+    cors: [
+      "https://guiasysstudio.github.io",
+      "https://guias.online",
+      /https:\/\/.*\.guiasys\.online$/
+    ],
+    timeoutSeconds: 60,
+    memory: "256MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    try{
+      const authHeader=req.headers.authorization||"";
+      const match=authHeader.match(/^Bearer\s+(.+)$/i);
+      if(!match){
+        res.status(401).json({error:"missing_auth"});
+        return;
+      }
+
+      const decoded=await getAuth().verifyIdToken(match[1]);
+      if(!(await staffCanManageSettings(decoded.uid))){
+        res.status(403).json({error:"permission_denied"});
+        return;
+      }
+
+      const base64=String(req.body?.base64||"").replace(/^data:image\/\w+;base64,/,"");
+      if(!base64||base64.length>2_000_000){
+        res.status(400).json({error:"invalid_image"});
+        return;
+      }
+
+      const path="assets/store/logo.webp";
+      const apiUrl=`https://api.github.com/repos/${OWNER}/${REPO}/contents/${path}`;
+      const current=await githubJson(apiUrl+`?ref=${encodeURIComponent(BRANCH)}`);
+      const payload={
+        message:"assets: update store logo",
+        content:base64,
+        branch:BRANCH,
+        ...(current?.sha?{sha:current.sha}:{})
+      };
+
+      const result=await githubJson(apiUrl,{
+        method:"PUT",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(payload)
+      });
+
+      res.json({ok:true,path,sha:result?.content?.sha||""});
+    }catch(err){
+      console.error("uploadStoreLogo failed",err);
+      res.status(500).json({error:"upload_failed",message:err?.message||"Falha ao enviar logo."});
+    }
+  }
+);
 
 export const grantLoyaltyCoupons = onDocumentUpdated(
   {
