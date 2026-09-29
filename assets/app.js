@@ -466,7 +466,7 @@ function renderOptionGroups(){
   }).join('')}</div></div>`:'';
   const extras=currentProduct.extras||[];
   $('#extraOptions').innerHTML=extras.length?`<div class="option-group"><h3>Adicionais</h3><div class="option-list">${extras.map((x,i)=>`<label class="option-choice"><span><input type="checkbox" name="extra" value="${i}"> ${esc(x.name)}</span><strong>+ ${money(x.price)}</strong></label>`).join('')}</div></div>`:'';
-  $('input[name=size],input[name=extra]').forEach(i=>i.onchange=updateModalPrice);
+  $$('input[name=size],input[name=extra]').forEach(i=>i.onchange=updateModalPrice);
 }
 
 function selectedSize(){
