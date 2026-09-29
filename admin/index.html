@@ -38,7 +38,7 @@
         <button class="nav-item master-only hidden" data-view="roles" type="button"><span class="ui-icon icon-shield-check" aria-hidden="true"></span><span>Perfis</span></button>
         <button class="nav-item" data-view="settings" type="button"><span class="ui-icon icon-store" aria-hidden="true"></span><span>Dados da Pizzaria</span></button>
       </nav>
-      <div class="sidebar-bottom"><small id="currentUserDisplay" class="muted" style="text-align:center"></small><a class="btn btn-secondary btn-block" href="../" target="_blank">Abrir cardápio</a><button id="logoutBtn" class="btn btn-ghost btn-block">Sair</button></div>
+      <div class="sidebar-bottom"><small id="currentUserDisplay" class="muted" style="text-align:center"></small><a class="btn btn-secondary btn-block" href="../" target="_blank">Abrir cardápio</a><button id="logoutBtn" class="btn btn-ghost btn-block" type="button">Sair</button></div>
     </aside>
 
     <main class="admin-main">
@@ -102,12 +102,12 @@
       </section>
 
       <section id="view-products" class="admin-view">
-        <div class="section-actions"><button id="newProductBtn" class="btn btn-primary">+ Novo produto</button><button id="seedBtn" class="btn btn-secondary">Criar cardápio de exemplo</button></div>
+        <div class="section-actions"><button id="newProductBtn" class="btn btn-primary icon-button-label" type="button"><span class="ui-icon icon-plus" aria-hidden="true"></span><span>Novo produto</span></button><button id="seedBtn" class="btn btn-secondary" type="button">Criar cardápio de exemplo</button></div>
         <div class="panel"><div id="productsTable" class="data-list"></div></div>
       </section>
 
       <section id="view-categories" class="admin-view">
-        <div class="section-actions"><button id="newCategoryBtn" class="btn btn-primary">+ Nova categoria</button></div>
+        <div class="section-actions"><button id="newCategoryBtn" class="btn btn-primary icon-button-label" type="button"><span class="ui-icon icon-plus" aria-hidden="true"></span><span>Nova categoria</span></button></div>
         <div class="panel"><div id="categoriesTable" class="data-list"></div></div>
       </section>
 
@@ -164,7 +164,7 @@
       </section>
 
       <section id="view-users" class="admin-view">
-        <div class="section-actions"><button id="newUserBtn" class="btn btn-primary">+ Novo usuário</button></div>
+        <div class="section-actions"><button id="newUserBtn" class="btn btn-primary icon-button-label" type="button"><span class="ui-icon icon-plus" aria-hidden="true"></span><span>Novo usuário</span></button></div>
         <div class="panel"><div id="usersTable" class="data-list"></div></div>
       </section>
 
