@@ -82,6 +82,9 @@ onAuthStateChanged(auth,async user=>{
         '</div><hr>'
       ).join('')+
       '<div class="row"><span>Subtotal</span><strong>'+money(o.subtotal)+'</strong></div>'+
+      (Number(o.discount||0)>0
+        ?'<div class="row"><span>Desconto'+(o.coupon?.code?' • '+esc(o.coupon.code):'')+'</span><strong>- '+money(o.discount)+'</strong></div>'
+        :'')+
       '<div class="row"><span>Entrega</span><strong>'+money(o.deliveryFee)+'</strong></div>'+
       '<div class="row big"><span>TOTAL</span><strong>'+money(o.total)+'</strong></div>'+
       '<hr><p><strong>PAGAMENTO:</strong> '+esc(o.payment?.method||'')+'</p>'+
