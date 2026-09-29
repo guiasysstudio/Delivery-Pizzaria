@@ -711,11 +711,30 @@ function expectedDeliveryFee(order){
 
 function applyOrderPromotion(base,item){
   if(!item?.promotion) return {ok:true,value:base};
-  const promo=promotions.find(p=>p.id===item.promotion.id);
-  if(!promo) return {ok:false,reason:`Promoção inválida em ${item.name}.`,value:base};
-  const sameType=promo.discountType===item.promotion.discountType;
-  const sameValue=Math.abs(Number(promo.discountValue||0)-Number(item.promotion.discountValue||0))<0.009;
-  if(!sameType||!sameValue) return {ok:false,reason:`Dados da promoção divergentes em ${item.name}.`,value:base};
+
+  // A promoção gravada no pedido é um snapshot histórico. Uma promoção pode
+  // expirar, ser editada ou excluída depois da compra sem invalidar a comanda.
+  const snapshot=item.promotion||{};
+  const promo=promotions.find(p=>p.id===snapshot.id);
+  const sameCurrent=promo &&
+    promo.discountType===snapshot.discountType &&
+    Math.abs(Number(promo.discountValue||0)-Number(snapshot.discountValue||0))<0.009;
+
+  const historicalBase=Number(snapshot.originalBasePrice);
+  if(Number.isFinite(historicalBase)&&historicalBase>=0){
+    const discounted=snapshot.discountType==='percentage'
+      ?Math.max(0,historicalBase-(historicalBase*Number(snapshot.discountValue||0)/100))
+      :Math.max(0,historicalBase-Number(snapshot.discountValue||0));
+    return {ok:true,value:discounted,historical:!sameCurrent};
+  }
+
+  if(!sameCurrent){
+    // Pedidos antigos não tinham originalBasePrice. Neles, o preço final
+    // armazenado no próprio pedido é a referência histórica segura para
+    // impressão e auditoria visual.
+    return {ok:true,value:Number(item.unitPrice||0),historical:true,useStoredUnit:true};
+  }
+
   const discounted=promo.discountType==='percentage'
     ?Math.max(0,base-(base*Number(promo.discountValue||0)/100))
     :Math.max(0,base-Number(promo.discountValue||0));
@@ -747,6 +766,7 @@ function expectedItemUnitPrice(item){
 
   const promoted=applyOrderPromotion(base,item);
   if(!promoted.ok) return promoted;
+  if(promoted.useStoredUnit) return {ok:true,value:Number(item.unitPrice||0),historical:true};
   base=promoted.value;
 
   let extras=0;
