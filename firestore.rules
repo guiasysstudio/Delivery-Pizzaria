@@ -124,7 +124,27 @@ service cloud.firestore {
       allow get: if hasPermission('usersManage') ||
         (signedIn() && request.auth.uid == uid);
       allow list: if hasPermission('usersManage');
-      allow create, update, delete: if hasPermission('usersManage');
+
+      allow create: if hasPermission('usersManage') &&
+        (
+          isMaster() ||
+          request.resource.data.role != 'master'
+        );
+
+      allow update: if hasPermission('usersManage') &&
+        (
+          isMaster() ||
+          (
+            resource.data.role != 'master' &&
+            request.resource.data.role != 'master'
+          )
+        );
+
+      allow delete: if hasPermission('usersManage') &&
+        (
+          isMaster() ||
+          resource.data.role != 'master'
+        );
     }
 
     match /roles/{roleId} {
@@ -225,6 +245,7 @@ service cloud.firestore {
         request.resource.data.total >= 0;
 
       allow read: if hasPermission('ordersView') ||
+        hasPermission('cashView') ||
         (signedIn() && resource.data.customerId == request.auth.uid);
 
       allow update: if canUpdateOrder();
