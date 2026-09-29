@@ -1028,11 +1028,19 @@ $('#registerCustomerForm').onsubmit=async e=>{
   }catch(err){
     console.error('Falha no cadastro:',err);
     const code=String(err?.code||'');
-    $('#registerAuthError').textContent=code.includes('cpf_already_registered')
+    const message=code.includes('cpf_already_registered')
       ?'Este CPF já está vinculado a outra conta.'
       :code.includes('invalid_cpf')
         ?'Informe um CPF válido.'
         :friendlyAuthError(err);
+
+    if(auth.currentUser&&!code.startsWith('auth/')){
+      alert(message+' Sua conta foi criada, mas o cadastro precisa ser concluído em Minha Conta.');
+      location.href='./account/#profile';
+      return;
+    }
+
+    $('#registerAuthError').textContent=message;
     $('#registerAuthError').classList.remove('hidden');
   }
 };
