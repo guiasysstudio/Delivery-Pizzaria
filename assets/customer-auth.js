@@ -10,7 +10,8 @@ import {
   createUserWithEmailAndPassword,
   updateProfile,
   signOut,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  sendEmailVerification
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import {
   getFirestore,
@@ -167,6 +168,9 @@ export async function registerWithEmail({name,email,password,phone='' }){
   const result=await createUserWithEmailAndPassword(auth,normalizedEmail,password);
   await updateProfile(result.user,{displayName:name.trim()});
   try{await ensureCustomerProfile(result.user,{name:name.trim(),phone:phone.trim()});}catch(err){console.error(err);}
+  if(!result.user.emailVerified){
+    try{await sendEmailVerification(result.user);}catch(err){console.warn('Não foi possível enviar a verificação de e-mail.',err);}
+  }
   return result.user;
 }
 
@@ -176,6 +180,13 @@ export async function logoutCustomer(){
 
 export async function resetCustomerPassword(email){
   return sendPasswordResetEmail(auth,email.trim());
+}
+
+export async function resendCustomerEmailVerification(){
+  await authPersistenceReady;
+  if(!auth.currentUser) throw new Error('auth-required');
+  if(auth.currentUser.emailVerified) return;
+  return sendEmailVerification(auth.currentUser);
 }
 
 export async function ensureCustomerProfile(user,extra={}){
