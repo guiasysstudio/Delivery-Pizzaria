@@ -16,7 +16,7 @@
   <header class="public-header">
     <div class="shell public-header-row">
       <a class="public-brand" href="./" aria-label="Início">
-        <span class="public-brand-mark">🍕</span>
+        <span class="public-brand-mark"><img id="headerStoreLogo" class="store-logo-image hidden" alt=""><span id="headerStoreLogoFallback">🍕</span></span>
         <span>
           <strong id="headerStoreName">Pizzaria</strong>
           <small id="headerStoreStatus">Carregando...</small>
@@ -33,6 +33,10 @@
       </button>
 
       <div class="public-header-actions">
+        <button id="aboutBtn" class="header-action" type="button">
+          <span>ⓘ</span>
+          <span class="header-action-copy"><small>Conheça</small><strong>Sobre</strong></span>
+        </button>
         <button id="accountBtn" class="header-action" type="button">
           <span id="accountAvatar" class="avatar-circle">👤</span>
           <span class="header-action-copy">
@@ -68,6 +72,7 @@
           <div class="hero-status-row">
             <span id="storeStatus" class="store-open-pill">Carregando horário...</span>
             <span id="minimumOrderText" class="hero-note"></span>
+            <button id="installAppBtn" class="install-app-button hidden" type="button">▣ Instalar aplicativo</button>
           </div>
         </div>
         <div class="hero-pizza-art" aria-hidden="true">
@@ -94,11 +99,12 @@
           <div id="featuredCatalog" class="catalog-grid"></div>
         </section>
 
-        <section class="catalog-section">
+        <section id="catalogRoot" class="catalog-section">
           <div class="section-heading">
-            <div><span class="eyebrow">CARDÁPIO</span><h2 id="catalogTitle">Todos os produtos</h2></div>
+            <div><span class="eyebrow">CARDÁPIO</span><h2 id="catalogTitle">Cardápio</h2></div>
           </div>
-          <div id="catalog" class="catalog-grid"></div>
+          <div id="catalogSections" class="catalog-sections"></div>
+          <div id="catalog" class="catalog-grid hidden"></div>
           <div id="catalogEmpty" class="empty-state hidden">Nenhum produto encontrado.</div>
         </section>
       </div>
@@ -170,13 +176,45 @@
       </form>
       <form id="registerCustomerForm" class="hidden">
         <label class="field"><span>Nome completo</span><input id="registerName" required maxlength="100"></label>
-        <label class="field"><span>Telefone</span><input id="registerPhone" required maxlength="30" inputmode="tel"></label>
+        <label class="field"><span>Telefone</span><input id="registerPhone" required maxlength="15" inputmode="tel" autocomplete="tel" placeholder="(00) 00000-0000"></label>
+        <label class="field"><span>CPF</span><input id="registerCpf" required maxlength="14" inputmode="numeric" autocomplete="off" placeholder="000.000.000-00"></label>
         <label class="field"><span>E-mail</span><input id="registerEmail" type="email" required autocomplete="email"></label>
         <label class="field"><span>Senha</span><input id="registerPassword" type="password" minlength="6" required autocomplete="new-password"></label>
         <div id="registerAuthError" class="alert alert-error hidden"></div>
         <button class="btn btn-primary btn-block" type="submit">Criar minha conta</button>
         <p class="auth-switch">Já possui conta? <button id="showLoginBtn" class="link-button" type="button">Entrar</button></p>
       </form>
+    </div>
+  </dialog>
+
+  <dialog id="aboutDialog" class="modal">
+    <div class="modal-card about-card">
+      <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
+      <div class="about-logo-wrap">
+        <img id="aboutStoreLogo" class="about-store-logo hidden" alt="">
+        <div id="aboutStoreLogoFallback" class="about-store-logo-fallback">🍕</div>
+      </div>
+      <span class="eyebrow">SOBRE</span>
+      <h2 id="aboutStoreName">Pizzaria</h2>
+      <p id="aboutStoreSubtitle" class="muted"></p>
+      <div class="about-info-list">
+        <div><span>📍</span><div><small>Endereço</small><strong id="aboutStoreAddress">Não informado</strong></div></div>
+        <div><span>☎</span><div><small>Telefone / WhatsApp</small><strong id="aboutStorePhone">Não informado</strong></div></div>
+      </div>
+      <div class="section-actions">
+        <a id="aboutMapsLink" class="btn btn-secondary hidden" target="_blank" rel="noopener">Abrir no Google Maps</a>
+        <a id="aboutWhatsappLink" class="btn btn-primary hidden" target="_blank" rel="noopener">Falar no WhatsApp</a>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="iosInstallDialog" class="modal">
+    <div class="modal-card">
+      <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
+      <span class="eyebrow">INSTALAR</span>
+      <h2>Adicionar à Tela de Início</h2>
+      <p>No iPhone/iPad, abra este site no Safari, toque em <strong>Compartilhar</strong> e depois em <strong>Adicionar à Tela de Início</strong>.</p>
+      <button class="btn btn-primary btn-block dialog-close" type="button">Entendi</button>
     </div>
   </dialog>
 
@@ -290,10 +328,18 @@
     </div>
   </dialog>
 
+  <a id="floatingWhatsapp" class="floating-whatsapp hidden" target="_blank" rel="noopener" aria-label="Falar com a pizzaria no WhatsApp">☏</a>
+
   <footer class="footer">
     <div class="shell footer-grid">
-      <div><strong id="footerStore">Delivery Pizzaria</strong><p id="footerAddress" class="muted"></p></div>
-      <div class="footer-right"><span>Pedido seguro • Atendimento pela pizzaria</span></div>
+      <div>
+        <strong id="footerStore">Delivery Pizzaria</strong>
+        <p><a id="footerAddressLink" class="footer-address-link" target="_blank" rel="noopener"><span id="footerAddress" class="muted"></span></a></p>
+      </div>
+      <div class="footer-right">
+        <button id="footerAboutBtn" class="link-button" type="button">Sobre</button>
+        <span>Pedido seguro • Atendimento pela pizzaria</span>
+      </div>
     </div>
   </footer>
 
