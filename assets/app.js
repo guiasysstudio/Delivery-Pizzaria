@@ -1421,13 +1421,16 @@ async function createOrderSecurely({type,address,profilePhone,changeFor}){
       body:JSON.stringify(payload)
     });
   }catch(err){
-    console.warn('Function segura ainda indisponível; usando fluxo compatível.',err);
-    return null;
+    console.error('Não foi possível acessar a validação segura do pedido.',err);
+    const secureError=new Error('O servidor seguro de pedidos está indisponível. Tente novamente em instantes.');
+    secureError.code='secure-order-unavailable';
+    throw secureError;
   }
 
   if(response.status===404){
-    console.warn('Function createOrder ainda não publicada; usando fluxo compatível.');
-    return null;
+    const secureError=new Error('O serviço seguro de pedidos ainda não está disponível. O pedido não foi enviado.');
+    secureError.code='secure-order-not-deployed';
+    throw secureError;
   }
 
   const data=await response.json().catch(()=>({}));
@@ -1494,72 +1497,15 @@ $('#checkoutForm').addEventListener('submit',async e=>{
     try{
       serverResult=await createOrderSecurely({type,address,profilePhone,changeFor});
     }catch(serverError){
-      console.error('Pedido rejeitado pela validação segura:',serverError);
+      console.error('Pedido rejeitado ou serviço seguro indisponível:',serverError);
       return showCheckoutError(serverError.message||'Não foi possível validar o pedido.');
     }
 
-    if(serverResult){
-      orderNumber=Number(serverResult.orderNumber||0);
-      autoAccepted=serverResult.status==='accepted';
-    }else{
-      // Compatibilidade temporária enquanto a Cloud Function ainda não estiver publicada.
-      // Depois do deploy da Function, este trecho deixa de ser usado.
-      const orderRef=doc(collection(db,'orders'));
-      const counterRef=doc(db,'counters','orders');
+    orderNumber=Number(serverResult?.orderNumber||0);
+    autoAccepted=serverResult?.status==='accepted';
 
-      await runTransaction(db,async tx=>{
-        const snap=await tx.get(counterRef);
-        orderNumber=(snap.exists()?Number(snap.data().value||0):0)+1;
-
-        const payload={
-          orderNumber,
-          customerId:customer.uid,
-          status:autoAccepted?'accepted':'pending',
-          autoAccepted,
-          createdAt:serverTimestamp(),
-          acceptedAt:autoAccepted?serverTimestamp():null,
-          customer:{
-            name:profileName,
-            email:customer.email||'',
-            phone:profilePhone
-          },
-          fulfillment:type,
-          address:type==='delivery'?{
-            id:address.id,label:address.label||'',recipient:address.recipient||profileName,phone:address.phone||profilePhone,
-            zip:address.zip||'',street:address.street||'',number:address.number||'',complement:address.complement||'',
-            neighborhood:address.neighborhood||'',city:address.city||'',state:address.state||'',reference:address.reference||'',
-            location:address.location||null
-          }:null,
-          deliveryPricing:type==='delivery'?{
-            mode:quote.mode||settings.deliveryPricingMode||'fixed',
-            fee,
-            distanceKm:Number.isFinite(quote.distanceKm)?Number(quote.distanceKm.toFixed(3)):null,
-            zone:quote.zone?.neighborhood||null,
-            maxKm:quote.maxKm??null
-          }:{mode:'pickup',fee:0},
-          payment:{
-            method:selectedPayment,
-            needsChange:changeFor>0,
-            changeFor,
-            changeAmount
-          },
-          note:$('#orderNote').value.trim(),
-          items:cart.map(({lineId,...x})=>x),
-          subtotal,
-          discount,
-          coupon:activeCoupon?{
-            id:activeCoupon.id,
-            code:activeCoupon.code||activeCoupon.id,
-            type:activeCoupon.type,
-            value:Number(activeCoupon.value||0),
-            amount:discount
-          }:null,
-          deliveryFee:fee,total
-        };
-
-        tx.set(counterRef,{value:orderNumber,updatedAt:serverTimestamp()},{merge:true});
-        tx.set(orderRef,payload);
-      });
+    if(!orderNumber){
+      throw new Error('Resposta inválida do servidor seguro de pedidos.');
     }
 
     cart=[];saveCart();
