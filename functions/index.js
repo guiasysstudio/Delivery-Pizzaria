@@ -4,6 +4,7 @@ import { defineSecret } from "firebase-functions/params";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import { createHash } from "node:crypto";
 
 initializeApp();
 
@@ -415,6 +416,230 @@ async function verifyCustomerToken(req) {
   return getAuth().verifyIdToken(match[1]);
 }
 
+function normalizeCpf(value) {
+  return String(value||"").replace(/\D/g,"").slice(0,11);
+}
+
+function validCpf(value) {
+  const cpf=normalizeCpf(value);
+  if (cpf.length!==11 || /^(\d)\1{10}$/.test(cpf)) return false;
+  const digit=(base,factor)=>{
+    let total=0;
+    for (const ch of base) total+=Number(ch)*factor--;
+    const mod=(total*10)%11;
+    return mod===10?0:mod;
+  };
+  return digit(cpf.slice(0,9),10)===Number(cpf[9]) &&
+    digit(cpf.slice(0,10),11)===Number(cpf[10]);
+}
+
+function cpfHash(value) {
+  return createHash("sha256").update(normalizeCpf(value)).digest("hex");
+}
+
+function maskCpf(value) {
+  const cpf=normalizeCpf(value);
+  if (cpf.length!==11) return "";
+  return "***."+cpf.slice(3,6)+"."+cpf.slice(6,9)+"-**";
+}
+
+function validFullName(value) {
+  return normalizeText(value,100).split(/\s+/).filter(Boolean).length>=2;
+}
+
+function phoneDigits(value) {
+  return String(value||"").replace(/\D/g,"").slice(0,11);
+}
+
+const customerCors=[
+  "https://guiasysstudio.github.io",
+  "https://guias.online",
+  /https:\/\/.*\.guiasys\.online$/
+];
+
+export const customerIdentity = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:customerCors,
+    timeoutSeconds:30,
+    memory:"256MiB"
+  },
+  async (req,res)=>{
+    try {
+      const decoded=await verifyCustomerToken(req);
+      if (!decoded?.uid) {
+        res.status(401).json({error:"unauthorized"});
+        return;
+      }
+
+      const db=getFirestore();
+      const privateRef=db.doc(`customerPrivate/${decoded.uid}`);
+      const customerRef=db.doc(`customers/${decoded.uid}`);
+
+      if (req.method==="GET") {
+        const snap=await privateRef.get();
+        const data=snap.exists?snap.data():{};
+        res.json({
+          ok:true,
+          identityComplete:snap.exists&&validCpf(data?.cpf),
+          cpfMasked:snap.exists?maskCpf(data?.cpf):"",
+          email:decoded.email||"",
+          emailVerified:decoded.email_verified===true
+        });
+        return;
+      }
+
+      if (req.method!=="POST") {
+        res.status(405).json({error:"method_not_allowed"});
+        return;
+      }
+
+      const body=req.body||{};
+      const name=normalizeText(body.name,100);
+      const phone=phoneDigits(body.phone);
+      const cpf=normalizeCpf(body.cpf);
+
+      if (!validFullName(name)) {
+        res.status(400).json({error:"full_name_required"});
+        return;
+      }
+      if (!(phone.length===10||phone.length===11)) {
+        res.status(400).json({error:"invalid_phone"});
+        return;
+      }
+      if (!validCpf(cpf)) {
+        res.status(400).json({error:"invalid_cpf"});
+        return;
+      }
+
+      const hash=cpfHash(cpf);
+      const indexRef=db.doc(`cpfIndex/${hash}`);
+
+      await db.runTransaction(async tx=>{
+        const [indexSnap,privateSnap]=await Promise.all([
+          tx.get(indexRef),
+          tx.get(privateRef)
+        ]);
+
+        if (indexSnap.exists&&indexSnap.data()?.uid!==decoded.uid) {
+          throw Object.assign(new Error("cpf_already_registered"),{code:"cpf_already_registered"});
+        }
+
+        const previousHash=privateSnap.exists?privateSnap.data()?.cpfHash:"";
+        if (previousHash&&previousHash!==hash) {
+          const oldIndexRef=db.doc(`cpfIndex/${previousHash}`);
+          const oldIndex=await tx.get(oldIndexRef);
+          if (oldIndex.exists&&oldIndex.data()?.uid===decoded.uid) tx.delete(oldIndexRef);
+        }
+
+        tx.set(indexRef,{
+          uid:decoded.uid,
+          updatedAt:new Date()
+        },{merge:true});
+
+        tx.set(privateRef,{
+          cpf,
+          cpfHash:hash,
+          email:decoded.email||"",
+          updatedAt:new Date(),
+          ...(privateSnap.exists?{}:{createdAt:new Date()})
+        },{merge:true});
+
+        tx.set(customerRef,{
+          name,
+          phone,
+          email:decoded.email||"",
+          identityComplete:true,
+          updatedAt:new Date()
+        },{merge:true});
+      });
+
+      res.json({
+        ok:true,
+        identityComplete:true,
+        cpfMasked:maskCpf(cpf),
+        email:decoded.email||"",
+        emailVerified:decoded.email_verified===true
+      });
+    } catch (err) {
+      console.error("customerIdentity failed",err);
+      if (err?.code==="cpf_already_registered"||err?.message==="cpf_already_registered") {
+        res.status(409).json({error:"cpf_already_registered"});
+        return;
+      }
+      res.status(500).json({error:"identity_failed",message:err?.message||"Falha ao salvar os dados."});
+    }
+  }
+);
+
+export const cancelCustomerOrder = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:customerCors,
+    timeoutSeconds:30,
+    memory:"256MiB"
+  },
+  async (req,res)=>{
+    if (req.method!=="POST") {
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    try {
+      const decoded=await verifyCustomerToken(req);
+      if (!decoded?.uid) {
+        res.status(401).json({error:"unauthorized"});
+        return;
+      }
+
+      const orderId=normalizeText(req.body?.orderId,120);
+      if (!orderId) {
+        res.status(400).json({error:"order_required"});
+        return;
+      }
+
+      const db=getFirestore();
+      const orderRef=db.doc(`orders/${orderId}`);
+      const settingsRef=db.doc("settings/store");
+
+      await db.runTransaction(async tx=>{
+        const [orderSnap,settingsSnap]=await Promise.all([
+          tx.get(orderRef),
+          tx.get(settingsRef)
+        ]);
+        if (!orderSnap.exists) throw Object.assign(new Error("order_not_found"),{code:"order_not_found"});
+
+        const order=orderSnap.data()||{};
+        if (order.customerId!==decoded.uid) throw Object.assign(new Error("permission_denied"),{code:"permission_denied"});
+        if (!["pending","accepted"].includes(order.status)) throw Object.assign(new Error("cancel_not_allowed"),{code:"cancel_not_allowed"});
+
+        const minutes=Math.max(0,Number(settingsSnap.data()?.customerCancelMinutes??2));
+        const createdMs=order.createdAt?.toMillis?.()??new Date(order.createdAt||0).getTime();
+        const elapsed=Date.now()-createdMs;
+        if (!Number.isFinite(createdMs)||elapsed>minutes*60*1000) {
+          throw Object.assign(new Error("cancel_window_expired"),{code:"cancel_window_expired"});
+        }
+
+        tx.update(orderRef,{
+          status:"cancelled",
+          cancelledAt:new Date(),
+          cancelledByCustomer:true,
+          updatedAt:new Date()
+        });
+      });
+
+      res.json({ok:true,status:"cancelled"});
+    } catch (err) {
+      console.error("cancelCustomerOrder failed",err);
+      const code=err?.code||err?.message||"cancel_failed";
+      const status=code==="permission_denied"?403:
+        code==="order_not_found"?404:
+        ["cancel_not_allowed","cancel_window_expired"].includes(code)?409:500;
+      res.status(status).json({error:code});
+    }
+  }
+);
+
 export const createOrder = onRequest(
   {
     region:"southamerica-east1",
@@ -440,9 +665,10 @@ export const createOrder = onRequest(
       }
 
       const db=getFirestore();
-      const [settingsSnap,customerSnap,promotionsSnap]=await Promise.all([
+      const [settingsSnap,customerSnap,privateCustomerSnap,promotionsSnap]=await Promise.all([
         db.doc("settings/store").get(),
         db.doc(`customers/${decoded.uid}`).get(),
+        db.doc(`customerPrivate/${decoded.uid}`).get(),
         db.collection("promotions").get()
       ]);
 
@@ -453,6 +679,15 @@ export const createOrder = onRequest(
       }
 
       const customer=customerSnap.exists?customerSnap.data():{};
+      const privateCustomer=privateCustomerSnap.exists?privateCustomerSnap.data():{};
+      if (!customer.identityComplete || !validCpf(privateCustomer.cpf)) {
+        res.status(409).json({error:"profile_incomplete"});
+        return;
+      }
+      if (!validFullName(customer.name||decoded.name||"")) {
+        res.status(409).json({error:"full_name_required"});
+        return;
+      }
       const body=req.body||{};
       const rawItems=Array.isArray(body.items)?body.items:[];
       if (!rawItems.length || rawItems.length>80) {
@@ -581,7 +816,9 @@ export const createOrder = onRequest(
             id:best.promo.id,
             name:best.promo.name||"Promoção",
             discountType:best.promo.discountType,
-            discountValue:Number(best.promo.discountValue||0)
+            discountValue:Number(best.promo.discountValue||0),
+            originalBasePrice:base,
+            promotedBasePrice:promotedBase
           }:null
         });
       }
@@ -671,8 +908,8 @@ export const createOrder = onRequest(
 
       const phone=normalizeText(body.phone||customer.phone,40);
       const name=normalizeText(customer.name||decoded.name||"Cliente",100);
-      if (!phone) {
-        res.status(400).json({error:"phone_required"});
+      if (![10,11].includes(phoneDigits(phone).length)) {
+        res.status(400).json({error:"invalid_phone"});
         return;
       }
 
