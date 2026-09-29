@@ -12,7 +12,7 @@ const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const placeholder='../assets/products/placeholder.svg';
 
-let user=null,profile=null,addresses=[],orders=[],favorites=new Set(),products=[],couponRewards=[],settings={};
+let user=null,profile=null,addresses=[],orders=[],favorites=new Set(),products=[],couponRewards=[],settings={},pendingCustomPhotoURL=undefined;
 let unsubscribeOrders=null;
 
 const statusLabels={
@@ -78,12 +78,79 @@ async function loadAll(){
   couponRewards=results[6]?.docs?.map(d=>({id:d.id,...d.data()}))||[];
 }
 
+function effectiveProfilePhoto(){
+  return profile?.customPhotoURL||profile?.photoURL||user?.photoURL||'';
+}
+
+function setProfileAvatar(element,url,fallback='👤'){
+  if(!element) return;
+  element.replaceChildren();
+  if(url){
+    const img=document.createElement('img');
+    img.src=url;
+    img.alt='Foto do perfil';
+    img.referrerPolicy='no-referrer';
+    img.onerror=()=>{
+      element.replaceChildren(document.createTextNode(fallback));
+      element.classList.remove('has-photo');
+    };
+    element.appendChild(img);
+    element.classList.add('has-photo');
+  }else{
+    element.textContent=fallback;
+    element.classList.remove('has-photo');
+  }
+}
+
+function renderProfilePhoto(){
+  const name=profile?.name||user?.displayName||'Cliente';
+  const preview=$('#profilePhotoPreview');
+  const url=pendingCustomPhotoURL!==undefined
+    ?(pendingCustomPhotoURL||profile?.photoURL||user?.photoURL||'')
+    :effectiveProfilePhoto();
+  setProfileAvatar(preview,url,(name[0]||'C').toUpperCase());
+  $('#useGooglePhotoBtn')?.classList.toggle('hidden',!(user?.photoURL||profile?.photoURL));
+}
+
+async function prepareProfilePhoto(file){
+  if(!file) return null;
+  if(file.size>8*1024*1024) throw new Error('A imagem deve ter no máximo 8 MB.');
+
+  const dataUrl=await new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(String(reader.result||''));
+    reader.onerror=()=>reject(new Error('Não foi possível ler a imagem.'));
+    reader.readAsDataURL(file);
+  });
+
+  const image=await new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>resolve(img);
+    img.onerror=()=>reject(new Error('Formato de imagem inválido.'));
+    img.src=dataUrl;
+  });
+
+  const size=256;
+  const canvas=document.createElement('canvas');
+  canvas.width=size;
+  canvas.height=size;
+  const ctx=canvas.getContext('2d');
+
+  const sourceSize=Math.min(image.naturalWidth,image.naturalHeight);
+  const sx=(image.naturalWidth-sourceSize)/2;
+  const sy=(image.naturalHeight-sourceSize)/2;
+  ctx.drawImage(image,sx,sy,sourceSize,sourceSize,0,0,size,size);
+
+  return canvas.toDataURL('image/jpeg',0.84);
+}
+
 function renderHeader(){
   $('#accountStoreName').textContent=settings.storeName||'Delivery Pizzaria';
   const name=profile?.name||user.displayName||'Cliente';
   $('#accountProfileName').textContent=name;
   $('#accountProfileEmail').textContent=user.email||'';
-  $('#accountBigAvatar').textContent=(name[0]||'C').toUpperCase();
+  setProfileAvatar($('#accountBigAvatar'),effectiveProfilePhoto(),(name[0]||'C').toUpperCase());
+  renderProfilePhoto();
 }
 
 $$('.account-nav-item').forEach(b=>b.onclick=()=>openSection(b.dataset.section));
@@ -100,16 +167,54 @@ function renderProfile(){
   $('#profileName').value=profile?.name||user.displayName||'';
   $('#profilePhone').value=profile?.phone||'';
   $('#profileEmail').value=user.email||'';
+  pendingCustomPhotoURL=undefined;
+  renderProfilePhoto();
 }
+
+$('#chooseProfilePhotoBtn')?.addEventListener('click',()=>$('#profilePhotoFile').click());
+
+$('#profilePhotoFile')?.addEventListener('change',async e=>{
+  const file=e.target.files?.[0];
+  if(!file) return;
+
+  const button=$('#chooseProfilePhotoBtn');
+  const original=button.textContent;
+  button.disabled=true;
+  button.textContent='Preparando...';
+
+  try{
+    pendingCustomPhotoURL=await prepareProfilePhoto(file);
+    renderProfilePhoto();
+  }catch(err){
+    console.error(err);
+    alert(err.message||'Não foi possível preparar a foto.');
+  }finally{
+    button.disabled=false;
+    button.textContent=original;
+    e.target.value='';
+  }
+});
+
+$('#useGooglePhotoBtn')?.addEventListener('click',()=>{
+  pendingCustomPhotoURL='';
+  renderProfilePhoto();
+});
 
 $('#profileForm').onsubmit=async e=>{
   e.preventDefault();
-  await saveCustomerProfile(user.uid,{
+  const payload={
     name:$('#profileName').value,
     phone:$('#profilePhone').value
-  });
+  };
+  if(pendingCustomPhotoURL!==undefined){
+    payload.customPhotoURL=pendingCustomPhotoURL;
+  }
+
+  await saveCustomerProfile(user.uid,payload);
   profile=await getCustomerProfile(user.uid);
+  pendingCustomPhotoURL=undefined;
   renderHeader();
+  renderProfilePhoto();
   $('#profileSaved').classList.remove('hidden');
   setTimeout(()=>$('#profileSaved').classList.add('hidden'),1800);
 };
