@@ -478,15 +478,48 @@ $('#removeCouponBtn')?.addEventListener('click',()=>{
   renderCart();
 });
 
-function renderCategories(){
-  const items=[{id:'all',name:'Todos'},...categories];
-  $('#categoryChips').innerHTML=items.map(c=>`<button class="chip ${selectedCategory===c.id?'active':''}" data-id="${c.id}">${esc(c.name)}</button>`).join('');
-  $$('.chip').forEach(b=>b.onclick=()=>{
-    selectedCategory=b.dataset.id;
-    renderCategories();
-    renderCatalog();
-    $('#catalogTitle').textContent=b.dataset.id==='all'?'Todos os produtos':categories.find(c=>c.id===b.dataset.id)?.name||'Cardápio';
+function categoryRank(category){
+  const name=String(category?.name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  if(name.includes('combo')) return 0;
+  if(name.includes('pizza')&&!name.includes('doce')) return 1;
+  if(name.includes('pizza')&&name.includes('doce')) return 2;
+  if(name.includes('bebida')||name.includes('refrigerante')) return 3;
+  return 20+Number(category?.order||0);
+}
+
+function orderedCategories(){
+  return [...categories].sort((a,b)=>{
+    const rank=categoryRank(a)-categoryRank(b);
+    if(rank) return rank;
+    const order=Number(a.order||0)-Number(b.order||0);
+    return order||String(a.name||'').localeCompare(String(b.name||''),'pt-BR');
   });
+}
+
+function renderCategories(){
+  const items=[{id:'all',name:'Todos'},...orderedCategories()];
+  $('#categoryChips').innerHTML=items.map(cat=>`<button class="chip ${selectedCategory===cat.id?'active':''}" data-id="${cat.id}">${esc(cat.name)}</button>`).join('');
+  $('.chip').forEach(b=>b.onclick=()=>{
+    const id=b.dataset.id;
+    selectedCategory=id;
+    renderCategories();
+
+    const term=$('#searchInput').value.trim();
+    if(term){
+      renderCatalog();
+      return;
+    }
+
+    if(id==='all'){
+      $('#catalogRoot').scrollIntoView({behavior:'smooth',block:'start'});
+      return;
+    }
+
+    document.getElementById('category-section-'+id)?.scrollIntoView({behavior:'smooth',block:'start'});
+  });
+
+  const active=$('#categoryChips .chip.active');
+  active?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
 }
 
 function productCard(p){
@@ -517,19 +550,78 @@ function bindProductCards(scope=document){
   });
 }
 
+let categoryObserver=null;
+
 function renderFeatured(){
-  const list=products.filter(p=>p.featured).slice(0,6);
-  $('#featuredSection').classList.toggle('hidden',!list.length||selectedCategory!=='all'||$('#searchInput').value.trim());
+  const term=$('#searchInput').value.trim();
+  const list=products.filter(p=>p.featured).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'pt-BR')).slice(0,6);
+  $('#featuredSection').classList.toggle('hidden',!list.length||!!term);
   $('#featuredCatalog').innerHTML=list.map(productCard).join('');
   bindProductCards($('#featuredCatalog'));
 }
 
+function bindCategoryScrollSpy(){
+  categoryObserver?.disconnect();
+  const sections=[...document.querySelectorAll('[data-catalog-category]')];
+  if(!sections.length) return;
+
+  categoryObserver=new IntersectionObserver(entries=>{
+    const visible=entries
+      .filter(entry=>entry.isIntersecting)
+      .sort((a,b)=>Math.abs(a.boundingClientRect.top)-Math.abs(b.boundingClientRect.top))[0];
+    if(!visible) return;
+    const id=visible.target.dataset.catalogCategory;
+    if(id&&id!==selectedCategory){
+      selectedCategory=id;
+      renderCategories();
+    }
+  },{rootMargin:'-150px 0px -55% 0px',threshold:[0,.05,.2]});
+
+  sections.forEach(section=>categoryObserver.observe(section));
+}
+
 function renderCatalog(){
   const term=$('#searchInput').value.trim().toLowerCase();
-  const list=products.filter(p=>(selectedCategory==='all'||p.categoryId===selectedCategory)&&(!term||`${p.name} ${p.description||''}`.toLowerCase().includes(term)));
-  $('#catalogEmpty').classList.toggle('hidden',list.length>0);
-  $('#catalog').innerHTML=list.map(productCard).join('');
-  bindProductCards($('#catalog'));
+  const flat=$('#catalog');
+  const sections=$('#catalogSections');
+
+  if(term){
+    categoryObserver?.disconnect();
+    sections.innerHTML='';
+    sections.classList.add('hidden');
+    flat.classList.remove('hidden');
+    const list=products
+      .filter(p=>(selectedCategory==='all'||p.categoryId===selectedCategory)&&`${p.name} ${p.description||''}`.toLowerCase().includes(term))
+      .sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'pt-BR'));
+    $('#catalogTitle').textContent=selectedCategory==='all'?'Resultados da busca':categories.find(x=>x.id===selectedCategory)?.name||'Resultados';
+    $('#catalogEmpty').classList.toggle('hidden',list.length>0);
+    flat.innerHTML=list.map(productCard).join('');
+    bindProductCards(flat);
+  }else{
+    flat.classList.add('hidden');
+    flat.innerHTML='';
+    sections.classList.remove('hidden');
+    $('#catalogTitle').textContent='Cardápio';
+
+    const groups=orderedCategories().map(category=>({
+      category,
+      items:products.filter(p=>p.categoryId===category.id)
+        .sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'pt-BR'))
+    })).filter(group=>group.items.length);
+
+    $('#catalogEmpty').classList.toggle('hidden',groups.length>0);
+    sections.innerHTML=groups.map(({category,items})=>`
+      <section id="category-section-${category.id}" class="catalog-category-section" data-catalog-category="${category.id}">
+        <div class="section-heading category-section-heading">
+          <div><span class="eyebrow">CARDÁPIO</span><h2>${esc(category.name)}</h2></div>
+          <span class="category-count">${items.length} item(ns)</span>
+        </div>
+        <div class="catalog-grid">${items.map(productCard).join('')}</div>
+      </section>`).join('');
+    bindProductCards(sections);
+    requestAnimationFrame(bindCategoryScrollSpy);
+  }
+
   renderFeatured();
 }
 
@@ -1077,7 +1169,11 @@ $('#addressEditorForm').onsubmit=async e=>{
   }
 };
 
-$('#searchInput').addEventListener('input',renderCatalog);
+$('#searchInput').addEventListener('input',()=>{
+  if(!$('#searchInput').value.trim()) selectedCategory='all';
+  renderCategories();
+  renderCatalog();
+});
 $('#desktopCartBtn').onclick=()=>$('#cartPanel').scrollIntoView({behavior:'smooth',block:'start'});
 $('#mobileHomeBtn')?.addEventListener('click',()=>window.scrollTo({top:0,behavior:'smooth'}));
 $('#mobileSearchBtn')?.addEventListener('click',()=>{
