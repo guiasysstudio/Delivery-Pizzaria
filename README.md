@@ -148,6 +148,25 @@ assets/products/
 
 O token do GitHub nunca é colocado no JavaScript do navegador.
 
+## Frete e área de entrega
+
+A Central Delivery permite escolher três formas de cobrança do motoboy:
+
+- **Valor fixo** — uma taxa única para qualquer entrega.
+- **Por bairro** — cada bairro recebe uma taxa própria, com opção de bloquear bairros não cadastrados.
+- **Por km** — faixas do tipo “até X km = R$ Y”, com opção de bloquear entregas acima da última faixa.
+
+No modo por km:
+
+- o ADM informa o CEP da pizzaria;
+- endereços dos clientes recebem coordenadas a partir do CEP;
+- o sistema calcula uma distância aproximada entre os CEPs;
+- a faixa correspondente define a taxa;
+- o pedido grava modo, distância aproximada e valor do frete;
+- a comanda mostra o tipo de cálculo e, quando aplicável, a distância.
+
+A geolocalização por CEP usa BrasilAPI CEP v2 quando disponível e mantém ViaCEP como fallback para dados de endereço. Para distância exata seguindo ruas/rotas, será necessário conectar um provedor de mapas/rotas por backend.
+
 ## Caixa e financeiro
 
 O caixa permite:
