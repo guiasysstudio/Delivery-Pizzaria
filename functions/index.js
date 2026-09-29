@@ -193,7 +193,9 @@ export const uploadStoreLogo = onRequest(
         return;
       }
 
-      const path="assets/store/logo.webp";
+      // PNG é compatível tanto com navegadores quanto com o decoder nativo
+      // usado pelo Print Agent no Windows, além de preservar transparência.
+      const path="assets/store/logo.png";
       const apiUrl=`https://api.github.com/repos/${OWNER}/${REPO}/contents/${path}`;
       const current=await githubJson(apiUrl+`?ref=${encodeURIComponent(BRANCH)}`);
       const payload={
