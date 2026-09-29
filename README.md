@@ -191,6 +191,15 @@ A abertura usa transação para evitar dois caixas abertos simultaneamente por c
 
 ## Perfis e permissões
 
+Na área **Usuários**, quem possui permissão de gerenciamento pode editar usuários e, pelas ações da lista:
+
+- ativar ou desativar o acesso;
+- trocar a senha;
+- excluir a conta interna;
+- editar nome e perfil de acesso.
+
+Ativar/desativar, trocar senha e excluir passam pela Firebase Function `manageStaffUser`, mantendo Firestore e Firebase Authentication sincronizados. A própria conta não pode ser desativada/excluída e o último Master ativo é protegido.
+
 O Master pode criar perfis próprios e escolher permissões individualmente, incluindo:
 
 - visualizar/aceitar/preparar/despachar/concluir/cancelar pedidos;
@@ -290,6 +299,7 @@ A pasta `functions/` contém:
 - `uploadStoreLogo`: envia a logo da pizzaria ao GitHub com autorização de configuração.
 - `customerIdentity`: valida nome, telefone e CPF no backend, mantém o CPF privado e garante unicidade.
 - `cancelCustomerOrder`: aplica a janela configurável de cancelamento e valida o dono/status do pedido.
+- `manageStaffUser`: ativa/desativa contas internas, troca senhas e exclui usuários com Firebase Admin e proteção para contas Master.
 - `createOrder`: valida o pedido no servidor, recalcula cardápio, promoções, cupom, frete e numeração antes de gravar.
 - `grantLoyaltyCoupons`: entrega automaticamente recompensas de fidelidade após pedidos concluídos.
 
