@@ -82,7 +82,6 @@ const defaultRoleTemplates={
 let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=[],promotions=[],coupons=[],cashSessions=[],cashMovements=[],currentCashSession=null,currentProfile=null;
 let unsubscribeOrders=null,soundEnabled=localStorage.getItem('deliverySoundEnabled')==='1',knownOrderIds=new Set();
 let printConfig={
-  printer:localStorage.getItem('deliveryPrinter')||'',
   autoPrint:localStorage.getItem('deliveryAutoPrint')==='1',
   printPending:localStorage.getItem('deliveryPrintPending')==='1',
   model:localStorage.getItem('deliveryPrintModel')||'thermal80'
@@ -1074,7 +1073,7 @@ function savePrintSettings(){
     model:document.querySelector('input[name="printModel"]:checked')?.value||'thermal80'
   };
 
-  localStorage.setItem('deliveryPrinter',printConfig.printer||'');
+  localStorage.removeItem('deliveryPrinter');
   localStorage.setItem('deliveryAutoPrint',printConfig.autoPrint?'1':'0');
   localStorage.setItem('deliveryPrintPending',printConfig.printPending?'1':'0');
   localStorage.setItem('deliveryPrintModel',printConfig.model);
@@ -1090,20 +1089,17 @@ async function checkPrintAgent(){
 
     const data=await response.json();
     const printers=Array.isArray(data.printers)?data.printers:[];
-
-    // Compatibilidade com a versão atual do Agent: a seleção física deixou de
-    // aparecer no site, mas enquanto o Agent novo não estiver instalado usamos
-    // internamente a impressora previamente salva ou a primeira detectada.
-    if(!printConfig.printer||!printers.includes(printConfig.printer)){
-      printConfig.printer=printers[0]||'';
-      localStorage.setItem('deliveryPrinter',printConfig.printer);
-    }
+    const selectedPrinter=String(data.selectedPrinter||'').trim();
 
     status.textContent='● Print Agent conectado';
     status.classList.add('ok');
     status.classList.remove('off');
     if($('#printerAgentInfoState')){
-      $('#printerAgentInfoState').textContent=printers.length?'Pronto':'Configure uma impressora no Agent';
+      $('#printerAgentInfoState').textContent=selectedPrinter
+        ?'Pronto • '+selectedPrinter
+        :printers.length
+          ?'Escolha uma impressora no Print Agent'
+          :'Nenhuma impressora instalada';
     }
     if($('#printerAgentVersion')) $('#printerAgentVersion').textContent=data.version||data.agentVersion||'Conectado';
     return true;
@@ -1225,7 +1221,6 @@ async function sendToPrintAgent(text){
     model:printConfig.model,
     storeLogo:settings.storeLogo||''
   };
-  if(printConfig.printer) payload.printer=printConfig.printer;
 
   const response=await fetch(PRINT_AGENT+'/print',{
     method:'POST',
