@@ -12,11 +12,18 @@ namespace DeliveryPizzaria.PrintAgent;
 
 internal static class Program
 {
+    private const string InstanceMutexName = @"Local\DeliveryPizzaria.PrintAgent";
+
     [STAThread]
     private static void Main()
     {
+        using var mutex = new Mutex(true, InstanceMutexName, out var createdNew);
+        if (!createdNew)
+            return;
+
         ApplicationConfiguration.Initialize();
         Application.Run(new TrayContext());
+        GC.KeepAlive(mutex);
     }
 }
 
@@ -75,7 +82,7 @@ internal sealed class TrayContext : ApplicationContext
         EnsureFirstRunStartup();
         EnsureSelectedPrinter();
 
-        _server = new LocalPrintServer(GetSelectedPrinter);
+        _server = new LocalPrintServer(GetSelectedPrinter, SetSelectedPrinter);
         _server.Start();
 
         _startupItem = new ToolStripMenuItem("Iniciar com o Windows")
@@ -445,15 +452,23 @@ internal sealed class AgentSettingsForm : Form
 
 internal sealed class LocalPrintServer : IDisposable
 {
+    private const string AgentVersion = "1.4.0";
+    private static readonly HttpClient LogoHttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(5)
+    };
+
     private readonly CancellationTokenSource _cts = new();
     private readonly object _printLock = new();
     private readonly Func<string?> _getSelectedPrinter;
+    private readonly Action<string?> _setSelectedPrinter;
     private WebApplication? _app;
     private Task? _runTask;
 
-    public LocalPrintServer(Func<string?> getSelectedPrinter)
+    public LocalPrintServer(Func<string?> getSelectedPrinter, Action<string?> setSelectedPrinter)
     {
         _getSelectedPrinter = getSelectedPrinter;
+        _setSelectedPrinter = setSelectedPrinter;
     }
 
     public void Start()
@@ -499,14 +514,14 @@ internal sealed class LocalPrintServer : IDisposable
         {
             ok = true,
             name = "Delivery Pizzaria Print Agent",
-            version = "1.3.0"
+            version = AgentVersion
         }));
 
         _app.MapGet("/health", () => Results.Json(new
         {
             ok = true,
             name = "Delivery Pizzaria Print Agent",
-            version = "1.3.0"
+            version = AgentVersion
         }));
 
         _app.MapGet("/printers", () =>
@@ -518,8 +533,8 @@ internal sealed class LocalPrintServer : IDisposable
             return Results.Json(new
             {
                 printers,
-                selectedPrinter = _getSelectedPrinter(),
-                version = "1.3.0"
+                selectedPrinter = ResolveSelectedPrinter(),
+                version = AgentVersion
             });
         });
 
@@ -544,20 +559,15 @@ internal sealed class LocalPrintServer : IDisposable
             }
 
             // A impressora física é sempre definida pelo próprio Agent.
-            // O painel web controla somente o modelo/conteúdo da comanda.
-            var printerName = _getSelectedPrinter();
+            // Se a impressora salva sumiu/foi renomeada, o Agent recupera
+            // automaticamente a padrão do Windows (ou a primeira disponível).
+            var printerName = ResolveSelectedPrinter();
             if (string.IsNullOrWhiteSpace(printerName))
             {
                 return Results.BadRequest(new { error = "printer_not_configured" });
             }
 
-            var installed = PrinterSettings.InstalledPrinters.Cast<string>()
-                .Any(p => string.Equals(p, printerName, StringComparison.CurrentCultureIgnoreCase));
-
-            if (!installed)
-            {
-                return Results.NotFound(new { error = "printer_not_found" });
-            }
+            using var logo = await TryLoadLogoAsync(request.StoreLogo, context.RequestAborted);
 
             try
             {
@@ -566,10 +576,17 @@ internal sealed class LocalPrintServer : IDisposable
                     PrintText(
                         printerName,
                         request.Text,
-                        Math.Clamp(request.Copies <= 0 ? 1 : request.Copies, 1, 5));
+                        Math.Clamp(request.Copies <= 0 ? 1 : request.Copies, 1, 5),
+                        request.Model,
+                        logo);
                 }
 
-                return Results.Ok(new { ok = true });
+                return Results.Ok(new
+                {
+                    ok = true,
+                    printer = printerName,
+                    model = NormalizeModel(request.Model)
+                });
             }
             catch (Exception ex)
             {
@@ -580,6 +597,34 @@ internal sealed class LocalPrintServer : IDisposable
         });
 
         _runTask = _app.RunAsync(_cts.Token);
+    }
+
+    private string? ResolveSelectedPrinter()
+    {
+        var printers = PrinterSettings.InstalledPrinters.Cast<string>()
+            .OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
+
+        if (printers.Length == 0)
+        {
+            _setSelectedPrinter(null);
+            return null;
+        }
+
+        var selected = _getSelectedPrinter();
+        var installedSelection = printers.FirstOrDefault(p =>
+            string.Equals(p, selected, StringComparison.CurrentCultureIgnoreCase));
+
+        if (!string.IsNullOrWhiteSpace(installedSelection))
+            return installedSelection;
+
+        var windowsDefault = new PrinterSettings().PrinterName;
+        var fallback = printers.FirstOrDefault(p =>
+            string.Equals(p, windowsDefault, StringComparison.CurrentCultureIgnoreCase))
+            ?? printers[0];
+
+        _setSelectedPrinter(fallback);
+        return fallback;
     }
 
     private static bool IsAllowedOrigin(string? origin)
@@ -604,8 +649,115 @@ internal sealed class LocalPrintServer : IDisposable
         return false;
     }
 
-    private static void PrintText(string printerName, string text, int copies)
+    private sealed record PrintProfile(
+        string Model,
+        int PaperWidth,
+        int PaperHeight,
+        Margins Margins,
+        float FontSize,
+        bool PrintLogo,
+        float MaxLogoHeight);
+
+    private static string NormalizeModel(string? model)
     {
+        return StringComparer.OrdinalIgnoreCase.Equals(model, "thermal58") ? "thermal58" :
+            StringComparer.OrdinalIgnoreCase.Equals(model, "a4") ? "a4" :
+            StringComparer.OrdinalIgnoreCase.Equals(model, "compact") ? "compact" :
+            StringComparer.OrdinalIgnoreCase.Equals(model, "label") ? "label" :
+            "thermal80";
+    }
+
+    private static PrintProfile GetPrintProfile(string? model)
+    {
+        return NormalizeModel(model) switch
+        {
+            "thermal58" => new("thermal58", 228, 2000, new Margins(4, 4, 5, 5), 7.2f, true, 55f),
+            "a4" => new("a4", 827, 1169, new Margins(40, 40, 40, 40), 10.5f, true, 105f),
+            "compact" => new("compact", 228, 2000, new Margins(4, 4, 5, 5), 7.2f, false, 0f),
+            "label" => new("label", 315, 394, new Margins(6, 6, 6, 6), 8.0f, false, 0f),
+            _ => new("thermal80", 315, 2000, new Margins(6, 6, 6, 6), 8.8f, true, 70f)
+        };
+    }
+
+    private static void ApplyPaperProfile(PrintDocument document, PrintProfile profile)
+    {
+        document.DefaultPageSettings.Margins = profile.Margins;
+
+        try
+        {
+            PaperSize? paper = null;
+
+            if (profile.Model == "a4")
+            {
+                paper = document.PrinterSettings.PaperSizes
+                    .Cast<PaperSize>()
+                    .FirstOrDefault(size => size.Kind == PaperKind.A4);
+            }
+
+            paper ??= new PaperSize(
+                profile.Model switch
+                {
+                    "thermal58" => "Thermal 58 mm",
+                    "a4" => "A4",
+                    "compact" => "Compact 58 mm",
+                    "label" => "Label 80 x 100 mm",
+                    _ => "Thermal 80 mm"
+                },
+                profile.PaperWidth,
+                profile.PaperHeight);
+
+            document.DefaultPageSettings.PaperSize = paper;
+        }
+        catch
+        {
+            // Alguns drivers recusam papel customizado. Neles, preservamos
+            // o tamanho configurado no próprio driver em vez de falhar a impressão.
+        }
+    }
+
+    private static async Task<Image?> TryLoadLogoAsync(string? url, CancellationToken cancellationToken)
+    {
+        if (!IsAllowedLogoUrl(url))
+            return null;
+
+        try
+        {
+            var bytes = await LogoHttpClient.GetByteArrayAsync(new Uri(url!), cancellationToken);
+            if (bytes.Length == 0 || bytes.Length > 2_000_000)
+                return null;
+
+            using var stream = new MemoryStream(bytes);
+            using var source = Image.FromStream(stream);
+            return new Bitmap(source);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool IsAllowedLogoUrl(string? value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var host = uri.Host;
+        return host.Equals("raw.githubusercontent.com", StringComparison.OrdinalIgnoreCase) ||
+            host.Equals("guiasysstudio.github.io", StringComparison.OrdinalIgnoreCase) ||
+            host.Equals("guiasys.online", StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith(".guiasys.online", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void PrintText(
+        string printerName,
+        string text,
+        int copies,
+        string? model,
+        Image? logo)
+    {
+        var profile = GetPrintProfile(model);
+
         for (var copy = 0; copy < copies; copy++)
         {
             using var document = new PrintDocument();
@@ -613,20 +765,37 @@ internal sealed class LocalPrintServer : IDisposable
             document.PrinterSettings.PrinterName = printerName;
             document.PrintController = new StandardPrintController();
             document.DocumentName = "Comanda Delivery Pizzaria";
-            document.DefaultPageSettings.Margins = new Margins(8, 8, 8, 8);
+            ApplyPaperProfile(document, profile);
 
             var lines = NormalizeLines(text).ToList();
             var lineIndex = 0;
+            var logoPrinted = false;
 
             document.PrintPage += (_, e) =>
             {
-                using var font = new Font("Consolas", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
-                using var bold = new Font("Consolas", 8.5f, FontStyle.Bold, GraphicsUnit.Point);
+                using var font = new Font("Consolas", profile.FontSize, FontStyle.Regular, GraphicsUnit.Point);
+                using var bold = new Font("Consolas", profile.FontSize, FontStyle.Bold, GraphicsUnit.Point);
 
                 var graphics = e.Graphics ?? throw new InvalidOperationException("Contexto de impressão indisponível.");
                 float y = e.MarginBounds.Top;
                 var lineHeight = font.GetHeight(graphics) + 1;
                 var maxWidth = e.MarginBounds.Width;
+
+                if (profile.PrintLogo && logo is not null && !logoPrinted)
+                {
+                    var scale = Math.Min(
+                        maxWidth / Math.Max(1f, logo.Width),
+                        profile.MaxLogoHeight / Math.Max(1f, logo.Height));
+                    scale = Math.Min(scale, 1.5f);
+
+                    var logoWidth = logo.Width * scale;
+                    var logoHeight = logo.Height * scale;
+                    var logoX = e.MarginBounds.Left + (maxWidth - logoWidth) / 2f;
+
+                    graphics.DrawImage(logo, logoX, y, logoWidth, logoHeight);
+                    y += logoHeight + 6f;
+                    logoPrinted = true;
+                }
 
                 while (lineIndex < lines.Count)
                 {
@@ -670,6 +839,8 @@ internal sealed class LocalPrintServer : IDisposable
 
         return upper.StartsWith("PEDIDO #")
             || upper.StartsWith("TOTAL:")
+            || upper.StartsWith("DESCONTO:")
+            || upper.StartsWith("CUPOM:")
             || upper.StartsWith("PAGAMENTO:")
             || upper.StartsWith("TROCO PARA:")
             || upper.StartsWith("LEVAR TROCO:");
@@ -733,5 +904,9 @@ internal sealed class LocalPrintServer : IDisposable
         _cts.Dispose();
     }
 
-    private sealed record PrintRequest(string Text, int Copies = 1, string? Printer = null);
+    private sealed record PrintRequest(
+        string Text,
+        int Copies = 1,
+        string? Model = null,
+        string? StoreLogo = null);
 }
