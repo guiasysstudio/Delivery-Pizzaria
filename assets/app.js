@@ -14,8 +14,55 @@ const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).
 const placeholder='./assets/products/placeholder.svg';
 const SECURE_ORDER_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/createOrder';
 
+function readStoredJson(storage,key,fallback){
+  try{
+    const raw=storage.getItem(key);
+    if(!raw) return fallback;
+    const parsed=JSON.parse(raw);
+    return parsed??fallback;
+  }catch(err){
+    console.warn(`Storage inválido em ${key}; restaurando valor padrão.`,err);
+    storage.removeItem(key);
+    return fallback;
+  }
+}
+
+function normalizeSearch(value){
+  return String(value||'')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase()
+    .trim();
+}
+
+function businessDateTimeKey(date=new Date(),timezone='America/Porto_Velho'){
+  const parts=new Intl.DateTimeFormat('en-CA',{
+    timeZone:timezone,
+    year:'numeric',month:'2-digit',day:'2-digit',
+    hour:'2-digit',minute:'2-digit',hourCycle:'h23'
+  }).formatToParts(date);
+  const values=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+}
+
+function dateTimeWindowActive(startsAt,endsAt,timezone='America/Porto_Velho'){
+  const nowMs=Date.now();
+  const nowKey=businessDateTimeKey(new Date(nowMs),timezone);
+  const boundary=(value,isStart)=>{
+    if(!value) return true;
+    const raw=String(value).trim();
+    const localMatch=raw.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::\d{2})?$/);
+    if(localMatch) return isStart?nowKey>=localMatch[1]:nowKey<=localMatch[1];
+    const epoch=Date.parse(raw);
+    if(!Number.isFinite(epoch)) return true;
+    return isStart?nowMs>=epoch:nowMs<=epoch;
+  };
+  return boundary(startsAt,true)&&boundary(endsAt,false);
+}
+
 let categories=[],products=[],promotions=[],settings=null;
-let cart=JSON.parse(localStorage.getItem('deliveryCart')||'[]');
+let cart=readStoredJson(localStorage,'deliveryCart',[]);
+if(!Array.isArray(cart)) cart=[];
 let selectedCategory='all';
 let currentProduct=null,currentQty=1,currentSecondFlavorId='';
 let customer=null,customerProfile=null,addresses=[],selectedAddressId=localStorage.getItem('deliverySelectedAddress')||'';
@@ -170,15 +217,41 @@ function activeAddress(){
 function isOpen(){
   if(settings?.openMode==='open') return true;
   if(settings?.openMode==='closed') return false;
-  const tz=settings?.timezone||'America/Porto_Velho';
-  const parts=new Intl.DateTimeFormat('en-US',{timeZone:tz,weekday:'short',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(new Date());
-  const wd=parts.find(p=>p.type==='weekday')?.value;
-  const map={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
-  const now=(parts.find(p=>p.type==='hour')?.value||'00')+':'+(parts.find(p=>p.type==='minute')?.value||'00');
-  const day=settings?.schedule?.[map[wd]]||settings?.schedule?.[String(map[wd])];
-  if(!day?.enabled) return false;
-  if(day.close>=day.open) return now>=day.open&&now<=day.close;
-  return now>=day.open||now<=day.close;
+
+  const timezone=settings?.timezone||'America/Porto_Velho';
+  const parts=new Intl.DateTimeFormat('en-US',{
+    timeZone:timezone,
+    weekday:'short',
+    hour:'2-digit',
+    minute:'2-digit',
+    hourCycle:'h23'
+  }).formatToParts(new Date());
+  const values=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+  const dayIndex=({Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6})[values.weekday];
+  const minute=Number(values.hour)*60+Number(values.minute);
+  const toMinutes=value=>{
+    const [hour,min]=String(value||'00:00').split(':').map(Number);
+    return hour*60+min;
+  };
+
+  const schedule=settings?.schedule||{};
+  const today=schedule[dayIndex]||schedule[String(dayIndex)];
+  if(today?.enabled){
+    const open=toMinutes(today.open);
+    const close=toMinutes(today.close);
+    if(close>open&&minute>=open&&minute<=close) return true;
+    if(close<=open&&minute>=open) return true;
+  }
+
+  const previousIndex=(dayIndex+6)%7;
+  const previous=schedule[previousIndex]||schedule[String(previousIndex)];
+  if(previous?.enabled){
+    const open=toMinutes(previous.open);
+    const close=toMinutes(previous.close);
+    if(close<=open&&minute<=close) return true;
+  }
+
+  return false;
 }
 
 function storeAddressText(){
@@ -340,12 +413,11 @@ async function loadCustomerOrderStats(uid){
 
 function promotionIsActive(p){
   if(p?.active===false) return false;
-  const now=Date.now();
-  const start=p?.startsAt?new Date(p.startsAt).getTime():0;
-  const end=p?.endsAt?new Date(p.endsAt).getTime():0;
-  if(start&&Number.isFinite(start)&&now<start) return false;
-  if(end&&Number.isFinite(end)&&now>end) return false;
-  return true;
+  return dateTimeWindowActive(
+    p?.startsAt,
+    p?.endsAt,
+    settings?.timezone||'America/Porto_Velho'
+  );
 }
 
 function promotionMatchesProduct(p,product){
@@ -398,11 +470,9 @@ function normalizeCouponCode(value){
 
 function couponValidation(coupon,subtotal){
   if(!coupon||coupon.active===false) return {valid:false,message:'Cupom inválido ou inativo.'};
-  const now=Date.now();
-  const start=coupon.startsAt?new Date(coupon.startsAt).getTime():0;
-  const end=coupon.endsAt?new Date(coupon.endsAt).getTime():0;
-  if(start&&Number.isFinite(start)&&now<start) return {valid:false,message:'Este cupom ainda não começou.'};
-  if(end&&Number.isFinite(end)&&now>end) return {valid:false,message:'Este cupom expirou.'};
+  const timezone=settings?.timezone||'America/Porto_Velho';
+  if(!dateTimeWindowActive(coupon.startsAt,'',timezone)) return {valid:false,message:'Este cupom ainda não começou.'};
+  if(!dateTimeWindowActive('',coupon.endsAt,timezone)) return {valid:false,message:'Este cupom expirou.'};
   if(subtotal<Number(coupon.minimumOrder||0)) return {valid:false,message:`Pedido mínimo para este cupom: ${money(coupon.minimumOrder)}.`};
   if(customerOrderStats.count<Number(coupon.minOrders||0)) return {valid:false,message:`Este cupom exige pelo menos ${coupon.minOrders} pedido(s) concluído(s).`};
   if(customerOrderStats.spent<Number(coupon.minSpent||0)) return {valid:false,message:`Este cupom exige ${money(coupon.minSpent)} em compras anteriores.`};
@@ -582,7 +652,7 @@ function bindCategoryScrollSpy(){
 }
 
 function renderCatalog(){
-  const term=$('#searchInput').value.trim().toLowerCase();
+  const term=normalizeSearch($('#searchInput').value);
   const flat=$('#catalog');
   const sections=$('#catalogSections');
 
@@ -592,7 +662,7 @@ function renderCatalog(){
     sections.classList.add('hidden');
     flat.classList.remove('hidden');
     const list=products
-      .filter(p=>(selectedCategory==='all'||p.categoryId===selectedCategory)&&`${p.name} ${p.description||''}`.toLowerCase().includes(term))
+      .filter(p=>(selectedCategory==='all'||p.categoryId===selectedCategory)&&normalizeSearch(`${p.name} ${p.description||''}`).includes(term))
       .sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'pt-BR'));
     $('#catalogTitle').textContent=selectedCategory==='all'?'Resultados da busca':categories.find(x=>x.id===selectedCategory)?.name||'Resultados';
     $('#catalogEmpty').classList.toggle('hidden',list.length>0);
