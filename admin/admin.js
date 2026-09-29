@@ -1412,6 +1412,7 @@ async function loadPromotions(){
     promotions=[];
   }
   renderPromotions();
+  if(products.length) renderProducts();
 }
 
 function promotionTargetLabel(p){
@@ -1445,21 +1446,22 @@ function refreshPromotionTarget(){
 }
 $('#promotionTargetType')?.addEventListener('change',refreshPromotionTarget);
 
-function editPromotion(id=null){
+function editPromotion(id=null,prefill={}){
   if(!hasPermission('promotionsManage')) return;
   const p=promotions.find(x=>x.id===id);
+  const source=p||prefill||{};
   $('#promotionEditorTitle').textContent=p?'Editar promoção':'Nova promoção';
   $('#promotionId').value=p?.id||'';
-  $('#promotionName').value=p?.name||'';
-  $('#promotionDescription').value=p?.description||'';
-  $('#promotionDiscountType').value=p?.discountType||'percentage';
-  $('#promotionDiscountValue').value=p?.discountValue??'';
-  $('#promotionTargetType').value=p?.targetType||'all';
+  $('#promotionName').value=source.name||'';
+  $('#promotionDescription').value=source.description||'';
+  $('#promotionDiscountType').value=source.discountType||'percentage';
+  $('#promotionDiscountValue').value=source.discountValue??'';
+  $('#promotionTargetType').value=source.targetType||'all';
   refreshPromotionTarget();
-  $('#promotionTargetId').value=p?.targetId||'';
-  $('#promotionStartsAt').value=p?.startsAt||'';
-  $('#promotionEndsAt').value=p?.endsAt||'';
-  $('#promotionActive').checked=p?.active!==false;
+  $('#promotionTargetId').value=source.targetId||'';
+  $('#promotionStartsAt').value=source.startsAt||'';
+  $('#promotionEndsAt').value=source.endsAt||'';
+  $('#promotionActive').checked=source.active!==false;
   $('#promotionEditorError').classList.add('hidden');
   $('#promotionEditor').showModal();
 }
@@ -1866,23 +1868,68 @@ $('#cashCloseForm')?.addEventListener('submit',async e=>{
 });
 
 
+function adminPromotionActive(promo){
+  if(!promo||promo.active===false) return false;
+  const now=Date.now();
+  const start=promo.startsAt?new Date(promo.startsAt).getTime():0;
+  const end=promo.endsAt?new Date(promo.endsAt).getTime():0;
+  if(start&&Number.isFinite(start)&&now<start) return false;
+  if(end&&Number.isFinite(end)&&now>end) return false;
+  return true;
+}
+
+function promotionsForProduct(product){
+  return promotions.filter(promo=>{
+    if(!adminPromotionActive(promo)) return false;
+    if(promo.targetType==='all') return true;
+    if(promo.targetType==='category') return promo.targetId===product.categoryId;
+    if(promo.targetType==='product') return promo.targetId===product.id;
+    return false;
+  });
+}
+
+function promotionSummaryForProduct(product){
+  const list=promotionsForProduct(product);
+  if(!list.length) return '';
+  return list.map(p=>p.discountType==='percentage'
+    ?`${Number(p.discountValue||0)}% OFF`
+    :`${money(p.discountValue)} OFF`
+  ).join(' • ');
+}
+
 function renderProducts(){
   const canEdit=hasPermission('productsEdit');
   const canDelete=hasPermission('productsDelete');
+  const canPromote=hasPermission('promotionsManage');
   $('#newProductBtn')?.classList.toggle('hidden',!hasPermission('productsCreate'));
   $('#seedBtn')?.classList.toggle('hidden',!(hasPermission('productsCreate')&&hasPermission('categoriesManage')));
 
-  $('#productsTable').innerHTML=products.length?products.map(p=>`<div class="data-row">
-    <div class="data-main"><strong>${esc(p.name)}</strong><small>${esc(categories.find(c=>c.id===p.categoryId)?.name||'Sem categoria')} • ${p.active===false?'Indisponível':'Disponível'} • ${p.sizes?.length?`${p.sizes.length} tamanhos`:money(p.price)}</small></div>
-    <span>${p.featured?'Destaque':''}</span>
-    <div class="data-actions">
-      ${canEdit?`<button class="btn btn-secondary edit-product" data-id="${p.id}" type="button">Editar</button>`:''}
-      ${canDelete?`<button class="btn btn-danger delete-product" data-id="${p.id}" type="button">Excluir</button>`:''}
-    </div>
-  </div>`).join(''):'<div class="empty-state">Nenhum produto cadastrado.</div>';
+  $('#productsTable').innerHTML=products.length?products.map(p=>{
+    const promoSummary=promotionSummaryForProduct(p);
+    return `<div class="data-row">
+      <div class="data-main">
+        <strong>${esc(p.name)}</strong>
+        <small>${esc(categories.find(cat=>cat.id===p.categoryId)?.name||'Sem categoria')} • ${p.active===false?'Indisponível':'Disponível'} • ${p.sizes?.length?`${p.sizes.length} tamanhos`:money(p.price)}</small>
+        ${promoSummary?`<small class="product-promotion-line">🏷️ Em promoção • ${esc(promoSummary)}</small>`:''}
+      </div>
+      <span>${p.featured?'Destaque':''}</span>
+      <div class="data-actions">
+        ${canPromote?`<button class="btn btn-secondary promote-product" data-id="${p.id}" type="button">${promoSummary?'Ver promoção':'Criar promoção'}</button>`:''}
+        ${canEdit?`<button class="btn btn-secondary edit-product" data-id="${p.id}" type="button">Editar</button>`:''}
+        ${canDelete?`<button class="btn btn-danger delete-product" data-id="${p.id}" type="button">Excluir</button>`:''}
+      </div>
+    </div>`;
+  }).join(''):'<div class="empty-state">Nenhum produto cadastrado.</div>';
 
   $$('.edit-product').forEach(b=>b.onclick=()=>editProduct(b.dataset.id));
   $$('.delete-product').forEach(b=>b.onclick=()=>deleteProduct(b.dataset.id));
+  $$('.promote-product').forEach(b=>b.onclick=()=>{
+    const product=products.find(p=>p.id===b.dataset.id);
+    if(!product) return;
+    const existing=promotions.find(p=>p.targetType==='product'&&p.targetId===product.id&&adminPromotionActive(p));
+    if(existing) editPromotion(existing.id);
+    else editPromotion(null,{targetType:'product',targetId:product.id,name:'Oferta • '+product.name});
+  });
 }
 $('#newProductBtn').onclick=()=>{if(hasPermission('productsCreate')) editProduct(null);};
 
