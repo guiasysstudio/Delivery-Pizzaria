@@ -100,6 +100,7 @@ const defaults={
   deliveryPricingMode:'fixed',
   deliveryFee:5,
   deliveryZones:[],
+  deliveryNeighborhoodFallbackFee:5,
   restrictDeliveryZones:false,
   deliveryKmBands:[],
   restrictDeliveryKm:true,
@@ -534,7 +535,7 @@ function deliveryFeeFromSettings(address){
     const zone=zones.find(z=>normalizePriceKey(z.neighborhood)===neighborhood);
     if(zone) return {supported:true,fee:Number(zone.fee||0),mode,zone:zone.neighborhood};
     if(settings.restrictDeliveryZones===true&&zones.length) return {supported:false,fee:0,mode};
-    return {supported:true,fee:Number(settings.deliveryFee||0),mode,zone:null};
+    return {supported:true,fee:Number(settings.deliveryNeighborhoodFallbackFee??settings.deliveryFee??0),mode,zone:null};
   }
 
   if(mode==='km'){
@@ -2053,6 +2054,7 @@ function renderSettings(){
   const modeInput=document.querySelector(`input[name="deliveryPricingMode"][value="${mode}"]`);
   if(modeInput) modeInput.checked=true;
   renderDeliveryZonesEditor(settings.deliveryZones||[]);
+  $('#setNeighborhoodFallbackFee').value=settings.deliveryNeighborhoodFallbackFee??settings.deliveryFee??0;
   $('#setRestrictDeliveryZones').checked=!!settings.restrictDeliveryZones;
   renderDeliveryKmBandsEditor(settings.deliveryKmBands||[]);
   $('#setRestrictDeliveryKm').checked=settings.restrictDeliveryKm!==false;
@@ -2130,6 +2132,7 @@ $('#settingsForm').onsubmit=async e=>{
     deliveryPricingMode,
     deliveryFee:Number($('#setDeliveryFee').value||0),
     deliveryZones,
+    deliveryNeighborhoodFallbackFee:Number($('#setNeighborhoodFallbackFee').value||0),
     restrictDeliveryZones:$('#setRestrictDeliveryZones').checked,
     deliveryKmBands,
     restrictDeliveryKm:$('#setRestrictDeliveryKm').checked,
