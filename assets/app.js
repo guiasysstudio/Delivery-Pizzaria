@@ -20,6 +20,7 @@ let selectedCategory='all';
 let currentProduct=null,currentQty=1,currentSecondFlavorId='';
 let customer=null,customerProfile=null,addresses=[],selectedAddressId=localStorage.getItem('deliverySelectedAddress')||'';
 let favorites=new Set(),afterAuthAction=null,selectedPayment='',activeCoupon=null,customerOrderStats={count:0,spent:0};
+let deferredInstallPrompt=null;
 let pendingCouponCode=normalizeCouponCode(new URLSearchParams(location.search).get('coupon')||'');
 
 const defaultSettings={
@@ -996,17 +997,40 @@ $('#loginCustomerForm').onsubmit=async e=>{
 
 $('#registerCustomerForm').onsubmit=async e=>{
   e.preventDefault();
+  const name=$('#registerName').value.trim();
+  const phone=$('#registerPhone').value.trim();
+  const cpf=$('#registerCpf').value.trim();
+
+  if(!validFullName(name)){
+    $('#registerAuthError').textContent='Informe seu nome completo, com pelo menos nome e sobrenome.';
+    $('#registerAuthError').classList.remove('hidden');
+    return;
+  }
+  if(!validCpf(cpf)){
+    $('#registerAuthError').textContent='Informe um CPF válido.';
+    $('#registerAuthError').classList.remove('hidden');
+    return;
+  }
+
   try{
-    await registerWithEmail({
-      name:$('#registerName').value,
-      phone:$('#registerPhone').value,
+    const user=await registerWithEmail({
+      name,
+      phone,
       email:$('#registerEmail').value,
       password:$('#registerPassword').value
     });
+    await saveCustomerIdentity({name,phone,cpf});
+    customerProfile=await getCustomerProfile(user.uid);
     if($('#authDialog').open) $('#authDialog').close();
     clearLoginQuery();
   }catch(err){
-    $('#registerAuthError').textContent=friendlyAuthError(err);
+    console.error('Falha no cadastro:',err);
+    const code=String(err?.code||'');
+    $('#registerAuthError').textContent=code.includes('cpf_already_registered')
+      ?'Este CPF já está vinculado a outra conta.'
+      :code.includes('invalid_cpf')
+        ?'Informe um CPF válido.'
+        :friendlyAuthError(err);
     $('#registerAuthError').classList.remove('hidden');
   }
 };
@@ -1214,6 +1238,14 @@ async function openCheckout(){
     return;
   }
   if(!cart.length) return;
+
+  if(!customerProfile?.identityComplete||!validFullName(customerProfile?.name||customer.displayName||'')){
+    localStorage.setItem('deliveryReturnToCheckout','1');
+    alert('Antes de fazer o primeiro pedido, complete seu nome, telefone e CPF em Minha Conta.');
+    location.href='./account/#profile';
+    return;
+  }
+
   try{
     if(fulfillment()==='delivery'){
       const address=activeAddress();
@@ -1322,7 +1354,10 @@ function secureOrderErrorMessage(code,data={}){
     delivery_not_supported:'Esse endereço está fora da área de entrega.',
     invalid_payment:'Escolha uma forma de pagamento válida.',
     invalid_change:'O valor informado para troco é menor que o total.',
-    phone_required:'Informe um telefone de contato.'
+    phone_required:'Informe um telefone de contato.',
+    invalid_phone:'Informe um telefone válido com DDD.',
+    profile_incomplete:'Complete seu cadastro com nome, telefone e CPF antes de pedir.',
+    full_name_required:'Informe seu nome completo, com nome e sobrenome.'
   };
   return map[code]||data?.message||'Não foi possível validar o pedido no servidor.';
 }
@@ -1526,6 +1561,66 @@ function showCheckoutError(message){
   $('#checkoutError').classList.remove('hidden');
 }
 $('#successClose').onclick=()=>$('#successDialog').close();
+
+function bindFormattedInput(selector,formatter){
+  const input=$(selector);
+  if(!input) return;
+  const apply=()=>{input.value=formatter(input.value);};
+  input.addEventListener('input',apply);
+  input.addEventListener('blur',apply);
+}
+
+function formatCepInput(value){
+  const d=String(value||'').replace(/\D/g,'').slice(0,8);
+  return d.length>5?d.slice(0,5)+'-'+d.slice(5):d;
+}
+
+bindFormattedInput('#registerPhone',formatPhone);
+bindFormattedInput('#registerCpf',formatCpf);
+bindFormattedInput('#addressPhone',formatPhone);
+bindFormattedInput('#checkoutPhone',formatPhone);
+bindFormattedInput('#addressZip',formatCepInput);
+
+function isStandalonePwa(){
+  return window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
+}
+
+function isIosDevice(){
+  return /iphone|ipad|ipod/i.test(navigator.userAgent);
+}
+
+function updateInstallButton(){
+  const button=$('#installAppBtn');
+  if(!button) return;
+  const canOffer=!isStandalonePwa()&&(!!deferredInstallPrompt||isIosDevice());
+  button.classList.toggle('hidden',!canOffer);
+  button.textContent=isIosDevice()&&!deferredInstallPrompt?'▣ Adicionar à Tela de Início':'▣ Instalar aplicativo';
+}
+
+window.addEventListener('beforeinstallprompt',event=>{
+  event.preventDefault();
+  deferredInstallPrompt=event;
+  updateInstallButton();
+});
+
+window.addEventListener('appinstalled',()=>{
+  deferredInstallPrompt=null;
+  updateInstallButton();
+});
+
+$('#installAppBtn')?.addEventListener('click',async()=>{
+  if(isStandalonePwa()) return;
+  if(deferredInstallPrompt){
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice.catch(()=>null);
+    deferredInstallPrompt=null;
+    updateInstallButton();
+    return;
+  }
+  if(isIosDevice()) $('#iosInstallDialog').showModal();
+});
+
+updateInstallButton();
 
 function installDialogDismissal(){
   $$('dialog').forEach(dialog=>{
