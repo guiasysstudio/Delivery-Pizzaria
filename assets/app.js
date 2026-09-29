@@ -1,5 +1,5 @@
 import {
-  auth, db, watchCustomer, loginWithGoogle, loginWithEmail, registerWithEmail,
+  auth, authPersistenceReady, db, watchCustomer, loginWithGoogle, loginWithEmail, registerWithEmail,
   resetCustomerPassword, friendlyAuthError, lookupBrazilianZip, getCustomerProfile, saveCustomerProfile, getAddresses,
   saveAddress, setDefaultAddress, getFavorites, setFavorite
 } from './customer-auth.js';
@@ -1362,7 +1362,8 @@ function installDialogDismissal(){
 }
 installDialogDismissal();
 
-loadStore().then(()=>{
+loadStore().then(async()=>{
+  await authPersistenceReady;
   if(new URLSearchParams(location.search).get('login')==='1'){
     if(auth.currentUser){
       clearLoginQuery();
