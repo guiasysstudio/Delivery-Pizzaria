@@ -157,6 +157,23 @@ async function prepareProfilePhoto(file){
 
 function renderHeader(){
   $('#accountStoreName').textContent=settings.storeName||'Delivery Pizzaria';
+
+  const storeLogo=String(settings.storeLogo||'').trim();
+  const logo=$('#accountHeaderStoreLogo');
+  const fallback=$('#accountHeaderStoreLogoFallback');
+  if(logo&&fallback){
+    logo.classList.toggle('hidden',!storeLogo);
+    fallback.classList.toggle('hidden',!!storeLogo);
+    if(storeLogo){
+      logo.src=/^https?:\/\//i.test(storeLogo)?storeLogo:'../'+storeLogo.replace(/^\.?\//,'').replace(/^\//,'');
+      logo.alt='Logo da '+(settings.storeName||'pizzaria');
+      logo.onerror=()=>{
+        logo.classList.add('hidden');
+        fallback.classList.remove('hidden');
+      };
+    }
+  }
+
   const name=profile?.name||user.displayName||'Cliente';
   $('#accountProfileName').textContent=name;
   $('#accountProfileEmail').textContent=user.email||'';
