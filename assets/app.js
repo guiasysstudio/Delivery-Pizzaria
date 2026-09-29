@@ -609,6 +609,7 @@ function renderCart(){
   $('#cartCount').textContent=count;
   $('#floatingCount').textContent=count;
   $('#headerCartCount').textContent=count;
+  $('#mobileCartCount').textContent=count;
   $('#subtotal').textContent=money(subtotal);
   $('#discountRow').classList.toggle('hidden',discount<=0);
   $('#discountTotal').textContent='- '+money(discount);
@@ -828,6 +829,23 @@ $('#addressEditorForm').onsubmit=async e=>{
 
 $('#searchInput').addEventListener('input',renderCatalog);
 $('#desktopCartBtn').onclick=()=>$('#cartPanel').scrollIntoView({behavior:'smooth',block:'start'});
+$('#mobileHomeBtn')?.addEventListener('click',()=>window.scrollTo({top:0,behavior:'smooth'}));
+$('#mobileSearchBtn')?.addEventListener('click',()=>{
+  $('#searchInput').scrollIntoView({behavior:'smooth',block:'center'});
+  setTimeout(()=>$('#searchInput').focus(),350);
+});
+$('#mobileOrdersBtn')?.addEventListener('click',()=>{
+  if(customer) location.href='./account/#orders';
+  else openAuth();
+});
+$('#mobileAccountBtn')?.addEventListener('click',()=>{
+  if(customer) location.href='./account/';
+  else openAuth();
+});
+$('#mobileCartBtn')?.addEventListener('click',()=>{
+  $('#cartPanel').classList.add('open');
+  $('#cartPanel').scrollIntoView({behavior:'smooth',block:'start'});
+});
 $('#floatingCart').onclick=()=>$('#cartPanel').classList.toggle('open');
 $('#checkoutBtn').onclick=()=>{
   if(!cart.length) return;
