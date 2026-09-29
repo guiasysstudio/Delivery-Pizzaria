@@ -7,7 +7,7 @@ import {
 import {
   collection, doc, getDoc, getDocs, query, where, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
-import { showToast, confirmAction, emptyStateHtml, iconHtml } from '../assets/ui.js';
+import { showToast, confirmAction, emptyStateHtml, iconHtml, applyBrandTheme } from '../assets/ui.js';
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -77,6 +77,7 @@ async function loadAll(){
   favorites=results[2];
   products=results[3].docs.map(d=>({id:d.id,...d.data()}));
   settings=results[4].exists()?results[4].data():{};
+  applyBrandTheme(settings.primaryColor||'#b91c1c');
   orders=results[5].docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
     const ad=a.createdAt?.toMillis?.()||0;
     const bd=b.createdAt?.toMillis?.()||0;
