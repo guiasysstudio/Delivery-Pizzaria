@@ -33,6 +33,7 @@
         <button class="account-nav-item active" data-section="profile">👤 <span>Meus dados</span></button>
         <button class="account-nav-item" data-section="addresses">📍 <span>Endereços</span></button>
         <button class="account-nav-item" data-section="orders">🧾 <span>Meus pedidos</span></button>
+        <button class="account-nav-item" data-section="coupons">🎟️ <span>Cupons</span></button>
         <button class="account-nav-item" data-section="favorites">♥ <span>Favoritos</span></button>
       </nav>
     </aside>
@@ -65,6 +66,12 @@
       <section id="account-section-orders" class="account-section hidden">
         <div class="section-heading"><div><span class="eyebrow">HISTÓRICO</span><h1>Meus pedidos</h1></div></div>
         <div id="accountOrdersList" class="account-orders-list"></div>
+      </section>
+
+      <section id="account-section-coupons" class="account-section hidden">
+        <div class="section-heading"><div><span class="eyebrow">VANTAGENS</span><h1>Meus cupons</h1></div></div>
+        <p class="muted">Cupons conquistados por pedidos e valor gasto aparecem aqui automaticamente.</p>
+        <div id="accountCouponsList" class="account-coupons-grid"></div>
       </section>
 
       <section id="account-section-favorites" class="account-section hidden">
