@@ -449,11 +449,13 @@ function whatsappDigits(){
 function orderWhatsappUrl(order){
   const number=whatsappDigits();
   if(!number) return '';
+  const itemSummary=(order.items||[]).slice(0,8).map(item=>Number(item.qty||1)+'x '+String(item.name||'Item')).join(', ');
   const message=[
     'Olá! Gostaria de falar sobre o pedido #'+String(order.orderNumber||0).padStart(4,'0')+'.',
+    itemSummary?'Itens: '+itemSummary:'',
     'Status: '+(statusLabels[order.status]||order.status),
     'Total: '+money(order.total)
-  ].join('\n');
+  ].filter(Boolean).join('\n');
   return 'https://wa.me/'+number+'?text='+encodeURIComponent(message);
 }
 
