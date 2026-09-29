@@ -603,9 +603,7 @@ export const customerIdentity = onRequest(
 
         const previousHash=privateSnap.exists?privateSnap.data()?.cpfHash:"";
         if (previousHash&&previousHash!==hash) {
-          const oldIndexRef=db.doc(`cpfIndex/${previousHash}`);
-          const oldIndex=await tx.get(oldIndexRef);
-          if (oldIndex.exists&&oldIndex.data()?.uid===decoded.uid) tx.delete(oldIndexRef);
+          throw Object.assign(new Error("cpf_change_not_allowed"),{code:"cpf_change_not_allowed"});
         }
 
         tx.set(indexRef,{
@@ -642,6 +640,10 @@ export const customerIdentity = onRequest(
       console.error("customerIdentity failed",err);
       if (err?.code==="cpf_already_registered"||err?.message==="cpf_already_registered") {
         res.status(409).json({error:"cpf_already_registered"});
+        return;
+      }
+      if (err?.code==="cpf_change_not_allowed"||err?.message==="cpf_change_not_allowed") {
+        res.status(409).json({error:"cpf_change_not_allowed"});
         return;
       }
       res.status(500).json({error:"identity_failed",message:err?.message||"Falha ao salvar os dados."});
