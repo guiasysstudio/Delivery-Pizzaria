@@ -2224,7 +2224,7 @@ $('#uploadProductImageBtn')?.addEventListener('click',async()=>{
   const button=$('#uploadProductImageBtn');
   const status=$('#productImageUploadStatus');
   const canvas=$('#productImageCanvas');
-  const slug=($('#productName').value||'produto').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'produto';
+  const slug=(($('#productName').value||'produto').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'produto').slice(0,55);
   if(!productImageUploadKey) productImageUploadKey=crypto.randomUUID().replace(/-/g,'').slice(0,12);
   const name=slug+'-'+productImageUploadKey;
 
