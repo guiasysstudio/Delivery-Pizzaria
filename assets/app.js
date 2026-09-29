@@ -7,7 +7,7 @@ import {
 import {
   collection, doc, getDoc, getDocs, query, where
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
-import { showToast, emptyStateHtml, iconHtml, skeletonListHtml } from './ui.js';
+import { showToast, emptyStateHtml, iconHtml, skeletonListHtml, applyBrandTheme } from './ui.js';
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -85,6 +85,7 @@ const defaultSettings={
   storeState:'',
   storeLocation:null,
   storeLogo:'',
+  primaryColor:'#b91c1c',
   googleMapsUrl:'',
   whatsapp:'',
   customerCancelMinutes:2,
@@ -328,6 +329,7 @@ function renderStoreIdentity(){
 }
 
 function renderStore(){
+  applyBrandTheme(settings?.primaryColor||'#b91c1c');
   document.title=`${settings.storeName} • Delivery`;
   $('#storeName').textContent=settings.storeName;
   $('#headerStoreName').textContent=settings.storeName;
