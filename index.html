@@ -103,8 +103,8 @@
       <div class="catalog-area">
         <div class="catalog-toolbar">
           <div class="search-wrap public-search">
-            <span>⌕</span>
-            <input id="searchInput" type="search" placeholder="Buscar pizza, bebida, adicional..." autocomplete="off" />
+            <span class="ui-icon icon-search" aria-hidden="true"></span>
+            <input id="searchInput" type="search" placeholder="Buscar pizza, bebida, adicional..." autocomplete="off" aria-label="Buscar no cardápio" />
           </div>
           <div id="categoryChips" class="chips category-scroll"></div>
         </div>
@@ -146,9 +146,9 @@
   <button class="floating-cart" id="floatingCart" type="button" aria-label="Abrir carrinho"><span class="ui-icon icon-shopping-cart" aria-hidden="true"></span><span id="floatingCount">0</span></button>
 
   <nav class="mobile-app-nav" aria-label="Navegação do delivery">
-    <button id="mobileHomeBtn" class="mobile-app-nav-item active" type="button"><span>⌂</span><small>Cardápio</small></button>
-    <button id="mobileSearchBtn" class="mobile-app-nav-item" type="button"><span>⌕</span><small>Buscar</small></button>
-    <button id="mobileOrdersBtn" class="mobile-app-nav-item" type="button"><span>▤</span><small>Pedidos</small></button>
+    <button id="mobileHomeBtn" class="mobile-app-nav-item active" type="button"><span class="ui-icon icon-pizza" aria-hidden="true"></span><small>Cardápio</small></button>
+    <button id="mobileSearchBtn" class="mobile-app-nav-item" type="button"><span class="ui-icon icon-search" aria-hidden="true"></span><small>Buscar</small></button>
+    <button id="mobileOrdersBtn" class="mobile-app-nav-item" type="button"><span class="ui-icon icon-receipt-text" aria-hidden="true"></span><small>Pedidos</small></button>
     <button id="mobileAccountBtn" class="mobile-app-nav-item" type="button"><span class="ui-icon icon-user-round" aria-hidden="true"></span><small>Conta</small></button>
     <button id="mobileCartBtn" class="mobile-app-nav-item mobile-cart-nav" type="button"><span><span class="ui-icon icon-shopping-cart" aria-hidden="true"></span><b id="mobileCartCount">0</b></span><small>Carrinho</small></button>
   </nav>
