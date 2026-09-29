@@ -449,12 +449,7 @@ function notifyNewOrder(o){
   }
 }
 
-function beep(){
-  const c=new AudioContext(),osc=c.createOscillator(),gain=c.createGain();
-  osc.connect(gain); gain.connect(c.destination);
-  osc.frequency.value=880; gain.gain.value=.08; osc.start();
-  setTimeout(()=>{osc.stop();c.close();},400);
-}
+function beep(){playNotificationSound();}
 
 $('#soundBtn').onclick=async()=>{
   soundEnabled=!soundEnabled;
@@ -522,6 +517,148 @@ function switchView(v){
   if(v==='cash') renderCash();
   if(v==='roles') renderRoles();
 }
+
+function formatPhoneInput(value){
+  const d=String(value||'').replace(/\D/g,'').slice(0,11);
+  if(d.length<=2) return d?('('+d):'';
+  if(d.length<=6) return '('+d.slice(0,2)+') '+d.slice(2);
+  if(d.length<=10) return '('+d.slice(0,2)+') '+d.slice(2,6)+'-'+d.slice(6);
+  return '('+d.slice(0,2)+') '+d.slice(2,7)+'-'+d.slice(7);
+}
+
+function formatCepInput(value){
+  const d=String(value||'').replace(/\D/g,'').slice(0,8);
+  return d.length>5?d.slice(0,5)+'-'+d.slice(5):d;
+}
+
+function bindAdminFormattedInput(selector,formatter){
+  const input=$(selector);
+  if(!input) return;
+  input.addEventListener('input',()=>{input.value=formatter(input.value);});
+}
+
+bindAdminFormattedInput('#setPhone',formatPhoneInput);
+bindAdminFormattedInput('#setWhatsapp',formatPhoneInput);
+bindAdminFormattedInput('#setStoreZip',formatCepInput);
+bindAdminFormattedInput('#deliveryTestZip',formatCepInput);
+
+function renderStoreLogoPreview(){
+  const host=$('#storeLogoPreview');
+  if(!host) return;
+  const value=$('#setStoreLogo')?.value?.trim()||'';
+  host.replaceChildren();
+  if(!value){
+    host.textContent='🍕';
+    host.classList.remove('has-image');
+    return;
+  }
+  const img=document.createElement('img');
+  img.alt='Logo da pizzaria';
+  img.src=/^https?:\/\//i.test(value)?value:'../'+value.replace(/^\.?\//,'').replace(/^\//,'');
+  img.onerror=()=>{
+    host.replaceChildren(document.createTextNode('🍕'));
+    host.classList.remove('has-image');
+  };
+  host.appendChild(img);
+  host.classList.add('has-image');
+}
+
+$('#chooseStoreLogoBtn')?.addEventListener('click',()=>$('#storeLogoFile').click());
+$('#removeStoreLogoBtn')?.addEventListener('click',()=>{
+  $('#setStoreLogo').value='';
+  $('#storeLogoStatus').textContent='Logo padrão selecionada.';
+  renderStoreLogoPreview();
+});
+
+$('#storeLogoFile')?.addEventListener('change',async e=>{
+  const file=e.target.files?.[0];
+  if(!file) return;
+  if(file.size>8*1024*1024){
+    alert('Escolha uma imagem de até 8 MB.');
+    e.target.value='';
+    return;
+  }
+
+  const button=$('#chooseStoreLogoBtn');
+  button.disabled=true;
+  $('#storeLogoStatus').textContent='Preparando logo...';
+
+  try{
+    const dataUrl=await new Promise((resolve,reject)=>{
+      const reader=new FileReader();
+      reader.onload=()=>resolve(String(reader.result||''));
+      reader.onerror=reject;
+      reader.readAsDataURL(file);
+    });
+
+    const img=await new Promise((resolve,reject)=>{
+      const image=new Image();
+      image.onload=()=>resolve(image);
+      image.onerror=reject;
+      image.src=dataUrl;
+    });
+
+    const size=512;
+    const canvas=document.createElement('canvas');
+    canvas.width=size;canvas.height=size;
+    const ctx=canvas.getContext('2d');
+    ctx.clearRect(0,0,size,size);
+    const scale=Math.min(size/img.naturalWidth,size/img.naturalHeight);
+    const w=img.naturalWidth*scale,h=img.naturalHeight*scale;
+    ctx.drawImage(img,(size-w)/2,(size-h)/2,w,h);
+    const base64=canvas.toDataURL('image/webp',.9).split(',')[1];
+
+    const token=await auth.currentUser.getIdToken();
+    const response=await fetch(STORE_LOGO_UPLOAD_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({base64})
+    });
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(result?.message||result?.error||'upload');
+
+    $('#setStoreLogo').value=result.path;
+    $('#storeLogoStatus').textContent='Logo enviada com sucesso.';
+    renderStoreLogoPreview();
+  }catch(err){
+    console.error(err);
+    $('#storeLogoStatus').textContent='Não foi possível enviar a logo. Verifique se as Firebase Functions estão publicadas.';
+  }finally{
+    button.disabled=false;
+    e.target.value='';
+  }
+});
+
+function playNotificationSound(name=settings.notificationSound||'bell',volume=settings.notificationVolume??70){
+  if(name==='none') return;
+  const ctx=new (window.AudioContext||window.webkitAudioContext)();
+  const gain=ctx.createGain();
+  gain.gain.value=Math.max(0,Math.min(1,Number(volume||0)/100))*.16;
+  gain.connect(ctx.destination);
+
+  const patterns={
+    bell:[[880,0,.12],[1174,.13,.18]],
+    chime:[[659,0,.12],[784,.12,.12],[988,.24,.22]],
+    pop:[[520,0,.08],[740,.08,.11]],
+    alert:[[880,0,.1],[880,.16,.1],[1046,.32,.16]],
+    classic:[[523,0,.12],[659,.14,.12],[784,.28,.2]]
+  };
+  const pattern=patterns[name]||patterns.bell;
+  const now=ctx.currentTime;
+  for(const [frequency,offset,duration] of pattern){
+    const osc=ctx.createOscillator();
+    osc.type='sine';
+    osc.frequency.value=frequency;
+    osc.connect(gain);
+    osc.start(now+offset);
+    osc.stop(now+offset+duration);
+  }
+  setTimeout(()=>ctx.close().catch(()=>{}),900);
+}
+
+$('#previewNotificationSoundBtn')?.addEventListener('click',()=>{
+  playNotificationSound($('#setNotificationSound').value,$('#setNotificationVolume').value);
+});
 
 function normalizePriceKey(value){
   return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
