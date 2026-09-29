@@ -16,7 +16,7 @@
 <body class="account-body">
   <header class="public-header">
     <div class="shell public-header-row">
-      <a class="public-brand" href="../"><span class="public-brand-mark">🍕</span><span><strong id="accountStoreName">Pizzaria</strong><small>Voltar ao cardápio</small></span></a>
+      <a class="public-brand" href="../"><span class="public-brand-mark"><span class="ui-icon icon-pizza" aria-hidden="true"></span></span><span><strong id="accountStoreName">Pizzaria</strong><small>Voltar ao cardápio</small></span></a>
       <div class="public-header-actions account-header-actions">
         <a class="header-action" href="../"><span>←</span><span class="header-action-copy"><small>Continuar comprando</small><strong>Cardápio</strong></span></a>
       </div>
@@ -26,24 +26,24 @@
   <main class="shell account-layout">
     <aside class="account-sidebar panel">
       <div class="account-profile-summary">
-        <div id="accountBigAvatar" class="account-big-avatar">👤</div>
+        <div id="accountBigAvatar" class="account-big-avatar"><span class="ui-icon icon-user-round" aria-hidden="true"></span></div>
         <strong id="accountProfileName">Minha conta</strong>
         <small id="accountProfileEmail" class="muted"></small>
       </div>
       <nav class="account-nav">
-        <button class="account-nav-item active" data-section="profile">👤 <span>Meus dados</span></button>
-        <button class="account-nav-item" data-section="addresses">📍 <span>Endereços</span></button>
-        <button class="account-nav-item" data-section="orders">🧾 <span>Meus pedidos</span></button>
-        <button class="account-nav-item" data-section="coupons">🎟️ <span>Cupons</span></button>
-        <button class="account-nav-item" data-section="favorites">♥ <span>Favoritos</span></button>
+        <button class="account-nav-item active" data-section="profile" type="button"><span class="ui-icon icon-user-round" aria-hidden="true"></span><span>Meus dados</span></button>
+        <button class="account-nav-item" data-section="addresses" type="button"><span class="ui-icon icon-map-pin" aria-hidden="true"></span><span>Endereços</span></button>
+        <button class="account-nav-item" data-section="orders" type="button"><span class="ui-icon icon-receipt-text" aria-hidden="true"></span><span>Meus pedidos</span></button>
+        <button class="account-nav-item" data-section="coupons" type="button"><span class="ui-icon icon-ticket-percent" aria-hidden="true"></span><span>Cupons</span></button>
+        <button class="account-nav-item" data-section="favorites" type="button"><span class="ui-icon icon-heart" aria-hidden="true"></span><span>Favoritos</span></button>
         <div class="account-nav-divider"></div>
-        <button id="switchAccountBtn" class="account-nav-item account-nav-action" type="button">⇄ <span>Trocar usuário</span></button>
-        <button id="accountLogoutBtn" class="account-nav-item account-nav-action danger" type="button">↪ <span>Sair</span></button>
+        <button id="switchAccountBtn" class="account-nav-item account-nav-action" type="button"><span class="ui-icon icon-repeat-2" aria-hidden="true"></span><span>Trocar usuário</span></button>
+        <button id="accountLogoutBtn" class="account-nav-item account-nav-action danger" type="button"><span class="ui-icon icon-log-out" aria-hidden="true"></span><span>Sair</span></button>
       </nav>
     </aside>
 
     <section class="account-main">
-      <div id="accountLoading" class="panel settings-card">Carregando sua conta...</div>
+      <div id="accountLoading" class="panel" aria-label="Carregando sua conta"><div class="skeleton-row"><span class="skeleton skeleton-square"></span><span class="skeleton-stack"><span class="skeleton skeleton-line skeleton-line-lg"></span><span class="skeleton skeleton-line"></span></span><span class="skeleton skeleton-pill"></span></div><div class="skeleton-row"><span class="skeleton skeleton-square"></span><span class="skeleton-stack"><span class="skeleton skeleton-line skeleton-line-lg"></span><span class="skeleton skeleton-line"></span></span><span class="skeleton skeleton-pill"></span></div></div>
       <div id="accountGuest" class="panel settings-card hidden">
         <h2>Entre para acessar sua conta</h2>
         <p class="muted">Sua sessão terminou. Volte ao cardápio e faça login novamente.</p>
@@ -54,7 +54,7 @@
         <div class="section-heading"><div><span class="eyebrow">MINHA CONTA</span><h1>Meus dados</h1></div></div>
         <form id="profileForm" class="panel settings-card account-form">
           <div class="profile-photo-editor">
-            <div id="profilePhotoPreview" class="profile-photo-preview">👤</div>
+            <div id="profilePhotoPreview" class="profile-photo-preview"><span class="ui-icon icon-user-round" aria-hidden="true"></span></div>
             <div class="profile-photo-actions">
               <div><strong>Foto de perfil</strong><small class="muted">A foto do Google é usada automaticamente. Você também pode escolher uma foto própria.</small></div>
               <input id="profilePhotoFile" class="hidden" type="file" accept="image/png,image/jpeg,image/webp">
