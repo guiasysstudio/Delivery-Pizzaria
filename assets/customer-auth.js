@@ -70,6 +70,11 @@ export function normalizePhone(value){
   return String(value||'').replace(/\D/g,'').slice(0,11);
 }
 
+export function validPhone(value){
+  const digits=normalizePhone(value);
+  return digits.length===10||digits.length===11;
+}
+
 export function formatPhone(value){
   const d=normalizePhone(value);
   if(d.length<=2) return d?('('+d):'';
