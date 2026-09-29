@@ -11,6 +11,7 @@ const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
 const placeholder='./assets/products/placeholder.svg';
+const SECURE_ORDER_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/createOrder';
 
 let categories=[],products=[],promotions=[],settings=null;
 let cart=JSON.parse(localStorage.getItem('deliveryCart')||'[]');
@@ -1052,6 +1053,83 @@ function updateChangePreview(){
   $('#changePreview').classList.toggle('invalid',diff<0);
 }
 
+function secureOrderErrorMessage(code,data={}){
+  const map={
+    store_closed:'A pizzaria está fechada para novos pedidos.',
+    invalid_items:'Revise os itens do carrinho.',
+    product_unavailable:'Um dos produtos não está mais disponível.',
+    invalid_size:'Um dos tamanhos escolhidos não está mais disponível.',
+    half_half_not_allowed:'A combinação meio a meio escolhida não está mais disponível.',
+    invalid_second_flavor:'O segundo sabor escolhido não está mais disponível.',
+    second_flavor_size_unavailable:'O segundo sabor não está disponível nesse tamanho.',
+    invalid_extra:'Um adicional escolhido não está mais disponível.',
+    minimum_order:'O pedido não atingiu o valor mínimo.',
+    coupon_not_found:'Cupom não encontrado.',
+    coupon_inactive:'Esse cupom não está ativo.',
+    coupon_minimum_order:'O pedido não atingiu o mínimo exigido pelo cupom.',
+    coupon_not_eligible:'Sua conta ainda não atende às regras desse cupom.',
+    address_required:'Selecione um endereço de entrega.',
+    address_not_found:'O endereço selecionado não foi encontrado.',
+    delivery_not_supported:'Esse endereço está fora da área de entrega.',
+    invalid_payment:'Escolha uma forma de pagamento válida.',
+    invalid_change:'O valor informado para troco é menor que o total.',
+    phone_required:'Informe um telefone de contato.'
+  };
+  return map[code]||data?.message||'Não foi possível validar o pedido no servidor.';
+}
+
+async function createOrderSecurely({type,address,profilePhone,changeFor}){
+  const token=await customer.getIdToken();
+  const payload={
+    fulfillment:type,
+    addressId:type==='delivery'?address?.id||'':null,
+    phone:profilePhone,
+    note:$('#orderNote').value.trim(),
+    couponCode:activeCoupon?.code||activeCoupon?.id||'',
+    payment:{
+      method:selectedPayment,
+      needsChange:selectedPayment.toLowerCase().includes('dinheiro')&&$('#needsChange').checked,
+      changeFor
+    },
+    items:cart.map(item=>({
+      productId:item.productId,
+      flavorProductIds:item.flavorProductIds||[item.productId],
+      sizeName:item.size?.name||'',
+      extras:(item.extras||[]).map(x=>x.name),
+      qty:Number(item.qty||1),
+      note:item.note||''
+    }))
+  };
+
+  let response;
+  try{
+    response=await fetch(SECURE_ORDER_ENDPOINT,{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':'Bearer '+token
+      },
+      body:JSON.stringify(payload)
+    });
+  }catch(err){
+    console.warn('Function segura ainda indisponível; usando fluxo compatível.',err);
+    return null;
+  }
+
+  if(response.status===404){
+    console.warn('Function createOrder ainda não publicada; usando fluxo compatível.');
+    return null;
+  }
+
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok){
+    const err=new Error(secureOrderErrorMessage(data.error,data));
+    err.code=data.error||'secure-order-failed';
+    throw err;
+  }
+  return data;
+}
+
 $('#checkoutForm').addEventListener('submit',async e=>{
   e.preventDefault();
   $('#checkoutError').classList.add('hidden');
@@ -1088,7 +1166,7 @@ $('#checkoutForm').addEventListener('submit',async e=>{
   const btn=$('#sendOrderBtn');
   btn.disabled=true;btn.textContent='Enviando pedido...';
   try{
-    const autoAccepted=settings.autoAcceptOrders===true;
+    let autoAccepted=settings.autoAcceptOrders===true;
     const profileName=customerProfile?.name||customer.displayName||'Cliente';
     const profilePhone=$('#checkoutPhone').value.trim();
 
@@ -1102,62 +1180,79 @@ $('#checkoutForm').addEventListener('submit',async e=>{
     }
 
     let orderNumber=0;
-    const orderRef=doc(collection(db,'orders'));
-    const counterRef=doc(db,'counters','orders');
+    let serverResult=null;
 
-    await runTransaction(db,async tx=>{
-      const snap=await tx.get(counterRef);
-      orderNumber=(snap.exists()?Number(snap.data().value||0):0)+1;
+    try{
+      serverResult=await createOrderSecurely({type,address,profilePhone,changeFor});
+    }catch(serverError){
+      console.error('Pedido rejeitado pela validação segura:',serverError);
+      return showCheckoutError(serverError.message||'Não foi possível validar o pedido.');
+    }
 
-      const payload={
-        orderNumber,
-        customerId:customer.uid,
-        status:autoAccepted?'accepted':'pending',
-        autoAccepted,
-        createdAt:serverTimestamp(),
-        acceptedAt:autoAccepted?serverTimestamp():null,
-        customer:{
-          name:profileName,
-          email:customer.email||'',
-          phone:profilePhone
-        },
-        fulfillment:type,
-        address:type==='delivery'?{
-          id:address.id,label:address.label||'',recipient:address.recipient||profileName,phone:address.phone||profilePhone,
-          zip:address.zip||'',street:address.street||'',number:address.number||'',complement:address.complement||'',
-          neighborhood:address.neighborhood||'',city:address.city||'',state:address.state||'',reference:address.reference||'',
-          location:address.location||null
-        }:null,
-        deliveryPricing:type==='delivery'?{
-          mode:quote.mode||settings.deliveryPricingMode||'fixed',
-          fee,
-          distanceKm:Number.isFinite(quote.distanceKm)?Number(quote.distanceKm.toFixed(3)):null,
-          zone:quote.zone?.neighborhood||null,
-          maxKm:quote.maxKm??null
-        }:{mode:'pickup',fee:0},
-        payment:{
-          method:selectedPayment,
-          needsChange:changeFor>0,
-          changeFor,
-          changeAmount
-        },
-        note:$('#orderNote').value.trim(),
-        items:cart.map(({lineId,...x})=>x),
-        subtotal,
-        discount,
-        coupon:activeCoupon?{
-          id:activeCoupon.id,
-          code:activeCoupon.code||activeCoupon.id,
-          type:activeCoupon.type,
-          value:Number(activeCoupon.value||0),
-          amount:discount
-        }:null,
-        deliveryFee:fee,total
-      };
+    if(serverResult){
+      orderNumber=Number(serverResult.orderNumber||0);
+      autoAccepted=serverResult.status==='accepted';
+    }else{
+      // Compatibilidade temporária enquanto a Cloud Function ainda não estiver publicada.
+      // Depois do deploy da Function, este trecho deixa de ser usado.
+      const orderRef=doc(collection(db,'orders'));
+      const counterRef=doc(db,'counters','orders');
 
-      tx.set(counterRef,{value:orderNumber,updatedAt:serverTimestamp()},{merge:true});
-      tx.set(orderRef,payload);
-    });
+      await runTransaction(db,async tx=>{
+        const snap=await tx.get(counterRef);
+        orderNumber=(snap.exists()?Number(snap.data().value||0):0)+1;
+
+        const payload={
+          orderNumber,
+          customerId:customer.uid,
+          status:autoAccepted?'accepted':'pending',
+          autoAccepted,
+          createdAt:serverTimestamp(),
+          acceptedAt:autoAccepted?serverTimestamp():null,
+          customer:{
+            name:profileName,
+            email:customer.email||'',
+            phone:profilePhone
+          },
+          fulfillment:type,
+          address:type==='delivery'?{
+            id:address.id,label:address.label||'',recipient:address.recipient||profileName,phone:address.phone||profilePhone,
+            zip:address.zip||'',street:address.street||'',number:address.number||'',complement:address.complement||'',
+            neighborhood:address.neighborhood||'',city:address.city||'',state:address.state||'',reference:address.reference||'',
+            location:address.location||null
+          }:null,
+          deliveryPricing:type==='delivery'?{
+            mode:quote.mode||settings.deliveryPricingMode||'fixed',
+            fee,
+            distanceKm:Number.isFinite(quote.distanceKm)?Number(quote.distanceKm.toFixed(3)):null,
+            zone:quote.zone?.neighborhood||null,
+            maxKm:quote.maxKm??null
+          }:{mode:'pickup',fee:0},
+          payment:{
+            method:selectedPayment,
+            needsChange:changeFor>0,
+            changeFor,
+            changeAmount
+          },
+          note:$('#orderNote').value.trim(),
+          items:cart.map(({lineId,...x})=>x),
+          subtotal,
+          discount,
+          coupon:activeCoupon?{
+            id:activeCoupon.id,
+            code:activeCoupon.code||activeCoupon.id,
+            type:activeCoupon.type,
+            value:Number(activeCoupon.value||0),
+            amount:discount
+          }:null,
+          deliveryFee:fee,total
+        };
+
+        tx.set(counterRef,{value:orderNumber,updatedAt:serverTimestamp()},{merge:true});
+        tx.set(orderRef,payload);
+      });
+    }
+
     cart=[];saveCart();
     $('#checkoutDialog').close();
     $('#successOrderNumber').textContent='#'+String(orderNumber).padStart(4,'0');
