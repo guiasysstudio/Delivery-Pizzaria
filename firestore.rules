@@ -217,6 +217,12 @@ service cloud.firestore {
       allow read: if hasPermission('cashView');
       allow create, update: if hasPermission('cashOperate');
       allow delete: if isMaster();
+
+      match /movements/{movementId} {
+        allow read: if hasPermission('cashView');
+        allow create: if hasPermission('cashOperate');
+        allow update, delete: if isMaster();
+      }
     }
 
     match /cashState/{stateId} {
