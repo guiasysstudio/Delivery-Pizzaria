@@ -38,6 +38,23 @@ Sistema web completo de delivery para pizzaria, com experiência de cliente, ope
 - Pedir novamente.
 - Carteira de cupons conquistados.
 
+## Interface e identidade visual
+
+- Ícones SVG locais baseados em Lucide, sem dependência de CDN.
+- Toasts internos para sucesso, aviso, informação e erro.
+- Modais de confirmação próprios para ações destrutivas.
+- Skeletons de carregamento e estados vazios orientativos.
+- Navegação por teclado com `focus-visible`.
+- Áreas de toque ampliadas para celular.
+- Mensagens dinâmicas preparadas para leitores de tela.
+- Cor principal configurável por pizzaria.
+- Logo personalizada.
+- Imagem/banner de destaque opcional.
+- Favicon e pacote PWA local.
+- Respeito a `prefers-reduced-motion`.
+
+A licença dos ícones está armazenada em `assets/icons/LICENSE-LUCIDE.txt`.
+
 ## Pagamento
 
 O sistema não realiza pagamento online.
@@ -351,6 +368,7 @@ O workflow **Validate Delivery Pizzaria** verifica:
 - referências de IDs entre JavaScript e HTML;
 - IDs HTML duplicados;
 - manifesto PWA;
+- guardrails de UI profissional: sem `alert()/confirm()` nativos, sem emojis na interface, botões com `type` explícito e SVGs locais válidos;
 - arquivos obrigatórios.
 
 O workflow **Build Print Agent** compila o Windows x64 e atualiza o pacote estável.
