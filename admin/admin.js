@@ -175,6 +175,7 @@ const defaults={
   storeLocation:null,
   storeLogo:'',
   primaryColor:'#b91c1c',
+  heroBanner:'',
   googleMapsUrl:'',
   customerCancelMinutes:2,
   notificationSound:'bell',
@@ -2731,6 +2732,7 @@ function renderSettings(){
   const primaryColor=applyBrandTheme(settings.primaryColor||'#b91c1c');
   $('#setPrimaryColor').value=primaryColor;
   $('#primaryColorValue').textContent=primaryColor.toUpperCase();
+  $('#setHeroBanner').value=settings.heroBanner||'';
   $('#setGoogleMapsUrl').value=settings.googleMapsUrl||'';
   $('#setCustomerCancelMinutes').value=settings.customerCancelMinutes??2;
   $('#setNotificationSound').value=settings.notificationSound||'bell';
@@ -2824,6 +2826,7 @@ $('#settingsForm').onsubmit=async e=>{
     storeState:$('#setStoreState').value.trim().toUpperCase(),
     storeLogo:$('#setStoreLogo').value.trim(),
     primaryColor:$('#setPrimaryColor').value||'#b91c1c',
+    heroBanner:$('#setHeroBanner').value.trim(),
     googleMapsUrl:$('#setGoogleMapsUrl').value.trim(),
     storeAddress:[
       [$('#setStoreStreet').value.trim(),$('#setStoreNumber').value.trim()].filter(Boolean).join(', '),
