@@ -708,6 +708,8 @@ function deliveryFeeFromSettings(address){
 
 function expectedDeliveryFee(order){
   if(order.fulfillment==='pickup') return 0;
+  const snapshotFee=Number(order.deliveryPricing?.fee);
+  if(Number.isFinite(snapshotFee)&&snapshotFee>=0) return snapshotFee;
   return deliveryFeeFromSettings(order.address).fee;
 }
 
@@ -809,20 +811,22 @@ function verifyOrderPricing(order){
 
   let expectedDiscount=0;
   if(order.coupon){
-    const coupon=coupons.find(cp=>cp.id===order.coupon.id||cp.code===order.coupon.code);
-    if(!coupon){
-      issues.push('Cupom do pedido não existe no cadastro atual.');
+    const snapshotAmount=Number(order.coupon.amount);
+    if(Number.isFinite(snapshotAmount)&&snapshotAmount>=0){
+      expectedDiscount=Math.max(0,Math.min(expectedSubtotal,snapshotAmount));
     }else{
-      const sameType=coupon.type===order.coupon.type;
-      const sameValue=Math.abs(Number(coupon.value||0)-Number(order.coupon.value||0))<0.009;
-      if(!sameType||!sameValue){
-        issues.push('Dados do cupom divergem do cadastro.');
+      // Compatibilidade com pedidos antigos que não gravavam o valor final do
+      // cupom. Para pedidos novos, o snapshot é a fonte histórica.
+      const coupon=coupons.find(cp=>cp.id===order.coupon.id||cp.code===order.coupon.code);
+      if(coupon){
+        expectedDiscount=coupon.type==='percentage'
+          ?expectedSubtotal*Number(coupon.value||0)/100
+          :Number(coupon.value||0);
+        if(Number(coupon.maxDiscount||0)>0) expectedDiscount=Math.min(expectedDiscount,Number(coupon.maxDiscount));
+        expectedDiscount=Math.max(0,Math.min(expectedSubtotal,expectedDiscount));
+      }else{
+        expectedDiscount=Number(order.discount||0);
       }
-      expectedDiscount=coupon.type==='percentage'
-        ?expectedSubtotal*Number(coupon.value||0)/100
-        :Number(coupon.value||0);
-      if(Number(coupon.maxDiscount||0)>0) expectedDiscount=Math.min(expectedDiscount,Number(coupon.maxDiscount));
-      expectedDiscount=Math.max(0,Math.min(expectedSubtotal,expectedDiscount));
     }
   }
   if(Math.abs(expectedDiscount-Number(order.discount||0))>0.009){
