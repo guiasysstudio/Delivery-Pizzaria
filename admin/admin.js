@@ -38,6 +38,7 @@ const permissionDefinitions=[
   ['promotionsManage','Comercial','Gerenciar promoções'],
   ['couponsManage','Comercial','Gerenciar cupons'],
   ['customersView','Clientes','Visualizar clientes'],
+  ['customersEdit','Clientes','Editar dados públicos de clientes'],
   ['printingManage','Operação','Configurar impressão'],
   ['cashView','Financeiro','Visualizar caixa e financeiro'],
   ['cashOperate','Financeiro','Abrir e fechar caixa'],
@@ -50,31 +51,31 @@ const defaultRoleTemplates={
   manager:{name:'Gerente',permissions:{
     ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true,
     productsView:true,productsCreate:true,productsEdit:true,productsDelete:true,categoriesManage:true,
-    promotionsManage:true,couponsManage:true,customersView:true,printingManage:true,cashView:true,cashOperate:true,
+    promotionsManage:true,couponsManage:true,customersView:true,customersEdit:true,printingManage:true,cashView:true,cashOperate:true,
     settingsManage:true,usersManage:false,rolesManage:false
   }},
   cashier:{name:'Caixa',permissions:{
     ordersView:true,ordersAccept:true,ordersPrepare:false,ordersDispatch:false,ordersComplete:false,ordersCancel:true,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
-    promotionsManage:false,couponsManage:false,customersView:true,printingManage:true,cashView:true,cashOperate:true,
+    promotionsManage:false,couponsManage:false,customersView:true,customersEdit:false,printingManage:true,cashView:true,cashOperate:true,
     settingsManage:false,usersManage:false,rolesManage:false
   }},
   kitchen:{name:'Cozinha',permissions:{
     ordersView:true,ordersAccept:false,ordersPrepare:true,ordersDispatch:false,ordersComplete:false,ordersCancel:false,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
-    promotionsManage:false,couponsManage:false,customersView:false,printingManage:false,cashView:false,cashOperate:false,
+    promotionsManage:false,couponsManage:false,customersView:false,customersEdit:false,printingManage:false,cashView:false,cashOperate:false,
     settingsManage:false,usersManage:false,rolesManage:false
   }},
   delivery:{name:'Entrega',permissions:{
     ordersView:true,ordersAccept:false,ordersPrepare:false,ordersDispatch:true,ordersComplete:true,ordersCancel:false,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
-    promotionsManage:false,couponsManage:false,customersView:false,printingManage:false,cashView:false,cashOperate:false,
+    promotionsManage:false,couponsManage:false,customersView:false,customersEdit:false,printingManage:false,cashView:false,cashOperate:false,
     settingsManage:false,usersManage:false,rolesManage:false
   }},
   operator:{name:'Operador',permissions:{
     ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
-    promotionsManage:false,couponsManage:false,customersView:false,printingManage:false,cashView:false,cashOperate:false,
+    promotionsManage:false,couponsManage:false,customersView:false,customersEdit:false,printingManage:false,cashView:false,cashOperate:false,
     settingsManage:false,usersManage:false,rolesManage:false
   }}
 };
@@ -162,11 +163,42 @@ function roleLabel(role){
 function isMaster(){
   return currentProfile?.role==='master';
 }
+const permissionDependencies={
+  ordersAccept:'ordersView',
+  ordersPrepare:'ordersView',
+  ordersDispatch:'ordersView',
+  ordersComplete:'ordersView',
+  ordersCancel:'ordersView',
+  productsCreate:'productsView',
+  productsEdit:'productsView',
+  productsDelete:'productsView',
+  categoriesManage:'productsView',
+  promotionsManage:'productsView',
+  cashOperate:'cashView',
+  customersEdit:'customersView'
+};
+
+function withPermissionDependencies(source={}){
+  const permissions={...source};
+  let changed=true;
+  while(changed){
+    changed=false;
+    for(const [permission,required] of Object.entries(permissionDependencies)){
+      if(permissions[permission]===true&&permissions[required]!==true){
+        permissions[required]=true;
+        changed=true;
+      }
+    }
+  }
+  return permissions;
+}
+
 function rolePermissions(role=currentProfile?.role){
   if(role==='master'){
     return Object.fromEntries(permissionDefinitions.map(([key])=>[key,true]));
   }
-  return roles.find(r=>r.id===role)?.permissions||defaultRoleTemplates[role]?.permissions||{};
+  const raw=roles.find(r=>r.id===role)?.permissions||defaultRoleTemplates[role]?.permissions||{};
+  return withPermissionDependencies(raw);
 }
 function hasPermission(key){
   return isMaster()||rolePermissions()[key]===true;
@@ -307,12 +339,20 @@ async function initializeAdmin(){
 
   // Produtos também são carregados para quem trabalha com pedidos, pois o
   // painel confere os preços antes de aceitar/imprimir.
-  if(hasPermission('ordersView')||hasPermission('productsView')||hasPermission('productsCreate')||hasPermission('productsEdit')||hasPermission('promotionsManage')){
+  if(
+    hasPermission('ordersView') ||
+    hasPermission('productsView') ||
+    hasPermission('productsCreate') ||
+    hasPermission('productsEdit') ||
+    hasPermission('productsDelete') ||
+    hasPermission('categoriesManage') ||
+    hasPermission('promotionsManage')
+  ){
     tasks.push(loadCategories(),loadProducts());
   }
 
-  if(hasPermission('customersView')) tasks.push(loadCustomers());
-  if(hasPermission('usersManage')) tasks.push(loadUsers());
+  if(hasPermission('customersView')||hasPermission('customersEdit')) tasks.push(loadCustomers());
+  if(hasPermission('usersManage')||hasPermission('rolesManage')) tasks.push(loadUsers());
   if(hasPermission('ordersView')||hasPermission('promotionsManage')) tasks.push(loadPromotions());
   if(hasPermission('ordersView')||hasPermission('couponsManage')) tasks.push(loadCoupons());
   if(hasPermission('cashView')) tasks.push(loadCashSessions());
@@ -472,7 +512,7 @@ function allowedViews(){
   if(hasPermission('categoriesManage')) views.push('categories');
   if(hasPermission('promotionsManage')) views.push('promotions');
   if(hasPermission('couponsManage')) views.push('coupons');
-  if(hasPermission('customersView')) views.push('customers');
+  if(hasPermission('customersView')||hasPermission('customersEdit')) views.push('customers');
   if(hasPermission('printingManage')) views.push('printing');
   if(hasPermission('usersManage')) views.push('users');
   if(hasPermission('rolesManage')) views.push('roles');
@@ -1349,6 +1389,7 @@ function renderRoles(){
 function renderPermissionEditor(selected={}){
   const host=$('#rolePermissionsEditor');
   if(!host) return;
+  selected=withPermissionDependencies(selected);
   const groups={};
   for(const [key,group,label] of permissionDefinitions){
     (groups[group]??=[]).push([key,label]);
@@ -1359,6 +1400,22 @@ function renderPermissionEditor(selected={}){
       ${items.map(([key,label])=>`<label class="permission-item"><input type="checkbox" data-permission="${key}" ${selected[key]?'checked':''}><span>${esc(label)}</span></label>`).join('')}
     </section>
   `).join('');
+
+  $$('[data-permission]').forEach(input=>input.addEventListener('change',()=>{
+    const required=permissionDependencies[input.dataset.permission];
+    if(input.checked&&required){
+      const dependency=$(`[data-permission="${required}"]`);
+      if(dependency) dependency.checked=true;
+    }
+    if(!input.checked){
+      for(const [permission,dependency] of Object.entries(permissionDependencies)){
+        if(dependency===input.dataset.permission){
+          const dependent=$(`[data-permission="${permission}"]`);
+          if(dependent) dependent.checked=false;
+        }
+      }
+    }
+  }));
 }
 
 function editRole(id=null){
@@ -1384,8 +1441,9 @@ $('#roleEditorForm')?.addEventListener('submit',async e=>{
     $('#roleEditorError').classList.remove('hidden');
     return;
   }
-  const permissions={};
+  let permissions={};
   $$('[data-permission]').forEach(input=>permissions[input.dataset.permission]=input.checked);
+  permissions=withPermissionDependencies(permissions);
   try{
     if(id){
       await updateDoc(doc(db,'roles',id),{name,permissions,active:true,updatedAt:serverTimestamp()});
