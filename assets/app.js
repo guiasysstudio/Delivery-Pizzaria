@@ -961,6 +961,19 @@ function setAuthMode(mode){
 $('#authCloseBtn').onclick=()=>{$('#authDialog').close();afterAuthAction=null;};
 $('#showRegisterBtn').onclick=()=>setAuthMode('register');
 $('#showLoginBtn').onclick=()=>setAuthMode('login');
+async function redirectIncompleteCustomerProfile(user){
+  if(!user) return false;
+  try{
+    const profile=await getCustomerProfile(user.uid);
+    if(profile?.identityComplete===true&&validFullName(profile?.name||user.displayName||'')) return false;
+  }catch(err){
+    console.warn('Não foi possível conferir se o cadastro está completo.',err);
+  }
+  localStorage.setItem('deliveryReturnAfterProfile','../');
+  location.href='./account/#profile';
+  return true;
+}
+
 let googleLoginBusy=false;
 
 $('#googleLoginBtn').onclick=async()=>{
@@ -973,9 +986,10 @@ $('#googleLoginBtn').onclick=async()=>{
   $('#customerAuthError').classList.add('hidden');
 
   try{
-    await loginWithGoogle();
+    const user=await loginWithGoogle();
     if($('#authDialog').open) $('#authDialog').close();
     clearLoginQuery();
+    if(await redirectIncompleteCustomerProfile(user)) return;
   }catch(err){
     console.error('Falha no login Google:',err);
     showAuthError(friendlyAuthError(err));
@@ -989,9 +1003,10 @@ $('#googleLoginBtn').onclick=async()=>{
 $('#loginCustomerForm').onsubmit=async e=>{
   e.preventDefault();
   try{
-    await loginWithEmail($('#customerLoginEmail').value,$('#customerLoginPassword').value);
+    const user=await loginWithEmail($('#customerLoginEmail').value,$('#customerLoginPassword').value);
     if($('#authDialog').open) $('#authDialog').close();
     clearLoginQuery();
+    if(await redirectIncompleteCustomerProfile(user)) return;
   }catch(err){
     showAuthError(friendlyAuthError(err));
   }
