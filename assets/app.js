@@ -641,7 +641,12 @@ function openProduct(id){
   currentSecondFlavorId='';
   $('#modalName').textContent=currentProduct.name;
   $('#modalDescription').textContent=currentProduct.description||'';
-  $('#modalImage').src=pathImage(currentProduct.image);
+  const modalImage=$('#modalImage');
+  modalImage.onerror=()=>{
+    modalImage.onerror=null;
+    modalImage.src=placeholder;
+  };
+  modalImage.src=pathImage(currentProduct.image);
   $('#modalFeatured').classList.toggle('hidden',!currentProduct.featured);
   $('#itemNote').value='';
   $('#favoriteBtn').textContent=customer&&favorites.has(currentProduct.id)?'♥':'♡';
