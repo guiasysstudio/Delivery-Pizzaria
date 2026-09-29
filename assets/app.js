@@ -458,10 +458,14 @@ function renderFlavorOptions(){
 
 function renderOptionGroups(){
   const sizes=currentProduct.sizes||[];
-  $('#sizeOptions').innerHTML=sizes.length?`<div class="option-group"><h3>Escolha o tamanho</h3><div class="option-list">${sizes.map((s,i)=>`<label class="option-choice"><span><input type="radio" name="size" value="${i}" ${i===0?'checked':''}> ${esc(s.name)}</span><strong>${money(s.price)}</strong></label>`).join('')}</div></div>`:'';
+  $('#sizeOptions').innerHTML=sizes.length?`<div class="option-group"><h3>Escolha o tamanho</h3><div class="option-list">${sizes.map((s,i)=>{
+    const raw=Number(s.price||0);
+    const promo=productDisplayPrice(currentProduct,raw);
+    return `<label class="option-choice"><span><input type="radio" name="size" value="${i}" ${i===0?'checked':''}> ${esc(s.name)}</span><strong>${promo<raw?`<del class="old-price">${money(raw)}</del> `:''}${money(promo)}</strong></label>`;
+  }).join('')}</div></div>`:'';
   const extras=currentProduct.extras||[];
   $('#extraOptions').innerHTML=extras.length?`<div class="option-group"><h3>Adicionais</h3><div class="option-list">${extras.map((x,i)=>`<label class="option-choice"><span><input type="checkbox" name="extra" value="${i}"> ${esc(x.name)}</span><strong>+ ${money(x.price)}</strong></label>`).join('')}</div></div>`:'';
-  $$('input[name=size],input[name=extra]').forEach(i=>i.onchange=updateModalPrice);
+  $('input[name=size],input[name=extra]').forEach(i=>i.onchange=updateModalPrice);
 }
 
 function selectedSize(){
