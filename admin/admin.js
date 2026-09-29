@@ -788,6 +788,18 @@ function orderAddressText(o){
   return `${o.customer?.address||''}, ${o.customer?.number||''} — ${o.customer?.neighborhood||''}`;
 }
 
+function deliveryPricingText(order){
+  if(order.fulfillment==='pickup') return 'Retirada no local';
+  const snap=order.deliveryPricing||{};
+  if(snap.mode==='km'&&Number.isFinite(Number(snap.distanceKm))){
+    return `Frete por km • ${Number(snap.distanceKm).toFixed(1).replace('.',',')} km • ${money(order.deliveryFee)}`;
+  }
+  if(snap.mode==='neighborhood'){
+    return `Frete por bairro${snap.zone?` • ${snap.zone}`:''} • ${money(order.deliveryFee)}`;
+  }
+  return `Frete fixo • ${money(order.deliveryFee)}`;
+}
+
 function openOrder(id){
   const o=orders.find(x=>x.id===id);
   if(!o) return;
@@ -829,6 +841,7 @@ function openOrder(id){
         <h3>Pagamento</h3>
         <p><strong>${esc(o.payment?.method||'')}</strong></p>
         ${changeInfo}
+        <p>${esc(deliveryPricingText(o))}</p>
         <p>Total: <strong>${money(o.total)}</strong></p>
       </div>
     </div>
@@ -944,6 +957,16 @@ function receiptText(o){
   lines.push('CLIENTE: '+(o.customer?.name||''));
   lines.push('FONE: '+(o.customer?.phone||''));
   lines.push(o.fulfillment==='pickup'?'RETIRADA NO LOCAL':'ENTREGA: '+orderAddressText(o));
+  if(o.fulfillment!=='pickup'){
+    const deliverySnap=o.deliveryPricing||{};
+    if(deliverySnap.mode==='km'&&Number.isFinite(Number(deliverySnap.distanceKm))){
+      lines.push('FRETE: POR KM • '+Number(deliverySnap.distanceKm).toFixed(1).replace('.',',')+' KM');
+    }else if(deliverySnap.mode==='neighborhood'){
+      lines.push('FRETE: POR BAIRRO'+(deliverySnap.zone?' • '+deliverySnap.zone:''));
+    }else{
+      lines.push('FRETE: VALOR FIXO');
+    }
+  }
   lines.push(divider);
   lines.push('ITENS');
 
