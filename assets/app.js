@@ -86,6 +86,7 @@ const defaultSettings={
   storeLocation:null,
   storeLogo:'',
   primaryColor:'#b91c1c',
+  heroBanner:'',
   googleMapsUrl:'',
   whatsapp:'',
   customerCancelMinutes:2,
@@ -298,6 +299,22 @@ function renderStoreIdentity(){
     if(logo){
       aboutLogo.src=pathImage(logo);
       aboutLogo.onerror=()=>{aboutLogo.classList.add('hidden');aboutFallback.classList.remove('hidden');};
+    }
+  }
+
+  const banner=settings?.heroBanner||'';
+  const bannerImage=$('#heroBannerImage');
+  const bannerFallback=$('#heroPizzaFallback');
+  if(bannerImage&&bannerFallback){
+    bannerImage.classList.toggle('hidden',!banner);
+    bannerFallback.classList.toggle('hidden',!!banner);
+    if(banner){
+      bannerImage.src=pathImage(banner);
+      bannerImage.alt='Destaque da '+(settings?.storeName||'pizzaria');
+      bannerImage.onerror=()=>{
+        bannerImage.classList.add('hidden');
+        bannerFallback.classList.remove('hidden');
+      };
     }
   }
 
