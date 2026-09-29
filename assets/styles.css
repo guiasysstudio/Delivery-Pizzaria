@@ -516,6 +516,11 @@
 .icon-banknote{--icon:url('./icons/banknote.svg')}
 .icon-credit-card{--icon:url('./icons/credit-card.svg')}
 .icon-qr-code{--icon:url('./icons/qr-code.svg')}
+.icon-copy{--icon:url('./icons/copy.svg')}
+.icon-trash{--icon:url('./icons/trash.svg')}
+.icon-volume-2{--icon:url('./icons/volume-2.svg')}
+.icon-chevron-down{--icon:url('./icons/chevron-down.svg')}
+.icon-download{--icon:url('./icons/download.svg')}
 
 .icon-button-label{display:inline-flex;align-items:center;gap:8px}
 .nav-item>.ui-icon,.account-nav-item>.ui-icon{width:1.15rem;height:1.15rem}
