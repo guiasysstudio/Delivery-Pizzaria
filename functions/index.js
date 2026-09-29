@@ -166,7 +166,7 @@ export const uploadStoreLogo = onRequest(
     secrets: [githubToken],
     cors: [
       "https://guiasysstudio.github.io",
-      "https://guias.online",
+      "https://guiasys.online",
       /https:\/\/.*\.guiasys\.online$/
     ],
     timeoutSeconds: 60,
@@ -528,7 +528,7 @@ function phoneDigits(value) {
 
 const customerCors=[
   "https://guiasysstudio.github.io",
-  "https://guias.online",
+  "https://guiasys.online",
   /https:\/\/.*\.guiasys\.online$/
 ];
 
