@@ -19,6 +19,7 @@ jobs:
         run: |
           node --check assets/app.js
           node --check assets/customer-auth.js
+          node --check assets/ui.js
           node --check account/account.js
           node --check account/receipt.js
           node --check admin/admin.js
@@ -94,6 +95,87 @@ jobs:
               print(f'{path}: IDs OK ({len(parser.ids)})')
           PY
 
+      - name: Check professional UI guardrails
+        run: |
+          python - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import re
+
+          ui_js = [
+              Path('assets/app.js'),
+              Path('account/account.js'),
+              Path('admin/admin.js'),
+              Path('assets/ui.js'),
+          ]
+          ui_html = [
+              Path('index.html'),
+              Path('account/index.html'),
+              Path('account/receipt.html'),
+              Path('admin/index.html'),
+              Path('admin/print.html'),
+              Path('404.html'),
+          ]
+
+          # Browser-native alert/confirm must not return to the product UI.
+          for path in ui_js:
+              text = path.read_text(encoding='utf-8')
+              hits = re.findall(r'\b(?:alert|confirm)\s*\(', text)
+              if hits:
+                  raise SystemExit(f'{path}: alert()/confirm() nativo encontrado: {hits[:5]}')
+
+          # Keep UI icons deterministic across Windows/Android/iOS.
+          emoji_re = re.compile(r'[\U0001F300-\U0001FAFF]')
+          for path in ui_js + ui_html:
+              text = path.read_text(encoding='utf-8')
+              if emoji_re.search(text):
+                  raise SystemExit(f'{path}: emoji encontrado; use SVG local em assets/icons')
+
+          class ButtonParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.missing = []
+              def handle_starttag(self, tag, attrs):
+                  if tag != 'button':
+                      return
+                  data = dict(attrs)
+                  if not data.get('type'):
+                      self.missing.append(data.get('id') or data.get('class') or '<sem id>')
+
+          for path in ui_html:
+              parser = ButtonParser()
+              parser.feed(path.read_text(encoding='utf-8'))
+              if parser.missing:
+                  raise SystemExit(f'{path}: botão sem type explícito: {parser.missing}')
+              print(f'{path}: button types OK')
+
+          css = Path('assets/styles.css').read_text(encoding='utf-8')
+          icon_dir = Path('assets/icons')
+          available = {p.stem for p in icon_dir.glob('*.svg')}
+          used = set()
+
+          for path in ui_html:
+              text = path.read_text(encoding='utf-8')
+              for attrs in re.findall(r'class=["\']([^"\']+)["\']', text):
+                  used.update(re.findall(r'\bicon-([a-z0-9-]+)\b', attrs))
+
+          for path in ui_js:
+              text = path.read_text(encoding='utf-8')
+              used.update(re.findall(r'iconHtml\(["\']([a-z0-9-]+)["\']', text))
+
+          ignored = {'button-label'}
+          used -= ignored
+          missing_files = sorted(used - available)
+          if missing_files:
+              raise SystemExit(f'Ícones SVG ausentes: {missing_files}')
+
+          missing_css = sorted(name for name in used if f'.icon-{name}' not in css)
+          if missing_css:
+              raise SystemExit(f'Ícones sem classe CSS: {missing_css}')
+
+          print(f'icon checks OK ({len(used)} ícones usados)')
+          PY
+
       - name: Check required files
         run: |
           test -f index.html
@@ -102,6 +184,8 @@ jobs:
           test -f account/receipt.html
           test -f account/receipt.js
           test -f firebase-config.js
+          test -f assets/ui.js
+          test -f assets/icons/LICENSE-LUCIDE.txt
           test -f firestore.rules
           test -f manifest.webmanifest
           test -f service-worker.js
