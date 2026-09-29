@@ -18,6 +18,7 @@ let selectedCategory='all';
 let currentProduct=null,currentQty=1,currentSecondFlavorId='';
 let customer=null,customerProfile=null,addresses=[],selectedAddressId=localStorage.getItem('deliverySelectedAddress')||'';
 let favorites=new Set(),afterAuthAction=null,selectedPayment='',activeCoupon=null,customerOrderStats={count:0,spent:0};
+let pendingCouponCode=normalizeCouponCode(new URLSearchParams(location.search).get('coupon')||'');
 
 const defaultSettings={
   storeName:'Delivery Pizzaria',
@@ -857,6 +858,11 @@ function openCheckout(){
     renderCart();
     $('#checkoutError').classList.add('hidden');
     $('#checkoutDialog').showModal();
+    if(pendingCouponCode&&!activeCoupon){
+      $('#couponCodeInput').value=pendingCouponCode;
+      pendingCouponCode='';
+      applyCoupon();
+    }
   }catch(err){
     console.error('Falha ao abrir checkout:',err);
     alert('Não foi possível abrir a finalização do pedido. Atualize a página e tente novamente.');
