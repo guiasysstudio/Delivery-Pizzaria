@@ -178,6 +178,18 @@
               <div id="deliveryKmBandsEmpty" class="repeat-empty">Nenhuma faixa de km cadastrada.</div>
               <label class="check-row"><input id="setRestrictDeliveryKm" type="checkbox" /><span>Não aceitar entrega acima da última faixa cadastrada</span></label>
             </div>
+
+            <div class="delivery-test-box">
+              <div>
+                <strong>Testar frete</strong>
+                <small class="muted">Digite um CEP de cliente para conferir a regra atual.</small>
+              </div>
+              <div class="delivery-test-controls">
+                <input id="deliveryTestZip" inputmode="numeric" maxlength="9" placeholder="CEP do cliente">
+                <button id="testDeliveryFeeBtn" class="btn btn-secondary" type="button">Calcular</button>
+              </div>
+              <div id="deliveryTestResult" class="delivery-test-result hidden"></div>
+            </div>
           </div>
           <div class="panel settings-card settings-wide"><h2>Horários</h2><p class="muted">Use HH:MM. Desmarque um dia para fechar.</p><div id="scheduleEditor" class="schedule-editor"></div></div>
           <div class="panel settings-card settings-wide"><div class="editor-section-head"><div><h2>Formas de pagamento</h2><p class="muted">O cliente escolhe uma destas opções no checkout.</p></div><button id="addPaymentMethodBtn" class="btn btn-secondary" type="button">+ Adicionar forma</button></div><div id="paymentMethodsEditor" class="simple-repeat-editor"></div><div id="paymentMethodsEmpty" class="repeat-empty">Nenhuma forma de pagamento cadastrada.</div></div>
