@@ -1172,7 +1172,7 @@ $('#registerCustomerForm').onsubmit=async e=>{
         :friendlyAuthError(err);
 
     if(auth.currentUser&&!code.startsWith('auth/')){
-      showToast(message+' Sua conta foi criada, mas o cadastro precisa ser concluído em Minha Conta.');
+      showToast(message+' Sua conta foi criada, mas o cadastro precisa ser concluído em Minha Conta.','warning',{duration:7000});
       location.href='./account/#profile';
       return;
     }
