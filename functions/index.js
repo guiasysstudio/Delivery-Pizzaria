@@ -211,3 +211,546 @@ export const grantLoyaltyCoupons = onDocumentUpdated(
   }
 );
 
+
+
+function normalizeText(value, max = 200) {
+  return String(value || "").trim().slice(0, max);
+}
+
+function normalizeKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function normalizeCouponCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .replace(/[^A-Z0-9_-]/g, "")
+    .slice(0, 30);
+}
+
+function currentScheduleState(settings) {
+  if (settings.openMode === "open") return true;
+  if (settings.openMode === "closed") return false;
+
+  const timezone = settings.timezone || "America/Porto_Velho";
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(now);
+
+  const values = Object.fromEntries(parts.map(p => [p.type, p.value]));
+  const dayIndex = ({ Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 })[values.weekday];
+  const minute = Number(values.hour) * 60 + Number(values.minute);
+
+  const toMinutes = value => {
+    const [h,m] = String(value || "00:00").split(":").map(Number);
+    return h * 60 + m;
+  };
+
+  const schedule = settings.schedule || {};
+  const today = schedule[dayIndex] || schedule[String(dayIndex)];
+  if (today?.enabled) {
+    const open = toMinutes(today.open);
+    const close = toMinutes(today.close);
+    if (close > open && minute >= open && minute <= close) return true;
+    if (close <= open && minute >= open) return true;
+  }
+
+  const previousIndex = (dayIndex + 6) % 7;
+  const previous = schedule[previousIndex] || schedule[String(previousIndex)];
+  if (previous?.enabled) {
+    const open = toMinutes(previous.open);
+    const close = toMinutes(previous.close);
+    if (close <= open && minute <= close) return true;
+  }
+
+  return false;
+}
+
+function promoActive(promo) {
+  if (!promo || promo.active === false) return false;
+  const now = Date.now();
+  const start = promo.startsAt ? new Date(promo.startsAt).getTime() : 0;
+  const end = promo.endsAt ? new Date(promo.endsAt).getTime() : 0;
+  if (start && Number.isFinite(start) && now < start) return false;
+  if (end && Number.isFinite(end) && now > end) return false;
+  return true;
+}
+
+function promoMatches(promo, product) {
+  if (!promoActive(promo)) return false;
+  if (promo.targetType === "all") return true;
+  if (promo.targetType === "category") return promo.targetId === product.categoryId;
+  if (promo.targetType === "product") return promo.targetId === product.id;
+  return false;
+}
+
+function applyPromotion(base, promo) {
+  if (!promo) return Number(base || 0);
+  if (promo.discountType === "percentage") {
+    return Math.max(0, Number(base || 0) * (1 - Number(promo.discountValue || 0) / 100));
+  }
+  return Math.max(0, Number(base || 0) - Number(promo.discountValue || 0));
+}
+
+function bestPromotion(promotions, product, base) {
+  const candidates = promotions
+    .filter(p => promoMatches(p, product))
+    .map(p => ({ promo:p, price:applyPromotion(base,p) }))
+    .sort((a,b) => a.price - b.price);
+  return candidates[0] || null;
+}
+
+function distanceKm(a,b) {
+  const lat1=Number(a?.latitude),lng1=Number(a?.longitude);
+  const lat2=Number(b?.latitude),lng2=Number(b?.longitude);
+  if (![lat1,lng1,lat2,lng2].every(Number.isFinite)) return null;
+  const toRad = v => v * Math.PI / 180;
+  const R = 6371;
+  const dLat = toRad(lat2-lat1);
+  const dLng = toRad(lng2-lng1);
+  const q = Math.sin(dLat/2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(q),Math.sqrt(1-q));
+}
+
+async function lookupCepLocation(zip) {
+  const digits=String(zip||"").replace(/\D/g,"");
+  if (digits.length !== 8) return null;
+  try {
+    const response = await fetch(`https://brasilapi.com.br/api/cep/v2/${digits}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    const latitude = Number(data?.location?.coordinates?.latitude);
+    const longitude = Number(data?.location?.coordinates?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    return { latitude, longitude, source:"brasilapi-cep-v2" };
+  } catch {
+    return null;
+  }
+}
+
+async function calculateServerDelivery(db, settings, address) {
+  const mode = settings.deliveryPricingMode || "fixed";
+  if (mode === "fixed") {
+    return { supported:true, fee:Number(settings.deliveryFee||0), mode };
+  }
+
+  if (mode === "neighborhood") {
+    const zones = Array.isArray(settings.deliveryZones) ? settings.deliveryZones : [];
+    const key = normalizeKey(address?.neighborhood);
+    const zone = zones.find(z => normalizeKey(z.neighborhood) === key);
+    if (zone) {
+      return { supported:true, fee:Number(zone.fee||0), mode, zone:zone.neighborhood||"" };
+    }
+    if (settings.restrictDeliveryZones === true && zones.length) {
+      return { supported:false, fee:0, mode, reason:"neighborhood_not_served" };
+    }
+    return {
+      supported:true,
+      fee:Number(settings.deliveryNeighborhoodFallbackFee ?? settings.deliveryFee ?? 0),
+      mode,
+      zone:null
+    };
+  }
+
+  if (mode === "km") {
+    let storeLocation = settings.storeLocation || null;
+    if (!storeLocation && settings.storeZip) {
+      storeLocation = await lookupCepLocation(settings.storeZip);
+    }
+
+    let addressLocation = address?.location || null;
+    if (!addressLocation && address?.zip) {
+      addressLocation = await lookupCepLocation(address.zip);
+    }
+
+    const km = distanceKm(storeLocation,addressLocation);
+    if (km == null) {
+      return { supported:false, fee:0, mode, reason:"location_unavailable" };
+    }
+
+    const bands = (Array.isArray(settings.deliveryKmBands) ? settings.deliveryKmBands : [])
+      .slice()
+      .sort((a,b) => Number(a.maxKm||0)-Number(b.maxKm||0));
+
+    const band = bands.find(b => km <= Number(b.maxKm||0));
+    if (band) {
+      return { supported:true, fee:Number(band.fee||0), mode, distanceKm:km, maxKm:Number(band.maxKm||0), addressLocation };
+    }
+
+    if (settings.restrictDeliveryKm === true && bands.length) {
+      return { supported:false, fee:0, mode, distanceKm:km, reason:"distance_not_served", addressLocation };
+    }
+
+    const last=bands.at(-1);
+    return {
+      supported:true,
+      fee:last?Number(last.fee||0):Number(settings.deliveryFee||0),
+      mode,
+      distanceKm:km,
+      maxKm:last?Number(last.maxKm||0):null,
+      addressLocation
+    };
+  }
+
+  return { supported:true, fee:Number(settings.deliveryFee||0), mode:"fixed" };
+}
+
+async function verifyCustomerToken(req) {
+  const authHeader=req.headers.authorization||"";
+  const match=authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+  return getAuth().verifyIdToken(match[1]);
+}
+
+export const createOrder = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:[
+      "https://guiasysstudio.github.io",
+      "https://guiasys.online",
+      /https:\/\/.*\.guiasys\.online$/
+    ],
+    timeoutSeconds:60,
+    memory:"256MiB"
+  },
+  async (req,res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    try {
+      const decoded=await verifyCustomerToken(req);
+      if (!decoded?.uid) {
+        res.status(401).json({error:"unauthorized"});
+        return;
+      }
+
+      const db=getFirestore();
+      const [settingsSnap,customerSnap,promotionsSnap]=await Promise.all([
+        db.doc("settings/store").get(),
+        db.doc(`customers/${decoded.uid}`).get(),
+        db.collection("promotions").get()
+      ]);
+
+      const settings=settingsSnap.exists?settingsSnap.data():{};
+      if (!currentScheduleState(settings)) {
+        res.status(409).json({error:"store_closed"});
+        return;
+      }
+
+      const customer=customerSnap.exists?customerSnap.data():{};
+      const body=req.body||{};
+      const rawItems=Array.isArray(body.items)?body.items:[];
+      if (!rawItems.length || rawItems.length>80) {
+        res.status(400).json({error:"invalid_items"});
+        return;
+      }
+
+      const fulfillment=body.fulfillment==="pickup"?"pickup":"delivery";
+      if (fulfillment==="pickup" && settings.allowPickup===false) {
+        res.status(400).json({error:"pickup_disabled"});
+        return;
+      }
+
+      let address=null;
+      if (fulfillment==="delivery") {
+        const addressId=normalizeText(body.addressId,120);
+        if (!addressId) {
+          res.status(400).json({error:"address_required"});
+          return;
+        }
+        const addressSnap=await db.doc(`customers/${decoded.uid}/addresses/${addressId}`).get();
+        if (!addressSnap.exists) {
+          res.status(400).json({error:"address_not_found"});
+          return;
+        }
+        address={id:addressSnap.id,...addressSnap.data()};
+      }
+
+      const productCache=new Map();
+      const getProduct=async id=>{
+        if (productCache.has(id)) return productCache.get(id);
+        const snap=await db.doc(`products/${id}`).get();
+        const value=snap.exists?{id:snap.id,...snap.data()}:null;
+        productCache.set(id,value);
+        return value;
+      };
+
+      const promotions=promotionsSnap.docs.map(d=>({id:d.id,...d.data()}));
+      const items=[];
+      let subtotal=0;
+
+      for (const raw of rawItems) {
+        const productId=normalizeText(raw.productId,120);
+        const first=await getProduct(productId);
+        if (!first || first.active===false) {
+          res.status(400).json({error:"product_unavailable",productId});
+          return;
+        }
+
+        const qty=Math.max(1,Math.min(99,Number(raw.qty||1)));
+        const sizeName=normalizeText(raw.sizeName||raw.size?.name,80);
+        let base=Number(first.price||0);
+        let size=null;
+
+        if (Array.isArray(first.sizes) && first.sizes.length) {
+          size=first.sizes.find(s=>normalizeKey(s.name)===normalizeKey(sizeName));
+          if (!size) {
+            res.status(400).json({error:"invalid_size",productId});
+            return;
+          }
+          base=Number(size.price||0);
+        }
+
+        const flavorIds=(Array.isArray(raw.flavorProductIds)?raw.flavorProductIds:[productId])
+          .map(x=>normalizeText(x,120))
+          .filter(Boolean);
+        const flavorNames=[first.name||""];
+        const validFlavorIds=[productId];
+
+        if (flavorIds.length>1) {
+          if (first.allowHalfHalf===false || first.isPizza!==true) {
+            res.status(400).json({error:"half_half_not_allowed",productId});
+            return;
+          }
+          for (const id of [...new Set(flavorIds.slice(1))].slice(0,1)) {
+            const flavor=await getProduct(id);
+            if (!flavor || flavor.active===false || flavor.categoryId!==first.categoryId || flavor.isPizza!==true) {
+              res.status(400).json({error:"invalid_second_flavor",productId:id});
+              return;
+            }
+            if (sizeName) {
+              const matching=flavor.sizes?.find(s=>normalizeKey(s.name)===normalizeKey(sizeName));
+              if (!matching) {
+                res.status(400).json({error:"second_flavor_size_unavailable",productId:id});
+                return;
+              }
+              base=Math.max(base,Number(matching.price||0));
+            }
+            flavorNames.push(flavor.name||"");
+            validFlavorIds.push(flavor.id);
+          }
+        }
+
+        const best=bestPromotion(promotions,first,base);
+        let promotedBase=best?best.price:base;
+
+        const requestedExtras=(Array.isArray(raw.extras)?raw.extras:[])
+          .map(x=>normalizeText(typeof x==="string"?x:x?.name,80))
+          .filter(Boolean);
+        const extras=[];
+        let extrasValue=0;
+
+        for (const name of requestedExtras.slice(0,20)) {
+          const catalogExtra=first.extras?.find(x=>normalizeKey(x.name)===normalizeKey(name));
+          if (!catalogExtra) {
+            res.status(400).json({error:"invalid_extra",productId,extra:name});
+            return;
+          }
+          extras.push({name:catalogExtra.name,price:Number(catalogExtra.price||0)});
+          extrasValue+=Number(catalogExtra.price||0);
+        }
+
+        const unitPrice=promotedBase+extrasValue;
+        subtotal+=unitPrice*qty;
+        items.push({
+          productId:first.id,
+          flavorProductIds:validFlavorIds,
+          name:flavorNames.join(" / "),
+          flavors:flavorNames,
+          size:size?{name:size.name,price:Number(size.price||0)}:null,
+          extras,
+          unitPrice,
+          qty,
+          note:normalizeText(raw.note,300),
+          promotion:best?{
+            id:best.promo.id,
+            name:best.promo.name||"Promoção",
+            discountType:best.promo.discountType,
+            discountValue:Number(best.promo.discountValue||0)
+          }:null
+        });
+      }
+
+      if (subtotal < Number(settings.minimumOrder||0)) {
+        res.status(400).json({error:"minimum_order",minimumOrder:Number(settings.minimumOrder||0)});
+        return;
+      }
+
+      let coupon=null;
+      let discount=0;
+      const couponCode=normalizeCouponCode(body.couponCode);
+      if (couponCode) {
+        const couponSnap=await db.doc(`coupons/${couponCode}`).get();
+        if (!couponSnap.exists) {
+          res.status(400).json({error:"coupon_not_found"});
+          return;
+        }
+        const cp={id:couponSnap.id,...couponSnap.data()};
+        const now=Date.now();
+        const start=cp.startsAt?new Date(cp.startsAt).getTime():0;
+        const end=cp.endsAt?new Date(cp.endsAt).getTime():0;
+        if (cp.active===false || (start&&now<start) || (end&&now>end)) {
+          res.status(400).json({error:"coupon_inactive"});
+          return;
+        }
+        if (subtotal<Number(cp.minimumOrder||0)) {
+          res.status(400).json({error:"coupon_minimum_order",minimumOrder:Number(cp.minimumOrder||0)});
+          return;
+        }
+
+        if (Number(cp.minOrders||0)>0 || Number(cp.minSpent||0)>0) {
+          const ordersSnap=await db.collection("orders").where("customerId","==",decoded.uid).get();
+          const completed=ordersSnap.docs.map(d=>d.data()).filter(o=>o.status==="completed");
+          const spent=completed.reduce((sum,o)=>sum+Number(o.total||0),0);
+          if (completed.length<Number(cp.minOrders||0) || spent<Number(cp.minSpent||0)) {
+            res.status(400).json({error:"coupon_not_eligible"});
+            return;
+          }
+        }
+
+        discount=cp.type==="percentage"
+          ?subtotal*Number(cp.value||0)/100
+          :Number(cp.value||0);
+        if (Number(cp.maxDiscount||0)>0) discount=Math.min(discount,Number(cp.maxDiscount||0));
+        discount=Math.max(0,Math.min(subtotal,discount));
+        coupon={
+          id:cp.id,
+          code:cp.code||cp.id,
+          type:cp.type||"percentage",
+          value:Number(cp.value||0),
+          amount:discount
+        };
+      }
+
+      let delivery={supported:true,fee:0,mode:"pickup"};
+      if (fulfillment==="delivery") {
+        delivery=await calculateServerDelivery(db,settings,address);
+        if (!delivery.supported) {
+          res.status(400).json({error:"delivery_not_supported",reason:delivery.reason||""});
+          return;
+        }
+        if (delivery.addressLocation && !address.location) {
+          address.location=delivery.addressLocation;
+          await db.doc(`customers/${decoded.uid}/addresses/${address.id}`).set(
+            {location:delivery.addressLocation,updatedAt:new Date()},
+            {merge:true}
+          );
+        }
+      }
+
+      const deliveryFee=Number(delivery.fee||0);
+      const total=Math.max(0,subtotal-discount+deliveryFee);
+      const paymentMethod=normalizeText(body.payment?.method,80);
+      const allowedPayments=Array.isArray(settings.payments)?settings.payments:[];
+      if (!paymentMethod || (allowedPayments.length&&!allowedPayments.includes(paymentMethod))) {
+        res.status(400).json({error:"invalid_payment"});
+        return;
+      }
+
+      const needsChange=paymentMethod.toLowerCase().includes("dinheiro")&&body.payment?.needsChange===true;
+      const changeFor=needsChange?Number(body.payment?.changeFor||0):0;
+      if (needsChange&&changeFor<total) {
+        res.status(400).json({error:"invalid_change"});
+        return;
+      }
+
+      const phone=normalizeText(body.phone||customer.phone,40);
+      const name=normalizeText(customer.name||decoded.name||"Cliente",100);
+      if (!phone) {
+        res.status(400).json({error:"phone_required"});
+        return;
+      }
+
+      const counterRef=db.doc("counters/orders");
+      const orderRef=db.collection("orders").doc();
+      let orderNumber=0;
+      const now=new Date();
+      const autoAccepted=settings.autoAcceptOrders===true;
+
+      await db.runTransaction(async tx=>{
+        const counter=await tx.get(counterRef);
+        orderNumber=(counter.exists?Number(counter.data().value||0):0)+1;
+        tx.set(counterRef,{value:orderNumber,updatedAt:now},{merge:true});
+        tx.set(orderRef,{
+          orderNumber,
+          customerId:decoded.uid,
+          status:autoAccepted?"accepted":"pending",
+          autoAccepted,
+          createdAt:now,
+          acceptedAt:autoAccepted?now:null,
+          customer:{
+            name,
+            email:decoded.email||"",
+            phone
+          },
+          fulfillment,
+          address:fulfillment==="delivery"?{
+            id:address.id,
+            label:address.label||"",
+            recipient:address.recipient||name,
+            phone:address.phone||phone,
+            zip:address.zip||"",
+            street:address.street||"",
+            number:address.number||"",
+            complement:address.complement||"",
+            neighborhood:address.neighborhood||"",
+            city:address.city||"",
+            state:address.state||"",
+            reference:address.reference||"",
+            location:address.location||delivery.addressLocation||null
+          }:null,
+          deliveryPricing:fulfillment==="delivery"?{
+            mode:delivery.mode||settings.deliveryPricingMode||"fixed",
+            fee:deliveryFee,
+            distanceKm:Number.isFinite(delivery.distanceKm)?Number(delivery.distanceKm.toFixed(3)):null,
+            zone:delivery.zone||null,
+            maxKm:delivery.maxKm??null
+          }:{mode:"pickup",fee:0},
+          payment:{
+            method:paymentMethod,
+            needsChange,
+            changeFor,
+            changeAmount:needsChange?changeFor-total:0
+          },
+          note:normalizeText(body.note,500),
+          items,
+          subtotal,
+          discount,
+          coupon,
+          deliveryFee,
+          total,
+          createdBy:"secure-function"
+        });
+      });
+
+      res.json({
+        ok:true,
+        orderId:orderRef.id,
+        orderNumber,
+        status:autoAccepted?"accepted":"pending",
+        subtotal,
+        discount,
+        deliveryFee,
+        total
+      });
+    } catch (err) {
+      console.error("createOrder failed",err);
+      res.status(500).json({error:"order_failed",message:err?.message||"Falha ao criar pedido."});
+    }
+  }
+);
