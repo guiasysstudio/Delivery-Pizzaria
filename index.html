@@ -46,7 +46,7 @@
           <small>Entregar em</small>
           <strong id="activeAddressText">Informe seu endereço</strong>
         </span>
-        <span>⌄</span>
+        <span class="ui-icon icon-chevron-down" aria-hidden="true"></span>
       </button>
 
       <div class="public-header-actions">
@@ -89,7 +89,7 @@
           <div class="hero-status-row">
             <span id="storeStatus" class="store-open-pill">Carregando horário...</span>
             <span id="minimumOrderText" class="hero-note"></span>
-            <button id="installAppBtn" class="install-app-button hidden" type="button">▣ Instalar aplicativo</button>
+            <button id="installAppBtn" class="install-app-button hidden icon-button-label" type="button"><span class="ui-icon icon-download" aria-hidden="true"></span><span>Instalar aplicativo</span></button>
           </div>
         </div>
         <div class="hero-pizza-art">
@@ -156,7 +156,7 @@
 
   <dialog id="productDialog" class="modal modal-wide">
     <form method="dialog" class="modal-card product-modal-card" id="productForm">
-      <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
+      <button class="modal-close dialog-close" type="button" aria-label="Fechar"><span class="ui-icon icon-circle-x" aria-hidden="true"></span></button>
       <div class="product-modal-grid">
         <img id="modalImage" class="modal-product-image" alt="" />
         <div>
@@ -178,7 +178,7 @@
 
   <dialog id="authDialog" class="modal">
     <div class="modal-card auth-card">
-      <button class="modal-close dialog-close" id="authCloseBtn" type="button">×</button>
+      <button class="modal-close dialog-close" id="authCloseBtn" type="button"><span class="ui-icon icon-circle-x" aria-hidden="true"></span></button>
       <span class="eyebrow">SUA CONTA</span>
       <h2 id="authTitle">Entrar</h2>
       <p id="authSubtitle" class="muted">Entre para usar seus endereços e acompanhar pedidos.</p>
@@ -207,7 +207,7 @@
 
   <dialog id="aboutDialog" class="modal">
     <div class="modal-card about-card">
-      <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
+      <button class="modal-close dialog-close" type="button" aria-label="Fechar"><span class="ui-icon icon-circle-x" aria-hidden="true"></span></button>
       <div class="about-logo-wrap">
         <img id="aboutStoreLogo" class="about-store-logo hidden" alt="">
         <div id="aboutStoreLogoFallback" class="about-store-logo-fallback"><span class="ui-icon icon-pizza" aria-hidden="true"></span></div>
@@ -228,7 +228,7 @@
 
   <dialog id="iosInstallDialog" class="modal">
     <div class="modal-card">
-      <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
+      <button class="modal-close dialog-close" type="button" aria-label="Fechar"><span class="ui-icon icon-circle-x" aria-hidden="true"></span></button>
       <span class="eyebrow">INSTALAR</span>
       <h2>Adicionar à Tela de Início</h2>
       <p>No iPhone/iPad, abra este site no Safari, toque em <strong>Compartilhar</strong> e depois em <strong>Adicionar à Tela de Início</strong>.</p>
@@ -238,7 +238,7 @@
 
   <dialog id="addressSelectorDialog" class="modal">
     <div class="modal-card">
-      <button class="modal-close dialog-close" id="addressSelectorClose" type="button">×</button>
+      <button class="modal-close dialog-close" id="addressSelectorClose" type="button"><span class="ui-icon icon-circle-x" aria-hidden="true"></span></button>
       <span class="eyebrow">ENDEREÇO</span><h2>Onde devemos entregar?</h2>
       <div id="addressSelectorGuest" class="hidden">
         <p class="muted">Entre na sua conta para escolher entre seus endereços cadastrados.</p>
@@ -253,7 +253,7 @@
 
   <dialog id="addressEditorDialog" class="modal modal-wide">
     <form id="addressEditorForm" method="dialog" class="modal-card">
-      <button class="modal-close dialog-close" type="button">×</button>
+      <button class="modal-close dialog-close" type="button"><span class="ui-icon icon-circle-x" aria-hidden="true"></span></button>
       <span class="eyebrow">ENDEREÇO</span><h2 id="addressEditorTitle">Novo endereço</h2>
       <input id="addressId" type="hidden">
       <div class="form-grid">
@@ -285,7 +285,7 @@
 
   <dialog id="checkoutDialog" class="modal modal-wide">
     <form method="dialog" class="modal-card checkout-card" id="checkoutForm">
-      <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
+      <button class="modal-close dialog-close" type="button" aria-label="Fechar"><span class="ui-icon icon-circle-x" aria-hidden="true"></span></button>
       <span class="eyebrow">FINALIZAR PEDIDO</span><h2>Revise antes de enviar</h2>
 
       <section class="checkout-section">
