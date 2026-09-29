@@ -733,5 +733,5 @@ internal sealed class LocalPrintServer : IDisposable
         _cts.Dispose();
     }
 
-    private sealed record PrintRequest(string Printer, string Text, int Copies);
+    private sealed record PrintRequest(string Text, int Copies = 1, string? Printer = null);
 }
