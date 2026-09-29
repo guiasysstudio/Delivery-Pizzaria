@@ -95,9 +95,14 @@ const defaults={
   subtitle:'Pizza quentinha, do forno para sua casa.',
   phone:'',
   storeAddress:'',
+  storeZip:'',
+  storeLocation:null,
+  deliveryPricingMode:'fixed',
   deliveryFee:5,
   deliveryZones:[],
   restrictDeliveryZones:false,
+  deliveryKmBands:[],
+  restrictDeliveryKm:true,
   minimumOrder:0,
   allowPickup:true,
   openMode:'schedule',
@@ -507,13 +512,49 @@ function normalizePriceKey(value){
   return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
 }
 
+function distanceKmBetween(a,b){
+  const lat1=Number(a?.latitude),lng1=Number(a?.longitude);
+  const lat2=Number(b?.latitude),lng2=Number(b?.longitude);
+  if(![lat1,lng1,lat2,lng2].every(Number.isFinite)) return null;
+  const toRad=v=>v*Math.PI/180;
+  const R=6371;
+  const dLat=toRad(lat2-lat1),dLng=toRad(lng2-lng1);
+  const q=Math.sin(dLat/2)**2+
+    Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(q),Math.sqrt(1-q));
+}
+
+function deliveryFeeFromSettings(address){
+  const mode=settings.deliveryPricingMode||'fixed';
+  if(mode==='fixed') return {supported:true,fee:Number(settings.deliveryFee||0),mode};
+
+  if(mode==='neighborhood'){
+    const zones=Array.isArray(settings.deliveryZones)?settings.deliveryZones:[];
+    const neighborhood=normalizePriceKey(address?.neighborhood);
+    const zone=zones.find(z=>normalizePriceKey(z.neighborhood)===neighborhood);
+    if(zone) return {supported:true,fee:Number(zone.fee||0),mode,zone:zone.neighborhood};
+    if(settings.restrictDeliveryZones===true&&zones.length) return {supported:false,fee:0,mode};
+    return {supported:true,fee:Number(settings.deliveryFee||0),mode,zone:null};
+  }
+
+  if(mode==='km'){
+    const distance=distanceKmBetween(settings.storeLocation,address?.location);
+    if(distance==null) return {supported:false,fee:0,mode,distanceKm:null};
+    const bands=(Array.isArray(settings.deliveryKmBands)?settings.deliveryKmBands:[])
+      .slice().sort((a,b)=>Number(a.maxKm||0)-Number(b.maxKm||0));
+    const band=bands.find(b=>distance<=Number(b.maxKm||0));
+    if(band) return {supported:true,fee:Number(band.fee||0),mode,distanceKm:distance,maxKm:Number(band.maxKm||0)};
+    if(settings.restrictDeliveryKm===true&&bands.length) return {supported:false,fee:0,mode,distanceKm:distance};
+    const last=bands.at(-1);
+    return {supported:true,fee:last?Number(last.fee||0):Number(settings.deliveryFee||0),mode,distanceKm:distance};
+  }
+
+  return {supported:true,fee:Number(settings.deliveryFee||0),mode:'fixed'};
+}
+
 function expectedDeliveryFee(order){
   if(order.fulfillment==='pickup') return 0;
-  const fallback=Number(settings.deliveryFee||0);
-  const zones=Array.isArray(settings.deliveryZones)?settings.deliveryZones:[];
-  const neighborhood=normalizePriceKey(order.address?.neighborhood);
-  const zone=zones.find(z=>normalizePriceKey(z.neighborhood)===neighborhood);
-  return zone?Number(zone.fee||0):fallback;
+  return deliveryFeeFromSettings(order.address).fee;
 }
 
 function applyOrderPromotion(base,item){
@@ -1849,6 +1890,101 @@ function collectDeliveryZones(){
 
 $('#addDeliveryZoneBtn')?.addEventListener('click',()=>addDeliveryZoneRow());
 
+function renderDeliveryKmBandsEditor(rows=[]){
+  const host=$('#deliveryKmBandsEditor');
+  if(!host) return;
+  host.innerHTML='';
+  for(const row of rows) addDeliveryKmBandRow(row);
+  updateDeliveryKmBandsEmpty();
+}
+
+function addDeliveryKmBandRow(row={maxKm:'',fee:''}){
+  const host=$('#deliveryKmBandsEditor');
+  const el=document.createElement('div');
+  el.className='repeat-row delivery-km-row';
+  el.innerHTML=`
+    <label class="field repeat-field"><span>Até quantos km</span><input class="km-max" type="number" min="0.1" step="0.1" placeholder="Ex.: 3" value="${Number.isFinite(Number(row.maxKm))?Number(row.maxKm):''}"></label>
+    <label class="field repeat-price"><span>Valor (R$)</span><input class="km-fee" type="number" min="0" step="0.01" placeholder="0,00" value="${Number.isFinite(Number(row.fee))?Number(row.fee):''}"></label>
+    <button class="repeat-remove" type="button" title="Remover">×</button>`;
+  el.querySelector('.repeat-remove').onclick=()=>{el.remove();updateDeliveryKmBandsEmpty();};
+  host.appendChild(el);
+  updateDeliveryKmBandsEmpty();
+}
+
+function updateDeliveryKmBandsEmpty(){
+  $('#deliveryKmBandsEmpty')?.classList.toggle('hidden',$('#deliveryKmBandsEditor')?.children.length>0);
+}
+
+function collectDeliveryKmBands(){
+  return [...$('#deliveryKmBandsEditor').querySelectorAll('.repeat-row')].map(row=>({
+    maxKm:Number(row.querySelector('.km-max').value||0),
+    fee:Number(row.querySelector('.km-fee').value||0)
+  })).filter(x=>x.maxKm>0).sort((a,b)=>a.maxKm-b.maxKm);
+}
+
+$('#addDeliveryKmBandBtn')?.addEventListener('click',()=>addDeliveryKmBandRow());
+
+function selectedDeliveryPricingMode(){
+  return document.querySelector('input[name="deliveryPricingMode"]:checked')?.value||'fixed';
+}
+
+function renderDeliveryPricingMode(){
+  const mode=selectedDeliveryPricingMode();
+  $('#deliveryFixedSettings')?.classList.toggle('hidden',mode!=='fixed');
+  $('#deliveryNeighborhoodSettings')?.classList.toggle('hidden',mode!=='neighborhood');
+  $('#deliveryKmSettings')?.classList.toggle('hidden',mode!=='km');
+}
+
+$('input[name="deliveryPricingMode"]').forEach(r=>r.addEventListener('change',renderDeliveryPricingMode));
+
+async function lookupZipGeo(zip){
+  const digits=String(zip||'').replace(/\D/g,'');
+  if(digits.length!==8) return null;
+  try{
+    const response=await fetch(`https://brasilapi.com.br/api/cep/v2/${digits}`,{cache:'no-store'});
+    if(!response.ok) return null;
+    const data=await response.json();
+    const lat=Number(data?.location?.coordinates?.latitude);
+    const lng=Number(data?.location?.coordinates?.longitude);
+    return {
+      zip:digits.replace(/^(\d{5})(\d{3})$/,'$1-$2'),
+      street:data.street||'',
+      neighborhood:data.neighborhood||'',
+      city:data.city||'',
+      state:data.state||'',
+      location:Number.isFinite(lat)&&Number.isFinite(lng)?{latitude:lat,longitude:lng,source:'brasilapi-cep-v2'}:null
+    };
+  }catch(err){
+    console.warn('Não foi possível localizar o CEP da loja.',err);
+    return null;
+  }
+}
+
+async function refreshStoreLocationPreview(){
+  const zip=$('#setStoreZip')?.value||'';
+  const status=$('#storeLocationStatus');
+  if(!status) return null;
+  const digits=zip.replace(/\D/g,'');
+  if(digits.length!==8){
+    status.textContent='Informe um CEP válido para usar frete por km.';
+    return null;
+  }
+  status.textContent='Localizando CEP...';
+  const data=await lookupZipGeo(zip);
+  if(!data?.location){
+    status.textContent='Não foi possível obter coordenadas para este CEP.';
+    return null;
+  }
+  $('#setStoreZip').value=data.zip;
+  if(!$('#setStoreAddress').value.trim()){
+    $('#setStoreAddress').value=[data.street,data.neighborhood,data.city,data.state].filter(Boolean).join(', ');
+  }
+  status.textContent=`CEP localizado • ${data.city||''}/${data.state||''} • pronto para cálculo por km.`;
+  return data.location;
+}
+
+$('#setStoreZip')?.addEventListener('blur',refreshStoreLocationPreview);
+
 function renderPaymentMethodsEditor(rows=[]){
   const host=$('#paymentMethodsEditor');
   if(!host) return;
@@ -1886,15 +2022,28 @@ function renderSettings(){
   $('#setStoreName').value=settings.storeName||'';
   $('#setSubtitle').value=settings.subtitle||'';
   $('#setPhone').value=settings.phone||'';
+  $('#setStoreZip').value=settings.storeZip||'';
   $('#setStoreAddress').value=settings.storeAddress||'';
   $('#setOpenMode').value=settings.openMode||'schedule';
   $('#setDeliveryFee').value=settings.deliveryFee??0;
+  const mode=settings.deliveryPricingMode||'fixed';
+  const modeInput=document.querySelector(`input[name="deliveryPricingMode"][value="${mode}"]`);
+  if(modeInput) modeInput.checked=true;
   renderDeliveryZonesEditor(settings.deliveryZones||[]);
   $('#setRestrictDeliveryZones').checked=!!settings.restrictDeliveryZones;
+  renderDeliveryKmBandsEditor(settings.deliveryKmBands||[]);
+  $('#setRestrictDeliveryKm').checked=settings.restrictDeliveryKm!==false;
+  renderDeliveryPricingMode();
   $('#setMinimumOrder').value=settings.minimumOrder??0;
   $('#setAllowPickup').checked=settings.allowPickup!==false;
   $('#setAutoAccept').checked=!!settings.autoAcceptOrders;
   renderPaymentMethodsEditor(settings.payments||[]);
+
+  if(settings.storeLocation?.latitude!=null&&settings.storeLocation?.longitude!=null){
+    $('#storeLocationStatus').textContent='CEP da loja localizado • pronto para cálculo por km.';
+  }else{
+    $('#storeLocationStatus').textContent='O CEP será usado para calcular frete por km quando essa opção estiver ativa.';
+  }
 
   for(let i=0;i<7;i++){
     const d=settings.schedule?.[i]||settings.schedule?.[String(i)]||defaults.schedule[i];
@@ -1903,7 +2052,6 @@ function renderSettings(){
     $(`.sch-close[data-day="${i}"]`).value=d.close||'23:00';
   }
 }
-
 $('#settingsForm').onsubmit=async e=>{
   e.preventDefault();
   const schedule={};
@@ -1915,16 +2063,53 @@ $('#settingsForm').onsubmit=async e=>{
     };
   }
 
+  const deliveryPricingMode=selectedDeliveryPricingMode();
+  const deliveryZones=collectDeliveryZones();
+  const deliveryKmBands=collectDeliveryKmBands();
+  let storeLocation=settings.storeLocation||null;
+  const storeZip=$('#setStoreZip').value.trim();
+
+  if(deliveryPricingMode==='neighborhood'&&$('#setRestrictDeliveryZones').checked&&!deliveryZones.length){
+    alert('Cadastre pelo menos um bairro antes de restringir a entrega por bairro.');
+    return;
+  }
+
+  if(deliveryPricingMode==='km'){
+    if(!deliveryKmBands.length){
+      alert('Cadastre pelo menos uma faixa de km e seu valor.');
+      return;
+    }
+    if(storeZip.replace(/\D/g,'').length!==8){
+      alert('Informe o CEP da pizzaria para calcular o frete por km.');
+      $('#setStoreZip').focus();
+      return;
+    }
+    const located=await refreshStoreLocationPreview();
+    if(!located){
+      alert('Não foi possível localizar o CEP da pizzaria. Confira o CEP antes de salvar o frete por km.');
+      return;
+    }
+    storeLocation=located;
+  }else if(storeZip.replace(/\D/g,'').length===8){
+    const data=await lookupZipGeo(storeZip);
+    if(data?.location) storeLocation=data.location;
+  }
+
   settings={
     ...settings,
     storeName:$('#setStoreName').value.trim(),
     subtitle:$('#setSubtitle').value.trim(),
     phone:$('#setPhone').value.trim(),
+    storeZip,
+    storeLocation,
     storeAddress:$('#setStoreAddress').value.trim(),
     openMode:$('#setOpenMode').value,
+    deliveryPricingMode,
     deliveryFee:Number($('#setDeliveryFee').value||0),
-    deliveryZones:collectDeliveryZones(),
+    deliveryZones,
     restrictDeliveryZones:$('#setRestrictDeliveryZones').checked,
+    deliveryKmBands,
+    restrictDeliveryKm:$('#setRestrictDeliveryKm').checked,
     minimumOrder:Number($('#setMinimumOrder').value||0),
     allowPickup:$('#setAllowPickup').checked,
     autoAcceptOrders:$('#setAutoAccept').checked,
@@ -1939,7 +2124,6 @@ $('#settingsForm').onsubmit=async e=>{
   $('#settingsSaved').classList.remove('hidden');
   setTimeout(()=>$('#settingsSaved').classList.add('hidden'),2200);
 };
-
 $('#seedBtn').onclick=async()=>{
   if(!(hasPermission('productsCreate')&&hasPermission('categoriesManage'))) return;
   const batch=writeBatch(db);
