@@ -1099,16 +1099,16 @@ async function checkPrintAgent(){
     status.classList.add('ok');
     status.classList.remove('off');
     if($('#printerAgentInfoState')){
-      $('#printerAgentInfoState').textContent=printers.length
-        ?`Conectado • ${printers.length} impressora(s) detectada(s)`
-        :'Conectado • configure uma impressora no Agent';
+      $('#printerAgentInfoState').textContent=printers.length?'Pronto':'Configure uma impressora no Agent';
     }
+    if($('#printerAgentVersion')) $('#printerAgentVersion').textContent=data.version||data.agentVersion||'Conectado';
     return true;
   }catch(err){
     status.textContent='● Print Agent desconectado';
     status.classList.add('off');
     status.classList.remove('ok');
     if($('#printerAgentInfoState')) $('#printerAgentInfoState').textContent='Sem conexão';
+    if($('#printerAgentVersion')) $('#printerAgentVersion').textContent='—';
     return false;
   }
 }
@@ -2517,7 +2517,7 @@ function renderSettings(){
   $('#setPhone').value=formatPhoneInput(settings.phone||'');
   $('#setWhatsapp').value=formatPhoneInput(settings.whatsapp||settings.phone||'');
   $('#setStoreZip').value=formatCepInput(settings.storeZip||'');
-  $('#setStoreStreet').value=settings.storeStreet||'';
+  $('#setStoreStreet').value=settings.storeStreet||settings.storeAddress||'';
   $('#setStoreNumber').value=settings.storeNumber||'';
   $('#setStoreNeighborhood').value=settings.storeNeighborhood||'';
   $('#setStoreComplement').value=settings.storeComplement||'';
