@@ -24,26 +24,26 @@
 
   <div id="adminApp" class="admin-app hidden">
     <aside class="admin-sidebar">
-      <div class="brand"><span class="brand-mark">🍕</span><div><strong id="adminStoreName">Pizzaria</strong><small>Central Delivery</small></div></div>
-      <nav class="admin-nav">
-        <button class="nav-item active" data-view="orders">📋 <span>Pedidos</span><span id="pendingBadge" class="nav-badge hidden">0</span></button>
-        <button class="nav-item" data-view="cash">💰 <span>Caixa</span></button>
-        <button class="nav-item" data-view="products">🍕 <span>Produtos</span></button>
-        <button class="nav-item" data-view="categories">🗂️ <span>Categorias</span></button>
-        <button class="nav-item" data-view="promotions">🏷️ <span>Promoções</span></button>
-        <button class="nav-item" data-view="coupons">🎟️ <span>Cupons</span></button>
-        <button class="nav-item" data-view="customers">👤 <span>Clientes</span></button>
-        <button class="nav-item cashier-feature" data-view="printing">🖨️ <span>Impressão</span></button>
-        <button class="nav-item master-only hidden" data-view="users">👥 <span>Usuários</span></button>
-        <button class="nav-item master-only hidden" data-view="roles">🔐 <span>Perfis</span></button>
-        <button class="nav-item" data-view="settings">🏪 <span>Dados da Pizzaria</span></button>
+      <div class="brand"><span class="brand-mark"><span class="ui-icon icon-pizza" aria-hidden="true"></span></span><div><strong id="adminStoreName">Pizzaria</strong><small>Central Delivery</small></div></div>
+      <nav class="admin-nav" aria-label="Navegação administrativa">
+        <button class="nav-item active" data-view="orders" type="button"><span class="ui-icon icon-clipboard-list" aria-hidden="true"></span><span>Pedidos</span><span id="pendingBadge" class="nav-badge hidden">0</span></button>
+        <button class="nav-item" data-view="cash" type="button"><span class="ui-icon icon-wallet-cards" aria-hidden="true"></span><span>Caixa</span></button>
+        <button class="nav-item" data-view="products" type="button"><span class="ui-icon icon-pizza" aria-hidden="true"></span><span>Produtos</span></button>
+        <button class="nav-item" data-view="categories" type="button"><span class="ui-icon icon-folders" aria-hidden="true"></span><span>Categorias</span></button>
+        <button class="nav-item" data-view="promotions" type="button"><span class="ui-icon icon-badge-percent" aria-hidden="true"></span><span>Promoções</span></button>
+        <button class="nav-item" data-view="coupons" type="button"><span class="ui-icon icon-ticket-percent" aria-hidden="true"></span><span>Cupons</span></button>
+        <button class="nav-item" data-view="customers" type="button"><span class="ui-icon icon-users" aria-hidden="true"></span><span>Clientes</span></button>
+        <button class="nav-item cashier-feature" data-view="printing" type="button"><span class="ui-icon icon-printer" aria-hidden="true"></span><span>Impressão</span></button>
+        <button class="nav-item master-only hidden" data-view="users" type="button"><span class="ui-icon icon-users" aria-hidden="true"></span><span>Usuários</span></button>
+        <button class="nav-item master-only hidden" data-view="roles" type="button"><span class="ui-icon icon-shield-check" aria-hidden="true"></span><span>Perfis</span></button>
+        <button class="nav-item" data-view="settings" type="button"><span class="ui-icon icon-store" aria-hidden="true"></span><span>Dados da Pizzaria</span></button>
       </nav>
       <div class="sidebar-bottom"><small id="currentUserDisplay" class="muted" style="text-align:center"></small><a class="btn btn-secondary btn-block" href="../" target="_blank">Abrir cardápio</a><button id="logoutBtn" class="btn btn-ghost btn-block">Sair</button></div>
     </aside>
 
     <main class="admin-main">
       <div id="adminSystemAlert" class="alert alert-error hidden" style="margin-top:0"></div>
-      <header class="admin-topbar"><div><span id="viewEyebrow" class="eyebrow">OPERAÇÃO</span><h1 id="viewTitle">Pedidos</h1></div><div class="topbar-actions"><button id="soundBtn" class="btn btn-secondary">🔔 Ativar som</button><span id="liveIndicator" class="live-indicator">● Tempo real</span></div></header>
+      <header class="admin-topbar"><div><span id="viewEyebrow" class="eyebrow">OPERAÇÃO</span><h1 id="viewTitle">Pedidos</h1></div><div class="topbar-actions"><button id="soundBtn" class="btn btn-secondary" type="button"><span class="ui-icon icon-bell-ring" aria-hidden="true"></span><span>Ativar som</span></button><span id="liveIndicator" class="live-indicator">Tempo real</span></div></header>
 
       <section id="view-orders" class="admin-view active">
         <div class="stats-grid">
@@ -178,7 +178,7 @@
           <div class="panel settings-card settings-wide">
             <div class="editor-section-head"><div><h2>Identidade da pizzaria</h2><p class="muted">Esses dados aparecem no site público, comprovantes e impressão.</p></div></div>
             <div class="store-brand-editor">
-              <div id="storeLogoPreview" class="store-logo-preview">🍕</div>
+              <div id="storeLogoPreview" class="store-logo-preview"><span class="ui-icon icon-pizza" aria-hidden="true"></span></div>
               <div>
                 <input id="setStoreLogo" type="hidden">
                 <input id="storeLogoFile" class="hidden" type="file" accept="image/png,image/jpeg,image/webp">
