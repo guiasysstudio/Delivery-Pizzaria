@@ -629,21 +629,27 @@ internal sealed class LocalPrintServer : IDisposable
 
     private static bool IsAllowedOrigin(string? origin)
     {
-        if (string.IsNullOrWhiteSpace(origin)) return true;
-
-        if (origin.Equals("https://guiasysstudio.github.io", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(origin))
             return true;
 
-        if (origin.Equals("https://guiasys.online", StringComparison.OrdinalIgnoreCase))
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+            return false;
+
+        var host = uri.Host;
+        var https = string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        var http = string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase);
+
+        if (https && host.Equals("guiasysstudio.github.io", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        if (origin.EndsWith(".guiasys.online", StringComparison.OrdinalIgnoreCase))
+        if (https && (
+            host.Equals("guiasys.online", StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith(".guiasys.online", StringComparison.OrdinalIgnoreCase)))
             return true;
 
-        if (origin.StartsWith("http://localhost", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (origin.StartsWith("http://127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        if (http && (
+            host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+            host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)))
             return true;
 
         return false;
