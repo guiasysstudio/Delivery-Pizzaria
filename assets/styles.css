@@ -165,3 +165,20 @@
 .simple-repeat-row{display:grid;grid-template-columns:minmax(0,1fr) 40px;gap:8px;align-items:center}
 .simple-repeat-row>input{width:100%;border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:#fff;outline:none}
 .simple-repeat-row>input:focus{border-color:#f87171;box-shadow:0 0 0 3px #fee2e2}
+
+
+.account-coupons-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.coupon-wallet-card{position:relative;overflow:hidden;padding:18px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:16px;align-items:center;border-style:dashed}
+.coupon-wallet-card:before,.coupon-wallet-card:after{content:"";position:absolute;width:22px;height:22px;border-radius:50%;background:var(--bg);top:50%;transform:translateY(-50%)}
+.coupon-wallet-card:before{left:-12px}.coupon-wallet-card:after{right:-12px}
+.coupon-wallet-value{min-width:90px;min-height:90px;border-radius:18px;background:linear-gradient(135deg,#991b1b,#dc2626);color:#fff;display:grid;place-items:center;text-align:center;padding:10px;font-size:1.25rem;font-weight:900}
+.coupon-wallet-content h3{margin:4px 0;font-size:1.2rem;letter-spacing:.05em}
+.coupon-wallet-content p{margin:4px 0 7px;color:var(--muted);font-size:.85rem}
+.coupon-wallet-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px;border-top:1px dashed var(--line);padding-top:12px}
+@media(max-width:800px){.account-coupons-grid{grid-template-columns:1fr}}
+@media(max-width:480px){
+  .coupon-wallet-card{grid-template-columns:72px minmax(0,1fr);gap:12px;padding:14px}
+  .coupon-wallet-value{min-width:72px;min-height:72px;font-size:1rem}
+  .coupon-wallet-actions{display:grid;grid-template-columns:1fr 1fr}
+  .coupon-wallet-actions .btn{text-align:center}
+}
