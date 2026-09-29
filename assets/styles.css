@@ -338,3 +338,137 @@
     justify-content:center;
   }
 }
+
+
+/* ===== Site improvements 2026-09-29 ===== */
+.store-logo-image{width:100%;height:100%;object-fit:cover;border-radius:inherit;display:block}
+.install-app-button{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.14);color:#fff;border-radius:999px;padding:9px 14px;font-weight:800;cursor:pointer}
+.install-app-button:hover{background:rgba(255,255,255,.22)}
+.catalog-sections{display:grid;gap:38px}
+.catalog-category-section{scroll-margin-top:145px}
+.category-section-heading{margin-bottom:14px}
+.category-count{font-size:.76rem;color:var(--muted);font-weight:800;background:#fff;border:1px solid var(--line);padding:5px 9px;border-radius:999px}
+.footer-address-link{text-decoration:none}
+.footer-address-link:not(.is-disabled):hover #footerAddress{text-decoration:underline;color:var(--text)}
+.footer-address-link.is-disabled{pointer-events:none}
+.floating-whatsapp{position:fixed;right:22px;bottom:24px;z-index:55;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;text-decoration:none;background:#16a34a;color:#fff;font-size:1.55rem;font-weight:900;box-shadow:0 14px 35px rgba(0,0,0,.22)}
+.floating-whatsapp:hover{transform:translateY(-2px)}
+.about-card{text-align:center;max-width:460px}
+.about-logo-wrap{display:grid;place-items:center;margin-bottom:12px}
+.about-store-logo,.about-store-logo-fallback{width:86px;height:86px;border-radius:20px;object-fit:cover}
+.about-store-logo-fallback{display:grid;place-items:center;background:#fee2e2;font-size:2.8rem}
+.about-info-list{display:grid;gap:10px;text-align:left;margin:18px 0}
+.about-info-list>div{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:12px}
+.about-info-list>div>span{font-size:1.15rem}
+.about-info-list small,.about-info-list strong{display:block}
+.about-info-list small{color:var(--muted);margin-bottom:2px}
+
+/* Account */
+.account-nav-divider{height:1px;background:var(--line);margin:6px 10px}
+.account-nav-action.danger{color:#b91c1c}
+.account-nav-action.danger:hover{background:#fee2e2;color:#991b1b}
+.identity-status{margin:10px 0 2px}
+.order-customer-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.btn-whatsapp{background:#16a34a;color:#fff;border-color:#16a34a}
+.btn-whatsapp:hover{background:#15803d;border-color:#15803d}
+.account-order-footer{align-items:flex-start}
+.account-header-actions{display:flex!important}
+
+/* Customer printable receipt */
+.receipt-body{background:#eef1f4;min-height:100vh}
+.receipt-shell{max-width:860px;margin:0 auto;padding:28px 18px 50px}
+.receipt-toolbar{display:flex;justify-content:space-between;gap:12px;margin-bottom:14px}
+.customer-receipt{padding:34px;background:#fff}
+.receipt-header{display:flex;align-items:center;gap:18px;border-bottom:2px solid #111827;padding-bottom:18px}
+.receipt-header h1{margin:4px 0 2px}
+.receipt-logo{width:72px;height:72px;object-fit:contain;border-radius:14px}
+.receipt-order-number{font-size:1.3rem;font-weight:900;margin:20px 0}
+.receipt-meta-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.receipt-meta-grid>div{border:1px solid var(--line);border-radius:10px;padding:12px}
+.receipt-meta-grid small,.receipt-meta-grid strong{display:block}
+.receipt-meta-grid small{color:var(--muted);margin-bottom:3px}
+.receipt-section{padding:18px 0;border-bottom:1px solid var(--line)}
+.receipt-section h2{font-size:1rem;margin:0 0 10px}
+.receipt-item{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-top:1px dashed var(--line)}
+.receipt-item:first-of-type{border-top:0}
+.receipt-item small{display:block;color:var(--muted);margin-top:3px}
+.receipt-totals{display:grid;gap:7px;padding:18px 0}
+.receipt-totals>div{display:flex;justify-content:space-between;gap:12px}
+.receipt-total{font-size:1.2rem;border-top:2px solid #111827;padding-top:10px;margin-top:4px}
+.receipt-footer{text-align:center;color:var(--muted);padding-top:20px}
+
+/* Pizzaria admin data */
+.store-brand-editor{display:grid;grid-template-columns:110px minmax(0,1fr);gap:18px;align-items:center;margin-bottom:18px;padding:16px;border:1px solid var(--line);border-radius:14px;background:#fafafa}
+.store-logo-preview{width:110px;height:110px;border-radius:20px;background:#fee2e2;display:grid;place-items:center;font-size:3rem;overflow:hidden}
+.store-logo-preview.has-image{background:#fff}
+.store-logo-preview img{width:100%;height:100%;object-fit:contain}
+.input-suffix{display:flex;align-items:center;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden}
+.input-suffix input{border:0!important;border-radius:0!important;min-width:0}
+.input-suffix span{padding:0 12px;color:var(--muted);font-weight:800}
+
+/* Print Agent / models */
+.agent-info-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
+.agent-info-grid>div{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fafafa}
+.agent-info-grid small,.agent-info-grid strong{display:block}
+.agent-info-grid small{color:var(--muted);margin-bottom:3px}
+.print-model-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.print-model-card{display:grid;gap:8px;border:1px solid var(--line);border-radius:14px;padding:12px;cursor:pointer;background:#fff}
+.print-model-card:has(input:checked){border-color:#b91c1c;box-shadow:0 0 0 2px rgba(185,28,28,.12)}
+.print-model-card>input{position:absolute;opacity:0;pointer-events:none}
+.print-model-card>small{color:var(--muted);line-height:1.35}
+.print-preview{height:150px;background:#f8f8f8;border:1px solid #d1d5db;box-shadow:0 6px 14px rgba(0,0,0,.06);padding:12px 8px;display:flex;flex-direction:column;gap:6px;align-items:center;justify-content:center;font-family:monospace;text-align:center}
+.print-preview i{font-style:normal;font-size:.67rem;color:#4b5563}
+.print-preview b,.print-preview strong{font-size:.73rem}
+.print-preview.thermal58{margin-inline:auto;width:78%}
+.print-preview.a4{height:170px}
+.print-preview.compact{height:120px}
+.print-preview.label{height:90px;margin-top:30px}
+
+/* Responsive overhaul */
+@media(max-width:1100px){
+  .print-model-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .agent-info-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:820px){
+  .catalog-sections{gap:28px}
+  .catalog-category-section{scroll-margin-top:126px}
+  .account-layout{grid-template-columns:1fr!important}
+  .account-sidebar{position:static!important}
+  .account-profile-summary{padding:18px}
+  .account-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  .account-nav-divider{grid-column:1/-1;margin:4px 0}
+  .account-nav-item{justify-content:flex-start}
+  .account-card-grid{grid-template-columns:1fr}
+  .order-customer-actions{width:100%;justify-content:flex-start}
+  .account-order-footer{flex-direction:column}
+  .store-brand-editor{grid-template-columns:90px minmax(0,1fr)}
+  .store-logo-preview{width:90px;height:90px}
+  .print-model-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .agent-info-grid{grid-template-columns:1fr}
+}
+@media(max-width:640px){
+  .public-header-row{gap:8px}
+  .catalog-toolbar{top:62px}
+  .category-section-heading{align-items:center}
+  .category-count{display:none}
+  .floating-whatsapp{right:16px;bottom:82px;width:48px;height:48px}
+  .account-header-actions{grid-column:auto!important;justify-content:flex-end!important}
+  .account-nav{grid-template-columns:1fr}
+  .account-nav-divider{grid-column:auto}
+  .receipt-shell{padding:10px}
+  .customer-receipt{padding:20px 16px}
+  .receipt-toolbar{flex-direction:column}
+  .receipt-meta-grid{grid-template-columns:1fr}
+  .receipt-header{align-items:flex-start}
+  .store-brand-editor{grid-template-columns:1fr;justify-items:center;text-align:center}
+  .print-model-grid{grid-template-columns:1fr}
+  .print-preview{max-width:240px;width:100%;margin-inline:auto}
+}
+@media print{
+  .no-print{display:none!important}
+  .receipt-body{background:#fff}
+  .receipt-shell{max-width:none;padding:0}
+  .customer-receipt{border:0!important;box-shadow:none!important;padding:0}
+  .receipt-header{break-inside:avoid}
+  .receipt-item,.receipt-section{break-inside:avoid}
+}
