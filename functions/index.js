@@ -380,6 +380,7 @@ export const manageStaffUser = onRequest(
         }
 
         await getAuth().updateUser(targetUid,{password});
+        await getAuth().revokeRefreshTokens(targetUid);
         await targetRef.set({
           passwordChangedAt:new Date(),
           passwordChangedBy:decoded.uid,
@@ -402,6 +403,7 @@ export const manageStaffUser = onRequest(
         }
 
         await getAuth().updateUser(targetUid,{disabled:!active});
+        if(!active) await getAuth().revokeRefreshTokens(targetUid);
         await targetRef.set({
           active,
           statusChangedAt:new Date(),
