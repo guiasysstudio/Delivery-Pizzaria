@@ -2,7 +2,7 @@ import {
   auth, authPersistenceReady, db, watchCustomer, loginWithGoogle, loginWithEmail, registerWithEmail,
   resetCustomerPassword, friendlyAuthError, lookupBrazilianZip, getCustomerProfile, saveCustomerProfile, getAddresses,
   saveAddress, setDefaultAddress, getFavorites, setFavorite, saveCustomerIdentity,
-  formatCpf, validCpf, formatPhone, validFullName
+  formatCpf, validCpf, formatPhone, validPhone, validFullName
 } from './customer-auth.js';
 import {
   collection, doc, getDoc, getDocs, runTransaction, addDoc, serverTimestamp, query, where
@@ -1023,6 +1023,12 @@ $('#registerCustomerForm').onsubmit=async e=>{
     $('#registerAuthError').classList.remove('hidden');
     return;
   }
+  if(!validPhone(phone)){
+    $('#registerAuthError').textContent='Informe um telefone válido com DDD.';
+    $('#registerAuthError').classList.remove('hidden');
+    $('#registerPhone').focus();
+    return;
+  }
   if(!validCpf(cpf)){
     $('#registerAuthError').textContent='Informe um CPF válido.';
     $('#registerAuthError').classList.remove('hidden');
@@ -1191,6 +1197,22 @@ $('#addressZip')?.addEventListener('blur',async()=>{
 $('#addressEditorForm').onsubmit=async e=>{
   e.preventDefault();
   if(!customer) return;
+
+  const phone=$('#addressPhone').value.trim();
+  const cep=$('#addressZip').value.replace(/\D/g,'');
+  if(!validPhone(phone)){
+    $('#addressEditorError').textContent='Informe um telefone válido com DDD.';
+    $('#addressEditorError').classList.remove('hidden');
+    $('#addressPhone').focus();
+    return;
+  }
+  if(cep&&cep.length!==8){
+    $('#addressEditorError').textContent='Informe um CEP válido no formato 00000-000.';
+    $('#addressEditorError').classList.remove('hidden');
+    $('#addressZip').focus();
+    return;
+  }
+
   try{
     const id=await saveAddress(customer.uid,{
       label:$('#addressLabel').value,zip:$('#addressZip').value,street:$('#addressStreet').value,
