@@ -175,7 +175,7 @@ bindAccountMask('#profileCpf',formatCpf);
 bindAccountMask('#accAddressPhone',formatPhone);
 bindAccountMask('#accAddressZip',formatAccountCep);
 
-$('.account-nav-item').forEach(b=>b.onclick=()=>openSection(b.dataset.section));
+$$('.account-nav-item').forEach(b=>b.onclick=()=>openSection(b.dataset.section));
 
 function openSection(section){
   const valid=['profile','addresses','orders','coupons','favorites'];
