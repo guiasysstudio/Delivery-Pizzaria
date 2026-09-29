@@ -1,7 +1,8 @@
 import {
   auth, authPersistenceReady, db, watchCustomer, loginWithGoogle, loginWithEmail, registerWithEmail,
   resetCustomerPassword, friendlyAuthError, lookupBrazilianZip, getCustomerProfile, saveCustomerProfile, getAddresses,
-  saveAddress, setDefaultAddress, getFavorites, setFavorite
+  saveAddress, setDefaultAddress, getFavorites, setFavorite, saveCustomerIdentity,
+  formatCpf, validCpf, formatPhone, validFullName
 } from './customer-auth.js';
 import {
   collection, doc, getDoc, getDocs, runTransaction, addDoc, serverTimestamp, query, where
@@ -27,7 +28,17 @@ const defaultSettings={
   phone:'',
   storeAddress:'',
   storeZip:'',
+  storeStreet:'',
+  storeNumber:'',
+  storeNeighborhood:'',
+  storeComplement:'',
+  storeCity:'',
+  storeState:'',
   storeLocation:null,
+  storeLogo:'',
+  googleMapsUrl:'',
+  whatsapp:'',
+  customerCancelMinutes:2,
   deliveryPricingMode:'fixed',
   deliveryFee:5,
   deliveryZones:[],
@@ -169,13 +180,85 @@ function isOpen(){
   return now>=day.open||now<=day.close;
 }
 
+function storeAddressText(){
+  const structured=[
+    [settings?.storeStreet,settings?.storeNumber].filter(Boolean).join(', '),
+    settings?.storeNeighborhood,
+    [settings?.storeCity,settings?.storeState].filter(Boolean).join('/')
+  ].filter(Boolean).join(' • ');
+  return structured||settings?.storeAddress||'';
+}
+
+function normalizedWhatsapp(){
+  const digits=String(settings?.whatsapp||settings?.phone||'').replace(/\D/g,'');
+  if(!digits) return '';
+  return digits.startsWith('55')?digits:'55'+digits;
+}
+
+function storeMapsUrl(){
+  if(settings?.googleMapsUrl) return settings.googleMapsUrl;
+  const address=storeAddressText();
+  return address?'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(address):'';
+}
+
+function renderStoreIdentity(){
+  const logo=settings?.storeLogo||'';
+  const headerLogo=$('#headerStoreLogo');
+  const headerFallback=$('#headerStoreLogoFallback');
+  if(headerLogo&&headerFallback){
+    headerLogo.classList.toggle('hidden',!logo);
+    headerFallback.classList.toggle('hidden',!!logo);
+    if(logo){
+      headerLogo.src=pathImage(logo);
+      headerLogo.onerror=()=>{headerLogo.classList.add('hidden');headerFallback.classList.remove('hidden');};
+    }
+  }
+
+  const aboutLogo=$('#aboutStoreLogo');
+  const aboutFallback=$('#aboutStoreLogoFallback');
+  if(aboutLogo&&aboutFallback){
+    aboutLogo.classList.toggle('hidden',!logo);
+    aboutFallback.classList.toggle('hidden',!!logo);
+    if(logo){
+      aboutLogo.src=pathImage(logo);
+      aboutLogo.onerror=()=>{aboutLogo.classList.add('hidden');aboutFallback.classList.remove('hidden');};
+    }
+  }
+
+  const address=storeAddressText();
+  const maps=storeMapsUrl();
+  const whatsapp=normalizedWhatsapp();
+
+  $('#aboutStoreName').textContent=settings?.storeName||'Pizzaria';
+  $('#aboutStoreSubtitle').textContent=settings?.subtitle||'';
+  $('#aboutStoreAddress').textContent=address||'Não informado';
+  $('#aboutStorePhone').textContent=settings?.whatsapp||settings?.phone||'Não informado';
+
+  const mapsLink=$('#aboutMapsLink');
+  mapsLink.classList.toggle('hidden',!maps);
+  if(maps) mapsLink.href=maps;
+
+  const footerLink=$('#footerAddressLink');
+  $('#footerAddress').textContent=address;
+  footerLink.classList.toggle('is-disabled',!maps);
+  if(maps) footerLink.href=maps; else footerLink.removeAttribute('href');
+
+  const waMessage='Olá! Vim pelo site da '+(settings?.storeName||'pizzaria')+'.';
+  const waUrl=whatsapp?'https://wa.me/'+whatsapp+'?text='+encodeURIComponent(waMessage):'';
+  const aboutWa=$('#aboutWhatsappLink');
+  const floatingWa=$('#floatingWhatsapp');
+  aboutWa.classList.toggle('hidden',!waUrl);
+  floatingWa.classList.toggle('hidden',!waUrl);
+  if(waUrl){aboutWa.href=waUrl;floatingWa.href=waUrl;}
+}
+
 function renderStore(){
   document.title=`${settings.storeName} • Delivery`;
   $('#storeName').textContent=settings.storeName;
   $('#headerStoreName').textContent=settings.storeName;
   $('#storeSubtitle').textContent=settings.subtitle||'';
   $('#footerStore').textContent=settings.storeName;
-  $('#footerAddress').textContent=settings.storeAddress||'';
+  renderStoreIdentity();
   $('#minimumOrderText').textContent=Number(settings.minimumOrder||0)>0?`Pedido mínimo ${money(settings.minimumOrder)}`:'';
   const open=isOpen();
   $('#storeStatus').textContent=open?'● Aberto agora':'● Fechado agora';
@@ -849,6 +932,8 @@ $('#forgotPasswordBtn').onclick=async()=>{
   }catch(err){showAuthError(friendlyAuthError(err));}
 };
 
+$('#aboutBtn')?.addEventListener('click',()=>$('#aboutDialog').showModal());
+$('#footerAboutBtn')?.addEventListener('click',()=>$('#aboutDialog').showModal());
 $('#accountBtn').onclick=()=>customer?location.href='./account/':openAuth();
 $('#addressSelectorBtn').onclick=openAddressSelector;
 $('#addressSelectorClose').onclick=()=>$('#addressSelectorDialog').close();
