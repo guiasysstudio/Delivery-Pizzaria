@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#fff7ed"/>
+  <rect width="1200" height="86" fill="#b91c1c"/>
+  <circle cx="190" cy="315" r="130" fill="#f59e0b"/>
+  <circle cx="190" cy="315" r="106" fill="#fde68a"/>
+  <path d="M190 209 284 382c-58 36-130 36-188 0z" fill="#fbbf24"/>
+  <path d="M190 209 284 382M190 209 96 382" stroke="#b45309" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="165" cy="292" r="16" fill="#b91c1c"/>
+  <circle cx="223" cy="324" r="16" fill="#b91c1c"/>
+  <circle cx="172" cy="359" r="16" fill="#b91c1c"/>
+  <text x="380" y="280" font-family="Arial,Helvetica,sans-serif" font-size="72" font-weight="700" fill="#111827">Delivery Pizzaria</text>
+  <text x="380" y="355" font-family="Arial,Helvetica,sans-serif" font-size="34" fill="#4b5563">Cardápio online • pedidos • acompanhamento</text>
+  <text x="380" y="410" font-family="Arial,Helvetica,sans-serif" font-size="28" fill="#b91c1c">Peça de forma rápida e segura.</text>
+</svg>
