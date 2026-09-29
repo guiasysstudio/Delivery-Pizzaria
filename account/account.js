@@ -239,7 +239,7 @@ $('#profilePhotoFile')?.addEventListener('change',async e=>{
     renderProfilePhoto();
   }catch(err){
     console.error(err);
-    showToast(err.message||'Não foi possível preparar a foto.');
+    showToast(err.message||'Não foi possível preparar a foto.','error');
   }finally{
     button.disabled=false;
     button.textContent=original;
@@ -259,17 +259,17 @@ $('#profileForm').onsubmit=async e=>{
   const cpf=$('#profileCpf').value.trim();
 
   if(!validFullName(name)){
-    showToast('Informe seu nome completo, com pelo menos nome e sobrenome.');
+    showToast('Informe seu nome completo, com pelo menos nome e sobrenome.','warning');
     $('#profileName').focus();
     return;
   }
   if(!validPhone(phone)){
-    showToast('Informe um telefone válido com DDD.');
+    showToast('Informe um telefone válido com DDD.','warning');
     $('#profilePhone').focus();
     return;
   }
   if(!validCpf(cpf)){
-    showToast('Informe um CPF válido.');
+    showToast('Informe um CPF válido.','warning');
     $('#profileCpf').focus();
     return;
   }
@@ -305,7 +305,7 @@ $('#profileForm').onsubmit=async e=>{
     const code=String(err?.code||'');
     if(code.includes('cpf_already_registered')) showToast('Este CPF já está vinculado a outra conta.','error');
     else if(code.includes('cpf_change_not_allowed')) showToast('O CPF confirmado desta conta não pode ser alterado pelo site.','warning');
-    else if(code.includes('invalid_phone')) showToast('Informe um telefone válido com DDD.');
+    else if(code.includes('invalid_phone')) showToast('Informe um telefone válido com DDD.','warning');
     else showToast('Não foi possível salvar seus dados. Tente novamente.','error');
   }
 };
@@ -537,7 +537,8 @@ function renderOrders(){
         ?'O prazo para cancelamento deste pedido terminou.'
         :code.includes('cancel_not_allowed')
           ?'Este pedido já avançou e não pode mais ser cancelado pelo site.'
-          :'Não foi possível cancelar o pedido.');
+          :'Não foi possível cancelar o pedido.',
+        code.includes('cancel_window_expired')||code.includes('cancel_not_allowed')?'warning':'error');
       b.disabled=false;
       b.textContent='Cancelar pedido';
     }
