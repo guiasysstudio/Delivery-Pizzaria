@@ -482,6 +482,7 @@ export const customerIdentity = onRequest(
         res.json({
           ok:true,
           identityComplete:snap.exists&&validCpf(data?.cpf),
+          cpf:snap.exists?normalizeCpf(data?.cpf):"",
           cpfMasked:snap.exists?maskCpf(data?.cpf):"",
           email:decoded.email||"",
           emailVerified:decoded.email_verified===true
@@ -557,6 +558,7 @@ export const customerIdentity = onRequest(
       res.json({
         ok:true,
         identityComplete:true,
+        cpf,
         cpfMasked:maskCpf(cpf),
         email:decoded.email||"",
         emailVerified:decoded.email_verified===true
