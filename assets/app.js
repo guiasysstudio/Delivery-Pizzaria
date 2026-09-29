@@ -1642,12 +1642,24 @@ installDialogDismissal();
 
 loadStore().then(async()=>{
   await authPersistenceReady;
-  if(new URLSearchParams(location.search).get('login')==='1'){
-    if(auth.currentUser){
-      clearLoginQuery();
-    }else{
-      openAuth();
-    }
+  const params=new URLSearchParams(location.search);
+  if(params.get('login')==='1'){
+    if(auth.currentUser) clearLoginQuery();
+    else openAuth();
+  }
+  if(params.get('checkout')==='1'&&auth.currentUser){
+    const url=new URL(location.href);
+    url.searchParams.delete('checkout');
+    history.replaceState(null,'',url.pathname+(url.search?url.search:'')+url.hash);
+    let tries=0;
+    const resume=()=>{
+      if(customer&&customerProfile?.identityComplete){
+        openCheckout();
+        return;
+      }
+      if(++tries<12) setTimeout(resume,150);
+    };
+    resume();
   }
 });
 setInterval(()=>{
