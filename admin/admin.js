@@ -688,7 +688,8 @@ $('#storeLogoFile')?.addEventListener('change',async e=>{
     const scale=Math.min(size/img.naturalWidth,size/img.naturalHeight);
     const w=img.naturalWidth*scale,h=img.naturalHeight*scale;
     ctx.drawImage(img,(size-w)/2,(size-h)/2,w,h);
-    const base64=canvas.toDataURL('image/webp',.9).split(',')[1];
+    // PNG mantém transparência e é decodificado de forma nativa pelo Windows/Print Agent.
+    const base64=canvas.toDataURL('image/png').split(',')[1];
 
     const token=await auth.currentUser.getIdToken();
     const response=await fetch(STORE_LOGO_UPLOAD_ENDPOINT,{
