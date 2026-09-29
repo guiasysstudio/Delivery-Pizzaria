@@ -58,8 +58,9 @@ jobs:
               js = js_path.read_text(encoding='utf-8')
               html = html_path.read_text(encoding='utf-8')
               ids = set(re.findall(r'id=["\']([^"\']+)["\']', html))
+              dynamic_ids = set(re.findall(r'id=["\']([^"\']+)["\']', js))
               refs = set(re.findall(r"\$\('#([A-Za-z0-9_-]+)'\)", js))
-              missing = sorted(refs - ids)
+              missing = sorted(refs - ids - dynamic_ids)
               if missing:
                   raise SystemExit(f'{js_path}: IDs ausentes em {html_path}: {missing}')
               print(f'{js_path}: referências de ID OK ({len(refs)})')
