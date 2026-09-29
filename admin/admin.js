@@ -481,12 +481,7 @@ function refreshUserRoleSelect(){
   if([...select.options].some(o=>o.value===current)) select.value=current;
 }
 
-async function loadSettings(){
-  const snap=await getDoc(doc(db,'settings','store'));
-  settings=snap.exists()?{...defaults,...snap.data()}:defaults;
-  if(!snap.exists()&&['master','manager'].includes(currentProfile?.role)){
-    await setDoc(doc(db,'settings','store'),settings);
-  }
+function renderAdminBranding(){
   $('#adminStoreName').textContent=settings.storeName||'Pizzaria';
   applyBrandTheme(settings.primaryColor||'#b91c1c');
 
@@ -503,8 +498,20 @@ async function loadSettings(){
         logo.classList.add('hidden');
         fallback.classList.remove('hidden');
       };
+    }else{
+      logo.removeAttribute('src');
+      logo.alt='';
     }
   }
+}
+
+async function loadSettings(){
+  const snap=await getDoc(doc(db,'settings','store'));
+  settings=snap.exists()?{...defaults,...snap.data()}:defaults;
+  if(!snap.exists()&&['master','manager'].includes(currentProfile?.role)){
+    await setDoc(doc(db,'settings','store'),settings);
+  }
+  renderAdminBranding();
 }
 
 async function loadCategories(){
@@ -2870,7 +2877,7 @@ $('#settingsForm').onsubmit=async e=>{
   };
 
   await setDoc(doc(db,'settings','store'),settings,{merge:true});
-  $('#adminStoreName').textContent=settings.storeName;
+  renderAdminBranding();
   $('#settingsSaved').classList.remove('hidden');
   setTimeout(()=>$('#settingsSaved').classList.add('hidden'),2200);
 };
