@@ -489,6 +489,22 @@ async function loadSettings(){
   }
   $('#adminStoreName').textContent=settings.storeName||'Pizzaria';
   applyBrandTheme(settings.primaryColor||'#b91c1c');
+
+  const storeLogo=String(settings.storeLogo||'').trim();
+  const logo=$('#adminHeaderStoreLogo');
+  const fallback=$('#adminHeaderStoreLogoFallback');
+  if(logo&&fallback){
+    logo.classList.toggle('hidden',!storeLogo);
+    fallback.classList.toggle('hidden',!!storeLogo);
+    if(storeLogo){
+      logo.src=/^https?:\/\//i.test(storeLogo)?storeLogo:'../'+storeLogo.replace(/^\.?\//,'').replace(/^\//,'');
+      logo.alt='Logo da '+(settings.storeName||'pizzaria');
+      logo.onerror=()=>{
+        logo.classList.add('hidden');
+        fallback.classList.remove('hidden');
+      };
+    }
+  }
 }
 
 async function loadCategories(){
