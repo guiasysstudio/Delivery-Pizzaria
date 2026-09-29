@@ -37,6 +37,87 @@ export const authPersistenceReady=setPersistence(auth,browserLocalPersistence).c
 export const googleProvider=new GoogleAuthProvider();
 googleProvider.setCustomParameters({prompt:'select_account'});
 
+const CUSTOMER_IDENTITY_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/customerIdentity';
+const CUSTOMER_CANCEL_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/cancelCustomerOrder';
+
+export function normalizeCpf(value){
+  return String(value||'').replace(/\D/g,'').slice(0,11);
+}
+
+export function formatCpf(value){
+  const digits=normalizeCpf(value);
+  return digits
+    .replace(/^(\d{3})(\d)/,'$1.$2')
+    .replace(/^(\d{3})\.(\d{3})(\d)/,'$1.$2.$3')
+    .replace(/\.(\d{3})(\d{1,2})$/,'.$1-$2');
+}
+
+export function validCpf(value){
+  const cpf=normalizeCpf(value);
+  if(cpf.length!==11||/^(\d)\1{10}$/.test(cpf)) return false;
+  const digit=(base,factor)=>{
+    let total=0;
+    for(const ch of base) total+=Number(ch)*factor--;
+    const mod=(total*10)%11;
+    return mod===10?0:mod;
+  };
+  return digit(cpf.slice(0,9),10)===Number(cpf[9])&&
+    digit(cpf.slice(0,10),11)===Number(cpf[10]);
+}
+
+export function normalizePhone(value){
+  return String(value||'').replace(/\D/g,'').slice(0,11);
+}
+
+export function formatPhone(value){
+  const d=normalizePhone(value);
+  if(d.length<=2) return d?('('+d):'';
+  if(d.length<=6) return '('+d.slice(0,2)+') '+d.slice(2);
+  if(d.length<=10) return '('+d.slice(0,2)+') '+d.slice(2,6)+'-'+d.slice(6);
+  return '('+d.slice(0,2)+') '+d.slice(2,7)+'-'+d.slice(7);
+}
+
+export function validFullName(value){
+  return String(value||'').trim().split(/\s+/).filter(Boolean).length>=2;
+}
+
+async function authenticatedJson(endpoint,options={}){
+  await authPersistenceReady;
+  const user=auth.currentUser;
+  if(!user) throw Object.assign(new Error('auth-required'),{code:'auth/required'});
+  const token=await user.getIdToken();
+  const response=await fetch(endpoint,{
+    ...options,
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,...(options.headers||{})}
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok){
+    const err=new Error(data?.message||data?.error||'request-failed');
+    err.code=data?.error||('http/'+response.status);
+    err.data=data;
+    throw err;
+  }
+  return data;
+}
+
+export async function getCustomerIdentity(){
+  return authenticatedJson(CUSTOMER_IDENTITY_ENDPOINT,{method:'GET',cache:'no-store'});
+}
+
+export async function saveCustomerIdentity({name,phone,cpf}){
+  return authenticatedJson(CUSTOMER_IDENTITY_ENDPOINT,{
+    method:'POST',
+    body:JSON.stringify({name:String(name||'').trim(),phone:String(phone||'').trim(),cpf:normalizeCpf(cpf)})
+  });
+}
+
+export async function cancelCustomerOrder(orderId){
+  return authenticatedJson(CUSTOMER_CANCEL_ENDPOINT,{
+    method:'POST',
+    body:JSON.stringify({orderId:String(orderId||'')})
+  });
+}
+
 export function watchCustomer(callback){
   let disposed=false;
   let unsubscribe=()=>{};
@@ -107,6 +188,7 @@ export async function ensureCustomerProfile(user,extra={}){
       phone:extra.phone||'',
       photoURL:user.photoURL||'',
       defaultAddressId:null,
+      identityComplete:false,
       createdAt:serverTimestamp(),
       updatedAt:serverTimestamp()
     });
