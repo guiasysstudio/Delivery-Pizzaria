@@ -61,7 +61,11 @@
             </div>
             <div id="cashOpenState" class="hidden">
               <div id="cashSessionMeta" class="cash-session-meta"></div>
-              <button id="closeCashBtn" class="btn btn-danger" type="button">Fechar caixa</button>
+              <div class="section-actions">
+                <button id="cashSupplyBtn" class="btn btn-secondary" type="button">+ Suprimento</button>
+                <button id="cashWithdrawalBtn" class="btn btn-secondary" type="button">− Sangria</button>
+                <button id="closeCashBtn" class="btn btn-danger" type="button">Fechar caixa</button>
+              </div>
             </div>
           </div>
           <div class="panel settings-card cash-summary-card">
@@ -76,6 +80,7 @@
             </div>
           </div>
         </div>
+        <div class="panel" style="margin-top:16px"><div class="panel-head"><strong>Movimentos do caixa atual</strong></div><div id="cashMovements" class="data-list"></div></div>
         <div class="panel" style="margin-top:16px"><div class="panel-head"><strong>Histórico de caixas</strong></div><div id="cashHistory" class="data-list"></div></div>
       </section>
 
@@ -369,6 +374,18 @@
       <div id="rolePermissionsEditor" class="permission-grid"></div>
       <div id="roleEditorError" class="alert alert-error hidden"></div>
       <button class="btn btn-primary btn-block" type="submit">Salvar perfil</button>
+    </form>
+  </dialog>
+
+  <dialog id="cashMovementDialog" class="modal">
+    <form id="cashMovementForm" class="modal-card" novalidate>
+      <button class="modal-close dialog-close" type="button">×</button>
+      <span class="eyebrow">MOVIMENTO DE CAIXA</span><h2 id="cashMovementTitle">Suprimento</h2>
+      <input id="cashMovementType" type="hidden" value="supply">
+      <label class="field"><span>Valor (R$)</span><input id="cashMovementAmount" type="number" min="0.01" step="0.01" required></label>
+      <label class="field"><span>Motivo / observação</span><textarea id="cashMovementNote" rows="3" maxlength="240" placeholder="Ex.: troco adicional, retirada para pagamento..."></textarea></label>
+      <div id="cashMovementError" class="alert alert-error hidden"></div>
+      <button class="btn btn-primary btn-block" type="submit">Salvar movimento</button>
     </form>
   </dialog>
 
