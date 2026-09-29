@@ -1512,6 +1512,9 @@ $('#checkoutForm').addEventListener('submit',async e=>{
     if(!profilePhone){
       return showCheckoutError('Informe um telefone de contato.');
     }
+    if(!validPhone(profilePhone)){
+      return showCheckoutError('Informe um telefone válido com DDD.');
+    }
 
     if(profilePhone!==customerProfile?.phone){
       await saveCustomerProfile(customer.uid,{name:profileName,phone:profilePhone});
