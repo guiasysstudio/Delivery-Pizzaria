@@ -2837,10 +2837,10 @@ function renderUsers(){
       </div>
     </div>`).join(''):'<div class="empty-state">Nenhum usuário cadastrado.</div>';
 
-  $('.edit-user').forEach(b=>b.onclick=()=>editUser(b.dataset.uid));
-  $('.password-user').forEach(b=>b.onclick=()=>openUserPasswordDialog(b.dataset.uid));
-  $('.toggle-user').forEach(b=>b.onclick=()=>toggleUser(b.dataset.uid));
-  $('.delete-user').forEach(b=>b.onclick=()=>removeUser(b.dataset.uid));
+  document.querySelectorAll('.edit-user').forEach(b=>b.onclick=()=>editUser(b.dataset.uid));
+  document.querySelectorAll('.password-user').forEach(b=>b.onclick=()=>openUserPasswordDialog(b.dataset.uid));
+  document.querySelectorAll('.toggle-user').forEach(b=>b.onclick=()=>toggleUser(b.dataset.uid));
+  document.querySelectorAll('.delete-user').forEach(b=>b.onclick=()=>removeUser(b.dataset.uid));
 }
 
 $('#newUserBtn').onclick=()=>{
