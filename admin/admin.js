@@ -921,17 +921,19 @@ function verifyOrderPricing(order){
 }
 
 function renderStats(){
-  const today=new Intl.DateTimeFormat('en-CA',{timeZone:settings.timezone||'America/Porto_Velho'}).format(new Date());
-  const sameDay=o=>{
-    const d=o.createdAt?.toDate?.();
-    return d&&new Intl.DateTimeFormat('en-CA',{timeZone:settings.timezone||'America/Porto_Velho'}).format(d)===today;
+  const timezone=settings.timezone||'America/Porto_Velho';
+  const today=new Intl.DateTimeFormat('en-CA',{timeZone:timezone}).format(new Date());
+  const dateInBusinessDay=ts=>{
+    const d=ts?.toDate?.();
+    return d&&new Intl.DateTimeFormat('en-CA',{timeZone:timezone}).format(d)===today;
   };
   $('#statPending').textContent=orders.filter(o=>o.status==='pending').length;
   $('#statAccepted').textContent=orders.filter(o=>o.status==='accepted').length;
   $('#statPreparing').textContent=orders.filter(o=>o.status==='preparing').length;
-  const todayOrders=orders.filter(sameDay);
+  const todayOrders=orders.filter(o=>dateInBusinessDay(o.createdAt));
+  const completedToday=orders.filter(o=>o.status==='completed'&&dateInBusinessDay(o.completedAt||o.createdAt));
   $('#statToday').textContent=todayOrders.length;
-  $('#statRevenueToday').textContent=money(todayOrders.filter(o=>o.status==='completed').reduce((sum,o)=>sum+Number(o.total||0),0));
+  $('#statRevenueToday').textContent=money(completedToday.reduce((sum,o)=>sum+Number(o.total||0),0));
   const p=orders.filter(o=>o.status==='pending').length;
   $('#pendingBadge').textContent=p;
   $('#pendingBadge').classList.toggle('hidden',p===0);
@@ -1753,10 +1755,15 @@ function businessDateFor(value=new Date()){
 function orderWithinCash(order,session){
   if(!session||order.status!=='completed') return false;
 
-  // Caixas novos são diários: a hora em que o operador clicou em "Abrir"
-  // não exclui pedidos realizados antes naquele mesmo dia.
+  // O caixa é agrupado pelo dia em que a venda foi efetivamente concluída.
+  // Isso evita jogar no dia anterior um pedido criado antes da meia-noite,
+  // mas pago/concluído depois dela.
   if(session.businessDate){
-    const orderDay=businessDateFor(order.createdAt?.toDate?.()||new Date(order.createdAt?.toMillis?.()||0));
+    const financialDate=
+      order.completedAt?.toDate?.() ||
+      order.createdAt?.toDate?.() ||
+      new Date(order.completedAt?.toMillis?.()||order.createdAt?.toMillis?.()||0);
+    const orderDay=businessDateFor(financialDate);
     return orderDay===session.businessDate;
   }
 
@@ -1836,8 +1843,28 @@ function renderCash(){
 }
 
 $('#openCashBtn')?.addEventListener('click',async()=>{
-  if(!hasPermission('cashOperate')||currentCashSession) return;
+  if(!hasPermission('cashOperate')) return;
+
+  // Atualiza antes de abrir para não trabalhar com estado antigo de outra estação.
+  await loadCashSessions();
+  if(currentCashSession){
+    alert('Já existe um caixa aberto. A tela foi atualizada com a sessão atual.');
+    return;
+  }
+
+  const businessDate=businessDateFor();
+  if(cashSessions.some(session=>session.businessDate===businessDate&&session.status==='closed')){
+    alert('O caixa deste dia operacional já foi encerrado. Para evitar duplicidade financeira, não é possível abrir uma segunda sessão no mesmo dia.');
+    return;
+  }
+
   const openingAmount=Number($('#cashOpeningAmount').value||0);
+  if(!Number.isFinite(openingAmount)||openingAmount<0){
+    alert('Informe um valor inicial válido, igual ou maior que zero.');
+    $('#cashOpeningAmount').focus();
+    return;
+  }
+
   const openingNote=$('#cashOpeningNote').value.trim();
   const stateRef=doc(db,'cashState','current');
   const sessionRef=doc(collection(db,'cashSessions'));
@@ -1849,7 +1876,7 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
 
       tx.set(sessionRef,{
         status:'open',
-        businessDate:businessDateFor(),
+        businessDate,
         openingAmount,
         openingNote,
         openedBy:auth.currentUser.uid,
@@ -1939,6 +1966,12 @@ $('#cashCloseForm')?.addEventListener('submit',async e=>{
   if(!currentCashSession) return;
   const session=currentCashSession;
   const declared=Number($('#cashClosingAmount').value||0);
+  if(!Number.isFinite(declared)||declared<0){
+    $('#cashCloseError').textContent='Informe um valor contado válido, igual ou maior que zero.';
+    $('#cashCloseError').classList.remove('hidden');
+    $('#cashClosingAmount').focus();
+    return;
+  }
   const summary=cashSummary(session);
   const expected=Number(session.openingAmount||0)+summary.money+summary.supplies-summary.withdrawals;
   const stateRef=doc(db,'cashState','current');
@@ -1947,7 +1980,7 @@ $('#cashCloseForm')?.addEventListener('submit',async e=>{
   try{
     await runTransaction(db,async tx=>{
       const state=await tx.get(stateRef);
-      if(state.exists()&&state.data()?.sessionId!==session.id) throw new Error('cash-session-changed');
+      if(!state.exists()||state.data()?.sessionId!==session.id) throw new Error('cash-session-changed');
 
       tx.update(sessionRef,{
         status:'closed',
@@ -1961,7 +1994,7 @@ $('#cashCloseForm')?.addEventListener('submit',async e=>{
         summary,
         updatedAt:serverTimestamp()
       });
-      if(state.exists()) tx.delete(stateRef);
+      tx.delete(stateRef);
     });
     $('#cashCloseDialog').close();
     await loadCashSessions();
