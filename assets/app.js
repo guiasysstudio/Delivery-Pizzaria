@@ -1709,7 +1709,8 @@ function updateInstallButton(){
   if(!button) return;
   const canOffer=!isStandalonePwa()&&(!!deferredInstallPrompt||isIosDevice());
   button.classList.toggle('hidden',!canOffer);
-  button.textContent=isIosDevice()&&!deferredInstallPrompt?'▣ Adicionar à Tela de Início':'▣ Instalar aplicativo';
+  const label=isIosDevice()&&!deferredInstallPrompt?'Adicionar à Tela de Início':'Instalar aplicativo';
+  button.innerHTML=iconHtml('download')+'<span>'+label+'</span>';
 }
 
 window.addEventListener('beforeinstallprompt',event=>{
