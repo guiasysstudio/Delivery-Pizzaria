@@ -49,6 +49,17 @@
       <section id="account-section-profile" class="account-section hidden">
         <div class="section-heading"><div><span class="eyebrow">MINHA CONTA</span><h1>Meus dados</h1></div></div>
         <form id="profileForm" class="panel settings-card account-form">
+          <div class="profile-photo-editor">
+            <div id="profilePhotoPreview" class="profile-photo-preview">👤</div>
+            <div class="profile-photo-actions">
+              <div><strong>Foto de perfil</strong><small class="muted">A foto do Google é usada automaticamente. Você também pode escolher uma foto própria.</small></div>
+              <input id="profilePhotoFile" class="hidden" type="file" accept="image/png,image/jpeg,image/webp">
+              <div class="section-actions">
+                <button id="chooseProfilePhotoBtn" class="btn btn-secondary" type="button">Escolher foto</button>
+                <button id="useGooglePhotoBtn" class="btn btn-ghost" type="button">Usar foto do Google</button>
+              </div>
+            </div>
+          </div>
           <div class="form-grid">
             <label class="field"><span>Nome completo</span><input id="profileName" required maxlength="100"></label>
             <label class="field"><span>Telefone / WhatsApp</span><input id="profilePhone" required maxlength="30" inputmode="tel"></label>
