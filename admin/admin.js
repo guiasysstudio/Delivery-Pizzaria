@@ -1989,7 +1989,7 @@ function editProduct(id){
   $('#productDescription').value=p?.description||'';
   $('#productPrice').value=p?.price??'';
   $('#productOrder').value=p?.order??0;
-  $('#productImage').value=p?.image||'';
+  $('#productImage').value=p?.image||'assets/products/placeholder.svg';
   renderPriceRows('productSizesEditor','productSizesEmpty',p?.sizes||[]);
   renderPriceRows('productExtrasEditor','productExtrasEmpty',p?.extras||[]);
   const inferredPizza=p?.isPizza??/pizza/i.test(categories.find(cat=>cat.id===(p?.categoryId||$('#productCategory').value))?.name||'');
@@ -1998,8 +1998,8 @@ function editProduct(id){
   $('#productActive').checked=p?.active!==false;
   $('#productFeatured').checked=!!p?.featured;
   $('#productEditorError').classList.add('hidden');
-  const preview=previewProductImagePath(p?.image);
-  if(preview) loadImageIntoEditor(preview); else resetImageEditor();
+  const preview=previewProductImagePath(p?.image||'assets/products/placeholder.svg');
+  loadImageIntoEditor(preview);
   $('#productEditor').showModal();
 }
 
