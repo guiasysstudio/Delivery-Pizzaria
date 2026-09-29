@@ -159,6 +159,11 @@ function renderHeader(){
   renderProfilePhoto();
 }
 
+function formatAccountCep(value){
+  const d=String(value||'').replace(/\D/g,'').slice(0,8);
+  return d.length>5?d.slice(0,5)+'-'+d.slice(5):d;
+}
+
 function bindAccountMask(selector,formatter){
   const input=$(selector);
   if(!input) return;
@@ -168,6 +173,7 @@ function bindAccountMask(selector,formatter){
 bindAccountMask('#profilePhone',formatPhone);
 bindAccountMask('#profileCpf',formatCpf);
 bindAccountMask('#accAddressPhone',formatPhone);
+bindAccountMask('#accAddressZip',formatAccountCep);
 
 $('.account-nav-item').forEach(b=>b.onclick=()=>openSection(b.dataset.section));
 
