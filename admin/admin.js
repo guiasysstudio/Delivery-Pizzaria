@@ -691,7 +691,7 @@ $('#storeLogoFile')?.addEventListener('change',async e=>{
   const file=e.target.files?.[0];
   if(!file) return;
   if(file.size>8*1024*1024){
-    showToast('Escolha uma imagem de até 8 MB.');
+    showToast('Escolha uma imagem de até 8 MB.','warning');
     e.target.value='';
     return;
   }
@@ -1046,7 +1046,7 @@ function renderOrders(){
       await updateOrderStatus(order,b.dataset.status);
     }catch(err){
       console.error(err);
-      showToast('Não foi possível atualizar o pedido.');
+      showToast('Não foi possível atualizar o pedido.','error');
     }finally{
       b.disabled=false;
     }
@@ -1424,7 +1424,7 @@ $('#saveAutoAcceptBtn')?.addEventListener('click',async()=>{
     showToast('Modo de confirmação atualizado.','success');
   }catch(err){
     console.error(err);
-    showToast('Você não tem permissão para alterar o modo de confirmação.');
+    showToast('Você não tem permissão para alterar o modo de confirmação.','error');
   }
 });
 
@@ -1460,7 +1460,7 @@ $('#testPrintBtn')?.addEventListener('click',async()=>{
     showToast('Teste enviado ao Print Agent usando o modelo selecionado.','success');
   }catch(err){
     console.error(err);
-    showToast('Não foi possível imprimir. Verifique se o Print Agent está aberto e se há uma impressora configurada nele.');
+    showToast('Não foi possível imprimir. Verifique se o Print Agent está aberto e se há uma impressora configurada nele.','error');
   }
 });
 
@@ -1563,7 +1563,7 @@ $('#roleEditorForm')?.addEventListener('submit',async e=>{
 
 async function deleteRole(id){
   if(!hasPermission('rolesManage')) return;
-  if(users.some(u=>u.role===id)) return showToast('Este perfil está sendo usado por um ou mais usuários. Troque o perfil desses usuários antes de excluir.');
+  if(users.some(u=>u.role===id)) return showToast('Este perfil está sendo usado por um ou mais usuários. Troque o perfil desses usuários antes de excluir.','warning');
   const role=roles.find(r=>r.id===id);
   if(!role||role.system) return;
   if(!await confirmAction(`Excluir o perfil “${role.name}”?`,{title:'Excluir perfil',confirmText:'Excluir',danger:true})) return;
@@ -1908,19 +1908,19 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
   // Atualiza antes de abrir para não trabalhar com estado antigo de outra estação.
   await loadCashSessions();
   if(currentCashSession){
-    showToast('Já existe um caixa aberto. A tela foi atualizada com a sessão atual.');
+    showToast('Já existe um caixa aberto. A tela foi atualizada com a sessão atual.','warning');
     return;
   }
 
   const businessDate=businessDateFor();
   if(cashSessions.some(session=>session.businessDate===businessDate&&session.status==='closed')){
-    showToast('O caixa deste dia operacional já foi encerrado. Para evitar duplicidade financeira, não é possível abrir uma segunda sessão no mesmo dia.');
+    showToast('O caixa deste dia operacional já foi encerrado. Para evitar duplicidade financeira, não é possível abrir uma segunda sessão no mesmo dia.','warning');
     return;
   }
 
   const openingAmount=Number($('#cashOpeningAmount').value||0);
   if(!Number.isFinite(openingAmount)||openingAmount<0){
-    showToast('Informe um valor inicial válido, igual ou maior que zero.');
+    showToast('Informe um valor inicial válido, igual ou maior que zero.','warning');
     $('#cashOpeningAmount').focus();
     return;
   }
@@ -1957,11 +1957,11 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
   }catch(err){
     console.error(err);
     if(err?.message==='cash-already-open'){
-      showToast('Já existe um caixa aberto. Atualize a tela para visualizar a sessão atual.');
+      showToast('Já existe um caixa aberto. Atualize a tela para visualizar a sessão atual.','warning');
       await loadCashSessions();
       return;
     }
-    showToast('Não foi possível abrir o caixa.');
+    showToast('Não foi possível abrir o caixa.','error');
   }
 });
 
@@ -2256,7 +2256,7 @@ productCanvas?.addEventListener('pointerup',()=>{productImageDragging=false;});
 productCanvas?.addEventListener('pointercancel',()=>{productImageDragging=false;});
 
 $('#uploadProductImageBtn')?.addEventListener('click',async()=>{
-  if(!productImageSource) return showToast('Selecione uma imagem primeiro.');
+  if(!productImageSource) return showToast('Selecione uma imagem primeiro.','warning');
   const button=$('#uploadProductImageBtn');
   const status=$('#productImageUploadStatus');
   const canvas=$('#productImageCanvas');
@@ -2295,7 +2295,7 @@ $('#uploadProductImageBtn')?.addEventListener('click',async()=>{
 });
 
 $('#downloadPreparedImageBtn')?.addEventListener('click',()=>{
-  if(!productImageSource) return showToast('Selecione uma imagem primeiro.');
+  if(!productImageSource) return showToast('Selecione uma imagem primeiro.','warning');
   const canvas=$('#productImageCanvas');
   canvas.toBlob(blob=>{
     if(!blob) return;
@@ -2443,7 +2443,7 @@ $('#categoryEditorForm').onsubmit=async e=>{
 async function deleteCategory(id){
   if(!hasPermission('categoriesManage')) return;
   if(products.some(p=>p.categoryId===id)){
-    return showToast('Essa categoria possui produtos. Mova ou exclua os produtos antes.');
+    return showToast('Essa categoria possui produtos. Mova ou exclua os produtos antes.','warning');
   }
   const c=categories.find(x=>x.id===id);
   if(await confirmAction(`Excluir a categoria “${c?.name}”?`,{title:'Excluir categoria',confirmText:'Excluir',danger:true})){
@@ -2785,23 +2785,23 @@ $('#settingsForm').onsubmit=async e=>{
   const storeZip=$('#setStoreZip').value.trim();
 
   if(deliveryPricingMode==='neighborhood'&&$('#setRestrictDeliveryZones').checked&&!deliveryZones.length){
-    showToast('Cadastre pelo menos um bairro antes de restringir a entrega por bairro.');
+    showToast('Cadastre pelo menos um bairro antes de restringir a entrega por bairro.','warning');
     return;
   }
 
   if(deliveryPricingMode==='km'){
     if(!deliveryKmBands.length){
-      showToast('Cadastre pelo menos uma faixa de km e seu valor.');
+      showToast('Cadastre pelo menos uma faixa de km e seu valor.','warning');
       return;
     }
     if(storeZip.replace(/\D/g,'').length!==8){
-      showToast('Informe o CEP da pizzaria para calcular o frete por km.');
+      showToast('Informe o CEP da pizzaria para calcular o frete por km.','warning');
       $('#setStoreZip').focus();
       return;
     }
     const located=await refreshStoreLocationPreview();
     if(!located){
-      showToast('Não foi possível localizar o CEP da pizzaria. Confira o CEP antes de salvar o frete por km.');
+      showToast('Não foi possível localizar o CEP da pizzaria. Confira o CEP antes de salvar o frete por km.','error');
       return;
     }
     storeLocation=located;
@@ -2934,7 +2934,7 @@ $('#seedBtn').onclick=async()=>{
   await Promise.all([loadCategories(),loadProducts()]);
   showToast(missing.length
     ?`Cardápio demonstrativo atualizado: ${missing.length} item(ns) adicionado(s).`
-    :'O cardápio demonstrativo já está completo.');
+    :'O cardápio demonstrativo já está completo.','success');
 };
 
 
@@ -3200,7 +3200,7 @@ async function toggleUser(uid){
     await loadUsers();
   }catch(err){
     console.error(err);
-    showToast(staffUserActionMessage(err));
+    showToast(staffUserActionMessage(err),'error');
   }
 }
 
@@ -3266,6 +3266,6 @@ async function removeUser(uid){
     await loadUsers();
   }catch(err){
     console.error(err);
-    showToast(staffUserActionMessage(err));
+    showToast(staffUserActionMessage(err),'error');
   }
 }
