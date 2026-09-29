@@ -374,28 +374,6 @@ function openAddress(a){
   $('#accountAddressEditor').showModal();
 }
 
-async function fillAccountAddressFromCep(){
-  const cep=String($('#accAddressZip').value||'').replace(/\D/g,'');
-  if(cep.length!==8) return;
-
-  try{
-    const response=await fetch('https://viacep.com.br/ws/'+cep+'/json/');
-    if(!response.ok) return;
-    const data=await response.json();
-    if(data.erro) return;
-
-    if(data.logradouro) $('#accAddressStreet').value=data.logradouro;
-    if(data.bairro) $('#accAddressNeighborhood').value=data.bairro;
-    if(data.localidade) $('#accAddressCity').value=data.localidade;
-    if(data.uf) $('#accAddressState').value=data.uf;
-    $('#accAddressNumber').focus();
-  }catch(err){
-    console.warn('CEP não encontrado.',err);
-  }
-}
-
-$('#accAddressZip').addEventListener('blur',fillAccountAddressFromCep);
-
 $('#accAddressZip')?.addEventListener('blur',async()=>{
   const input=$('#accAddressZip');
   const digits=input.value.replace(/\D/g,'');
