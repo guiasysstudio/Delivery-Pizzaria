@@ -2009,6 +2009,106 @@ async function refreshStoreLocationPreview(){
 
 $('#setStoreZip')?.addEventListener('blur',refreshStoreLocationPreview);
 
+async function calculateDeliveryDraftForCep(zip){
+  const mode=selectedDeliveryPricingMode();
+  const customer=await lookupZipGeo(zip);
+  if(!customer) return {supported:false,message:'CEP do cliente não encontrado.'};
+
+  if(mode==='fixed'){
+    return {
+      supported:true,
+      fee:Number($('#setDeliveryFee').value||0),
+      detail:'Valor fixo'
+    };
+  }
+
+  if(mode==='neighborhood'){
+    const zones=collectDeliveryZones();
+    const key=normalizePriceKey(customer.neighborhood);
+    const zone=zones.find(z=>normalizePriceKey(z.neighborhood)===key);
+    if(zone){
+      return {
+        supported:true,
+        fee:Number(zone.fee||0),
+        detail:`Bairro: ${customer.neighborhood||'—'}`
+      };
+    }
+    if($('#setRestrictDeliveryZones').checked){
+      return {supported:false,message:`Bairro ${customer.neighborhood||'não identificado'} não está na área de entrega.`};
+    }
+    return {
+      supported:true,
+      fee:Number($('#setNeighborhoodFallbackFee').value||0),
+      detail:`Bairro não cadastrado • taxa padrão`
+    };
+  }
+
+  const storeZip=$('#setStoreZip').value;
+  const store=await lookupZipGeo(storeZip);
+  if(!store?.location){
+    return {supported:false,message:'Informe um CEP válido da pizzaria para testar o frete por km.'};
+  }
+  if(!customer.location){
+    return {supported:false,message:'Este CEP de cliente não possui coordenadas disponíveis para cálculo por km.'};
+  }
+
+  const km=distanceKmBetween(store.location,customer.location);
+  const bands=collectDeliveryKmBands();
+  const band=bands.find(b=>km<=Number(b.maxKm||0));
+  if(band){
+    return {
+      supported:true,
+      fee:Number(band.fee||0),
+      detail:`${km.toFixed(1).replace('.',',')} km • faixa até ${Number(band.maxKm).toFixed(1).replace('.',',')} km`
+    };
+  }
+
+  if($('#setRestrictDeliveryKm').checked&&bands.length){
+    return {supported:false,message:`Distância aproximada de ${km.toFixed(1).replace('.',',')} km, acima da última faixa cadastrada.`};
+  }
+
+  const last=bands.at(-1);
+  return {
+    supported:true,
+    fee:last?Number(last.fee||0):Number($('#setDeliveryFee').value||0),
+    detail:`${km.toFixed(1).replace('.',',')} km • usando a última faixa disponível`
+  };
+}
+
+$('#testDeliveryFeeBtn')?.addEventListener('click',async()=>{
+  const result=$('#deliveryTestResult');
+  const button=$('#testDeliveryFeeBtn');
+  const zip=$('#deliveryTestZip').value.trim();
+  if(zip.replace(/\D/g,'').length!==8){
+    result.textContent='Digite um CEP válido com 8 números.';
+    result.className='delivery-test-result error';
+    return;
+  }
+
+  button.disabled=true;
+  button.textContent='Calculando...';
+  result.className='delivery-test-result';
+  result.textContent='Consultando CEP...';
+
+  try{
+    const quote=await calculateDeliveryDraftForCep(zip);
+    if(!quote.supported){
+      result.textContent=quote.message||'Entrega não disponível.';
+      result.className='delivery-test-result error';
+      return;
+    }
+    result.textContent=`${quote.detail} • Frete: ${money(quote.fee)}`;
+    result.className='delivery-test-result success';
+  }catch(err){
+    console.error(err);
+    result.textContent='Não foi possível calcular o frete agora.';
+    result.className='delivery-test-result error';
+  }finally{
+    button.disabled=false;
+    button.textContent='Calcular';
+  }
+});
+
 function renderPaymentMethodsEditor(rows=[]){
   const host=$('#paymentMethodsEditor');
   if(!host) return;
