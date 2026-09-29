@@ -721,7 +721,9 @@ function currentPromotionSnapshot(){
     id:best.promo.id,
     name:best.promo.name||'Promoção',
     discountType:best.promo.discountType,
-    discountValue:Number(best.promo.discountValue||0)
+    discountValue:Number(best.promo.discountValue||0),
+    originalBasePrice:raw,
+    promotedBasePrice:best.price
   };
 }
 function chosenUnitPrice(){
