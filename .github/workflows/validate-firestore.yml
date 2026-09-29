@@ -1,0 +1,36 @@
+name: Validate Firestore Rules
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "firestore.rules"
+      - "firestore.indexes.json"
+      - "firebase.json"
+      - ".github/workflows/validate-firestore.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "firestore.rules"
+      - "firestore.indexes.json"
+      - "firebase.json"
+      - ".github/workflows/validate-firestore.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-firestore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Load Firestore rules in emulator
+        run: |
+          npx --yes firebase-tools@15.28.2 emulators:exec             --only firestore             --project demo-delivery-pizzaria             "echo Firestore rules loaded successfully"
