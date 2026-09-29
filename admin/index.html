@@ -166,6 +166,8 @@
               <div class="editor-section-head"><div><h3>Taxas por bairro</h3><p class="muted">Adicione cada bairro e o valor cobrado.</p></div><button id="addDeliveryZoneBtn" class="btn btn-secondary" type="button">+ Adicionar bairro</button></div>
               <div id="deliveryZonesEditor" class="repeat-editor"></div>
               <div id="deliveryZonesEmpty" class="repeat-empty">Nenhum bairro cadastrado.</div>
+              <label class="field field-small"><span>Taxa para outros bairros (R$)</span><input id="setNeighborhoodFallbackFee" type="number" min="0" step="0.01" /></label>
+              <p class="muted small-copy">Esse valor só é usado se a restrição abaixo estiver desligada.</p>
               <label class="check-row"><input id="setRestrictDeliveryZones" type="checkbox" /><span>Não aceitar entrega em bairros não cadastrados</span></label>
             </div>
 
