@@ -30,6 +30,7 @@ const defaultSettings={
   deliveryPricingMode:'fixed',
   deliveryFee:5,
   deliveryZones:[],
+  deliveryNeighborhoodFallbackFee:5,
   restrictDeliveryZones:false,
   deliveryKmBands:[],
   restrictDeliveryKm:true,
@@ -615,7 +616,7 @@ function deliveryQuote(address=activeAddress()){
       return {supported:false,fee:0,mode,reason:'neighborhood_not_served'};
     }
 
-    return {supported:true,fee:fallback,mode,zone:null};
+    return {supported:true,fee:Number(settings?.deliveryNeighborhoodFallbackFee??fallback),mode,zone:null};
   }
 
   if(mode==='km'){
