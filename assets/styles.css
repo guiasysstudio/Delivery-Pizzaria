@@ -676,3 +676,11 @@ dialog[open]{animation:dialog-in .16s ease-out}
   box-shadow:0 24px 55px rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.22)
 }
 @media(max-width:760px){.hero-banner-image{height:210px;width:min(100%,360px)}}
+
+/* Touch targets */
+.favorite-card-button,.favorite-button,.add-round,.repeat-remove,.toast-close{
+  min-width:44px;min-height:44px
+}
+.favorite-card-button,.favorite-button,.add-round{width:44px;height:44px}
+.toast-close{width:44px;height:44px}
+.repeat-remove{display:grid;place-items:center}
