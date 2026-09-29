@@ -2935,7 +2935,7 @@ $('#customerSearch')?.addEventListener('input',renderCustomers);
 
 
 async function loadUsers(){
-  if(!hasPermission('usersManage')) return;
+  if(!(hasPermission('usersManage')||hasPermission('rolesManage'))) return;
   try{
     const s=await getDocs(collection(db,'users'));
     users=s.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(a.username||'').localeCompare(b.username||''));
@@ -2946,7 +2946,8 @@ async function loadUsers(){
   if(!users.some(u=>u.uid===auth.currentUser?.uid) && currentProfile?.bootstrap){
     users.unshift({...currentProfile});
   }
-  renderUsers();
+  if(hasPermission('usersManage')) renderUsers();
+  if(hasPermission('rolesManage')) renderRoles();
 }
 
 function renderUsers(){
