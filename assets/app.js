@@ -118,10 +118,16 @@ watchCustomer(async user=>{
   renderAddressSelector();
   renderCatalog();
   renderFeatured();
+
+  if(user){
+    const authDialog=$('#authDialog');
+    if(authDialog?.open) authDialog.close();
+    clearLoginQuery();
+  }
+
   if(afterAuthAction&&user){
     const action=afterAuthAction;
     afterAuthAction=null;
-    $('#authDialog').close();
     if(action==='checkout') openCheckout();
     if(action==='address') openAddressSelector();
     if(action.startsWith('favorite:')){
@@ -185,6 +191,38 @@ function renderStore(){
   renderPromotionBanner();
 }
 
+function clearLoginQuery(){
+  const url=new URL(location.href);
+  if(url.searchParams.has('login')){
+    url.searchParams.delete('login');
+    history.replaceState(null,'',url.pathname+(url.search?url.search:'')+url.hash);
+  }
+}
+
+function customerPhoto(){
+  return customerProfile?.customPhotoURL||customerProfile?.photoURL||customer?.photoURL||'';
+}
+
+function setAvatarElement(element,url,fallback='👤'){
+  if(!element) return;
+  element.replaceChildren();
+  if(url){
+    const img=document.createElement('img');
+    img.src=url;
+    img.alt='Foto do perfil';
+    img.referrerPolicy='no-referrer';
+    img.onerror=()=>{
+      element.replaceChildren(document.createTextNode(fallback));
+      element.classList.remove('has-photo');
+    };
+    element.appendChild(img);
+    element.classList.add('has-photo');
+  }else{
+    element.textContent=fallback;
+    element.classList.remove('has-photo');
+  }
+}
+
 function renderCustomerHeader(){
   const address=activeAddress();
   $('#activeAddressText').textContent=address
@@ -194,11 +232,11 @@ function renderCustomerHeader(){
     const name=customerProfile?.name||customer.displayName||'Cliente';
     $('#accountHello').textContent='Olá, '+name.split(' ')[0];
     $('#accountLabel').textContent='Minha conta';
-    $('#accountAvatar').textContent=(name[0]||'👤').toUpperCase();
+    setAvatarElement($('#accountAvatar'),customerPhoto(),(name[0]||'👤').toUpperCase());
   }else{
     $('#accountHello').textContent='Olá!';
     $('#accountLabel').textContent='Entrar ou cadastrar';
-    $('#accountAvatar').textContent='👤';
+    setAvatarElement($('#accountAvatar'),'','👤');
   }
 }
 
@@ -745,14 +783,42 @@ function setAuthMode(mode){
 $('#authCloseBtn').onclick=()=>{$('#authDialog').close();afterAuthAction=null;};
 $('#showRegisterBtn').onclick=()=>setAuthMode('register');
 $('#showLoginBtn').onclick=()=>setAuthMode('login');
+let googleLoginBusy=false;
+
 $('#googleLoginBtn').onclick=async()=>{
-  try{await loginWithGoogle();}catch(err){showAuthError(friendlyAuthError(err));}
+  if(googleLoginBusy) return;
+  googleLoginBusy=true;
+  const button=$('#googleLoginBtn');
+  const original=button.innerHTML;
+  button.disabled=true;
+  button.textContent='Abrindo Google...';
+  $('#customerAuthError').classList.add('hidden');
+
+  try{
+    await loginWithGoogle();
+    if($('#authDialog').open) $('#authDialog').close();
+    clearLoginQuery();
+  }catch(err){
+    console.error('Falha no login Google:',err);
+    showAuthError(friendlyAuthError(err));
+  }finally{
+    googleLoginBusy=false;
+    button.disabled=false;
+    button.innerHTML=original;
+  }
 };
+
 $('#loginCustomerForm').onsubmit=async e=>{
   e.preventDefault();
-  try{await loginWithEmail($('#customerLoginEmail').value,$('#customerLoginPassword').value);}
-  catch(err){showAuthError(friendlyAuthError(err));}
+  try{
+    await loginWithEmail($('#customerLoginEmail').value,$('#customerLoginPassword').value);
+    if($('#authDialog').open) $('#authDialog').close();
+    clearLoginQuery();
+  }catch(err){
+    showAuthError(friendlyAuthError(err));
+  }
 };
+
 $('#registerCustomerForm').onsubmit=async e=>{
   e.preventDefault();
   try{
@@ -762,6 +828,8 @@ $('#registerCustomerForm').onsubmit=async e=>{
       email:$('#registerEmail').value,
       password:$('#registerPassword').value
     });
+    if($('#authDialog').open) $('#authDialog').close();
+    clearLoginQuery();
   }catch(err){
     $('#registerAuthError').textContent=friendlyAuthError(err);
     $('#registerAuthError').classList.remove('hidden');
@@ -1296,7 +1364,11 @@ installDialogDismissal();
 
 loadStore().then(()=>{
   if(new URLSearchParams(location.search).get('login')==='1'){
-    openAuth();
+    if(auth.currentUser){
+      clearLoginQuery();
+    }else{
+      openAuth();
+    }
   }
 });
 setInterval(()=>{
