@@ -1,4 +1,4 @@
-const CACHE_NAME='delivery-pizzaria-v14';
+const CACHE_NAME='delivery-pizzaria-v15';
 const SHELL=[
   './',
   './index.html',
@@ -12,11 +12,14 @@ const SHELL=[
   './assets/icons/badge-percent.svg',
   './assets/icons/banknote.svg',
   './assets/icons/bell-ring.svg',
+  './assets/icons/chevron-down.svg',
   './assets/icons/circle-check.svg',
   './assets/icons/circle-x.svg',
   './assets/icons/clipboard-list.svg',
   './assets/icons/clock-3.svg',
+  './assets/icons/copy.svg',
   './assets/icons/credit-card.svg',
+  './assets/icons/download.svg',
   './assets/icons/external-link.svg',
   './assets/icons/folders.svg',
   './assets/icons/heart.svg',
@@ -39,8 +42,10 @@ const SHELL=[
   './assets/icons/shopping-cart.svg',
   './assets/icons/store.svg',
   './assets/icons/ticket-percent.svg',
+  './assets/icons/trash.svg',
   './assets/icons/user-round.svg',
   './assets/icons/users.svg',
+  './assets/icons/volume-2.svg',
   './assets/icons/wallet-cards.svg',
   './assets/pwa/icon-192.svg',
   './assets/pwa/icon-512.svg',
