@@ -148,9 +148,35 @@
 
       <section id="view-settings" class="admin-view">
         <form id="settingsForm" class="settings-grid">
-          <div class="panel settings-card"><h2>Dados da pizzaria</h2><label class="field"><span>Nome</span><input id="setStoreName" required /></label><label class="field"><span>Subtítulo</span><input id="setSubtitle" /></label><label class="field"><span>Telefone</span><input id="setPhone" /></label><label class="field"><span>Endereço da loja</span><input id="setStoreAddress" /></label></div>
-          <div class="panel settings-card"><h2>Operação</h2><label class="field"><span>Modo de funcionamento</span><select id="setOpenMode"><option value="schedule">Seguir horários</option><option value="open">Forçar aberto</option><option value="closed">Forçar fechado</option></select></label><label class="field"><span>Taxa de entrega (R$)</span><input id="setDeliveryFee" type="number" min="0" step="0.01" /></label><label class="field"><span>Pedido mínimo (R$)</span><input id="setMinimumOrder" type="number" min="0" step="0.01" /></label><label class="check-row"><input id="setAllowPickup" type="checkbox" /><span>Permitir retirada no local</span></label><label class="check-row"><input id="setAutoAccept" type="checkbox" /><span>Confirmar pedidos automaticamente</span></label><p class="muted">Desmarcado: o pedido entra como “Aguardando confirmação” e um caixa/gerente precisa aceitar. Marcado: ele já entra confirmado.</p></div>
-          <div class="panel settings-card settings-wide"><div class="editor-section-head"><div><h2>Áreas de entrega</h2><p class="muted">Cadastre o bairro e a taxa em campos separados.</p></div><button id="addDeliveryZoneBtn" class="btn btn-secondary" type="button">+ Adicionar bairro</button></div><div id="deliveryZonesEditor" class="repeat-editor"></div><div id="deliveryZonesEmpty" class="repeat-empty">Nenhum bairro específico. A taxa padrão será usada.</div><label class="check-row"><input id="setRestrictDeliveryZones" type="checkbox" /><span>Aceitar entrega somente nos bairros cadastrados acima</span></label></div>
+          <div class="panel settings-card"><h2>Dados da pizzaria</h2><label class="field"><span>Nome</span><input id="setStoreName" required /></label><label class="field"><span>Subtítulo</span><input id="setSubtitle" /></label><label class="field"><span>Telefone</span><input id="setPhone" /></label><label class="field"><span>CEP da loja</span><input id="setStoreZip" inputmode="numeric" maxlength="9" placeholder="00000-000" /></label><label class="field"><span>Endereço da loja</span><input id="setStoreAddress" /></label><div id="storeLocationStatus" class="muted small-copy">O CEP será usado para calcular frete por km quando essa opção estiver ativa.</div></div>
+          <div class="panel settings-card"><h2>Operação</h2><label class="field"><span>Modo de funcionamento</span><select id="setOpenMode"><option value="schedule">Seguir horários</option><option value="open">Forçar aberto</option><option value="closed">Forçar fechado</option></select></label><label class="field"><span>Pedido mínimo (R$)</span><input id="setMinimumOrder" type="number" min="0" step="0.01" /></label><label class="check-row"><input id="setAllowPickup" type="checkbox" /><span>Permitir retirada no local</span></label><label class="check-row"><input id="setAutoAccept" type="checkbox" /><span>Confirmar pedidos automaticamente</span></label><p class="muted">Desmarcado: o pedido entra como “Aguardando confirmação” e precisa ser aceito. Marcado: ele já entra confirmado.</p></div>
+          <div class="panel settings-card settings-wide">
+            <div class="editor-section-head"><div><h2>Frete / entrega</h2><p class="muted">Escolha como a taxa do motoboy será calculada.</p></div></div>
+            <div class="delivery-mode-grid">
+              <label class="delivery-mode-card"><input type="radio" name="deliveryPricingMode" value="fixed"><span><strong>Valor fixo</strong><small>Uma taxa única para qualquer entrega.</small></span></label>
+              <label class="delivery-mode-card"><input type="radio" name="deliveryPricingMode" value="neighborhood"><span><strong>Por bairro</strong><small>Cada bairro tem sua própria taxa.</small></span></label>
+              <label class="delivery-mode-card"><input type="radio" name="deliveryPricingMode" value="km"><span><strong>Por km</strong><small>Faixas de distância com valores diferentes.</small></span></label>
+            </div>
+
+            <div id="deliveryFixedSettings" class="delivery-mode-settings hidden">
+              <label class="field field-small"><span>Valor fixo da entrega (R$)</span><input id="setDeliveryFee" type="number" min="0" step="0.01" /></label>
+            </div>
+
+            <div id="deliveryNeighborhoodSettings" class="delivery-mode-settings hidden">
+              <div class="editor-section-head"><div><h3>Taxas por bairro</h3><p class="muted">Adicione cada bairro e o valor cobrado.</p></div><button id="addDeliveryZoneBtn" class="btn btn-secondary" type="button">+ Adicionar bairro</button></div>
+              <div id="deliveryZonesEditor" class="repeat-editor"></div>
+              <div id="deliveryZonesEmpty" class="repeat-empty">Nenhum bairro cadastrado.</div>
+              <label class="check-row"><input id="setRestrictDeliveryZones" type="checkbox" /><span>Não aceitar entrega em bairros não cadastrados</span></label>
+            </div>
+
+            <div id="deliveryKmSettings" class="delivery-mode-settings hidden">
+              <div class="alert"><strong>Como funciona:</strong> o sistema usa as coordenadas aproximadas do CEP da loja e do CEP do cliente para calcular a distância em linha reta. Para distância exata por ruas/rotas, depois podemos conectar um provedor de mapas.</div>
+              <div class="editor-section-head"><div><h3>Faixas por km</h3><p class="muted">Ex.: até 3 km = R$ 5,00; até 6 km = R$ 8,00.</p></div><button id="addDeliveryKmBandBtn" class="btn btn-secondary" type="button">+ Adicionar faixa</button></div>
+              <div id="deliveryKmBandsEditor" class="repeat-editor"></div>
+              <div id="deliveryKmBandsEmpty" class="repeat-empty">Nenhuma faixa de km cadastrada.</div>
+              <label class="check-row"><input id="setRestrictDeliveryKm" type="checkbox" /><span>Não aceitar entrega acima da última faixa cadastrada</span></label>
+            </div>
+          </div>
           <div class="panel settings-card settings-wide"><h2>Horários</h2><p class="muted">Use HH:MM. Desmarque um dia para fechar.</p><div id="scheduleEditor" class="schedule-editor"></div></div>
           <div class="panel settings-card settings-wide"><div class="editor-section-head"><div><h2>Formas de pagamento</h2><p class="muted">O cliente escolhe uma destas opções no checkout.</p></div><button id="addPaymentMethodBtn" class="btn btn-secondary" type="button">+ Adicionar forma</button></div><div id="paymentMethodsEditor" class="simple-repeat-editor"></div><div id="paymentMethodsEmpty" class="repeat-empty">Nenhuma forma de pagamento cadastrada.</div></div>
           <div class="panel settings-card"><h2>Pedidos</h2><p class="muted">A impressão foi movida para a área “Impressão”, pois cada computador pode usar uma impressora diferente.</p><p>O fluxo pode ser automático ou exigir aceite manual antes de enviar a comanda para produção.</p></div>
