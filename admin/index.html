@@ -362,9 +362,23 @@
       <label class="field" id="userPasswordField"><span>Senha *</span><input id="userPassword" type="password" minlength="6" autocomplete="new-password" /></label>
       <label class="field"><span>Perfil</span><select id="userRole"><option value="cashier">Caixa</option><option value="kitchen">Cozinha</option><option value="delivery">Entrega</option><option value="operator">Operador</option><option value="manager">Gerente</option><option value="master">Master</option></select></label>
       <label class="check-row"><input id="userActive" type="checkbox" checked /><span>Usuário ativo</span></label>
-      <p class="muted" id="userEditorHelp">A senha é definida somente na criação. O usuário poderá ser desativado depois pelo Master.</p>
+      <p class="muted" id="userEditorHelp">O novo usuário será criado ativo. Depois, use a lista para ativar/desativar, trocar a senha ou excluir.</p>
       <div id="userEditorError" class="alert alert-error hidden"></div>
       <button class="btn btn-primary btn-block" type="submit" value="default">Salvar usuário</button>
+    </form>
+  </dialog>
+
+  <dialog id="userPasswordDialog" class="modal">
+    <form id="userPasswordForm" class="modal-card" novalidate>
+      <button class="modal-close dialog-close" type="button" aria-label="Fechar">×</button>
+      <span class="eyebrow">SEGURANÇA</span>
+      <h2>Trocar senha</h2>
+      <p class="muted">Alterando a senha de <strong id="userPasswordTargetName">Usuário</strong>.</p>
+      <input id="userPasswordTargetUid" type="hidden" />
+      <label class="field"><span>Nova senha *</span><input id="userNewPassword" type="password" minlength="6" maxlength="128" autocomplete="new-password" required /></label>
+      <label class="field"><span>Confirmar nova senha *</span><input id="userConfirmPassword" type="password" minlength="6" maxlength="128" autocomplete="new-password" required /></label>
+      <div id="userPasswordError" class="alert alert-error hidden"></div>
+      <button id="saveUserPasswordBtn" class="btn btn-primary btn-block" type="submit">Alterar senha</button>
     </form>
   </dialog>
 
