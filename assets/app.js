@@ -500,7 +500,7 @@ function orderedCategories(){
 function renderCategories(){
   const items=[{id:'all',name:'Todos'},...orderedCategories()];
   $('#categoryChips').innerHTML=items.map(cat=>`<button class="chip ${selectedCategory===cat.id?'active':''}" data-id="${cat.id}">${esc(cat.name)}</button>`).join('');
-  $('.chip').forEach(b=>b.onclick=()=>{
+  $$('.chip').forEach(b=>b.onclick=()=>{
     const id=b.dataset.id;
     selectedCategory=id;
     renderCategories();
