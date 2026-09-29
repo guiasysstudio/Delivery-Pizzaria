@@ -12,7 +12,7 @@ const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const placeholder='../assets/products/placeholder.svg';
 
-let user=null,profile=null,addresses=[],orders=[],favorites=new Set(),products=[],settings={};
+let user=null,profile=null,addresses=[],orders=[],favorites=new Set(),products=[],couponRewards=[],settings={};
 let unsubscribeOrders=null;
 
 const statusLabels={
@@ -44,6 +44,7 @@ watchCustomer(async current=>{
     renderAddresses();
     renderOrders();
     renderFavorites();
+    renderCoupons();
     listenCustomerOrders();
     openSection(location.hash.replace('#','')||'profile');
   }catch(err){
@@ -60,7 +61,8 @@ async function loadAll(){
     getFavorites(user.uid),
     getDocs(collection(db,'products')),
     getDoc(doc(db,'settings','store')),
-    getDocs(query(collection(db,'orders'),where('customerId','==',user.uid)))
+    getDocs(query(collection(db,'orders'),where('customerId','==',user.uid))),
+    getDocs(collection(db,'customers',user.uid,'coupons')).catch(err=>{console.warn('Cupons ainda não disponíveis.',err);return null;})
   ]);
 
   profile=results[0];
@@ -73,6 +75,7 @@ async function loadAll(){
     const bd=b.createdAt?.toMillis?.()||0;
     return bd-ad;
   });
+  couponRewards=results[6]?.docs?.map(d=>({id:d.id,...d.data()}))||[];
 }
 
 function renderHeader(){
@@ -86,7 +89,7 @@ function renderHeader(){
 $$('.account-nav-item').forEach(b=>b.onclick=()=>openSection(b.dataset.section));
 
 function openSection(section){
-  const valid=['profile','addresses','orders','favorites'];
+  const valid=['profile','addresses','orders','coupons','favorites'];
   if(!valid.includes(section)) section='profile';
   $$('.account-nav-item').forEach(b=>b.classList.toggle('active',b.dataset.section===section));
   $$('.account-section').forEach(s=>s.classList.toggle('hidden',s.id!=='account-section-'+section));
@@ -305,6 +308,56 @@ function reorder(id){
   const newCart=(o.items||[]).map(i=>({...i,lineId:crypto.randomUUID()}));
   localStorage.setItem('deliveryCart',JSON.stringify(newCart));
   location.href='../';
+}
+
+
+function formatRewardDate(value){
+  if(!value) return '';
+  const parsed=new Date(value);
+  return Number.isNaN(parsed.getTime())?'':parsed.toLocaleDateString('pt-BR');
+}
+
+function renderCoupons(){
+  const host=$('#accountCouponsList');
+  if(!host) return;
+
+  if(!couponRewards.length){
+    host.innerHTML='<div class="panel empty-state">Você ainda não possui cupons conquistados. Continue pedindo para desbloquear vantagens.</div>';
+    return;
+  }
+
+  host.innerHTML=couponRewards.map(cp=>{
+    const label=cp.type==='percentage'
+      ?Number(cp.value||0)+'% OFF'
+      :money(cp.value||0)+' OFF';
+    const validity=cp.endsAt?'Válido até '+formatRewardDate(cp.endsAt):'Sem data de expiração';
+    const code=cp.code||cp.id;
+    return '<article class="coupon-wallet-card panel">'+
+      '<div class="coupon-wallet-value">'+esc(label)+'</div>'+
+      '<div class="coupon-wallet-content">'+
+        '<span class="eyebrow">CUPOM</span>'+
+        '<h3>'+esc(code)+'</h3>'+
+        '<p>'+esc(cp.description||'Benefício conquistado na pizzaria.')+'</p>'+
+        '<small class="muted">'+esc(validity)+'</small>'+
+      '</div>'+
+      '<div class="coupon-wallet-actions">'+
+        '<button class="btn btn-secondary copy-coupon" data-code="'+esc(code)+'" type="button">Copiar código</button>'+
+        '<a class="btn btn-primary" href="../?coupon='+encodeURIComponent(code)+'">Usar cupom</a>'+
+      '</div>'+
+    '</article>';
+  }).join('');
+
+  $$('.copy-coupon').forEach(b=>b.onclick=async()=>{
+    const code=b.dataset.code||'';
+    try{
+      await navigator.clipboard.writeText(code);
+      const original=b.textContent;
+      b.textContent='Copiado ✓';
+      setTimeout(()=>b.textContent=original,1400);
+    }catch{
+      alert('Código do cupom: '+code);
+    }
+  });
 }
 
 function productImage(v){
