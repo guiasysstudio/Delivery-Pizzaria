@@ -582,7 +582,7 @@ function renderCoupons(){
         '<small class="muted">'+esc(validity)+'</small>'+
       '</div>'+
       '<div class="coupon-wallet-actions">'+
-        '<button class="btn btn-secondary copy-coupon" data-code="'+esc(code)+'" type="button">Copiar código</button>'+
+        '<button class="btn btn-secondary copy-coupon icon-button-label" data-code="'+esc(code)+'" type="button">'+iconHtml('copy')+'<span>Copiar código</span></button>'+
         '<a class="btn btn-primary" href="../?coupon='+encodeURIComponent(code)+'">Usar cupom</a>'+
       '</div>'+
     '</article>';
@@ -592,9 +592,9 @@ function renderCoupons(){
     const code=b.dataset.code||'';
     try{
       await navigator.clipboard.writeText(code);
-      const original=b.textContent;
-      b.textContent='Copiado ✓';
-      setTimeout(()=>b.textContent=original,1400);
+      const original=b.innerHTML;
+      b.innerHTML=iconHtml('circle-check')+'<span>Copiado</span>';
+      setTimeout(()=>b.innerHTML=original,1400);
     }catch{
       showToast('Código do cupom: '+code,'info',{duration:7000});
     }
@@ -619,10 +619,10 @@ function renderFavorites(){
     const price=p.sizes?.length?Math.min(...p.sizes.map(s=>Number(s.price||0))):Number(p.price||0);
     return '<article class="product-card">'+
       '<div class="product-image-wrap"><img class="product-image" src="'+esc(productImage(p.image))+'" alt="">'+
-      '<button class="favorite-card-button active remove-fav" data-id="'+p.id+'" type="button">♥</button></div>'+
+      '<button class="favorite-card-button active remove-fav" data-id="'+p.id+'" type="button" aria-label="Remover dos favoritos" aria-pressed="true">'+iconHtml('heart')+'</button></div>'+
       '<div class="product-content"><div><h3>'+esc(p.name)+'</h3><p>'+esc(p.description||'')+'</p></div>'+
       '<div class="product-foot"><strong class="price">'+money(price)+'</strong>'+
-      '<a class="add-round" href="../?product='+encodeURIComponent(p.id)+'">+</a></div></div></article>';
+      '<a class="add-round" href="../?product='+encodeURIComponent(p.id)+'" aria-label="Abrir '+esc(p.name)+'">'+iconHtml('plus')+'</a></div></div></article>';
   }).join('');
 
   $$('.remove-fav').forEach(b=>b.onclick=async()=>{
