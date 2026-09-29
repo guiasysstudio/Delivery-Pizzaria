@@ -7,6 +7,7 @@ import {
 import {
   collection, doc, getDoc, getDocs, query, where, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+import { showToast, confirmAction, emptyStateHtml, iconHtml } from '../assets/ui.js';
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -89,23 +90,25 @@ function effectiveProfilePhoto(){
   return profile?.customPhotoURL||profile?.photoURL||user?.photoURL||'';
 }
 
-function setProfileAvatar(element,url,fallback='👤'){
+function setProfileAvatar(element,url,fallback=''){
   if(!element) return;
+  const renderFallback=()=>{
+    element.replaceChildren();
+    if(fallback) element.textContent=fallback;
+    else element.innerHTML=iconHtml('user-round');
+    element.classList.remove('has-photo');
+  };
   element.replaceChildren();
   if(url){
     const img=document.createElement('img');
     img.src=url;
     img.alt='Foto do perfil';
     img.referrerPolicy='no-referrer';
-    img.onerror=()=>{
-      element.replaceChildren(document.createTextNode(fallback));
-      element.classList.remove('has-photo');
-    };
+    img.onerror=renderFallback;
     element.appendChild(img);
     element.classList.add('has-photo');
   }else{
-    element.textContent=fallback;
-    element.classList.remove('has-photo');
+    renderFallback();
   }
 }
 
@@ -214,7 +217,7 @@ $('#resendEmailVerificationBtn')?.addEventListener('click',async()=>{
     setTimeout(()=>{button.textContent='Reenviar verificação';button.disabled=false;},2500);
   }catch(err){
     console.error(err);
-    alert('Não foi possível enviar a verificação agora.');
+    showToast('Não foi possível enviar a verificação agora.','error');
     button.disabled=false;
   }
 });
@@ -235,7 +238,7 @@ $('#profilePhotoFile')?.addEventListener('change',async e=>{
     renderProfilePhoto();
   }catch(err){
     console.error(err);
-    alert(err.message||'Não foi possível preparar a foto.');
+    showToast(err.message||'Não foi possível preparar a foto.');
   }finally{
     button.disabled=false;
     button.textContent=original;
@@ -255,17 +258,17 @@ $('#profileForm').onsubmit=async e=>{
   const cpf=$('#profileCpf').value.trim();
 
   if(!validFullName(name)){
-    alert('Informe seu nome completo, com pelo menos nome e sobrenome.');
+    showToast('Informe seu nome completo, com pelo menos nome e sobrenome.');
     $('#profileName').focus();
     return;
   }
   if(!validPhone(phone)){
-    alert('Informe um telefone válido com DDD.');
+    showToast('Informe um telefone válido com DDD.');
     $('#profilePhone').focus();
     return;
   }
   if(!validCpf(cpf)){
-    alert('Informe um CPF válido.');
+    showToast('Informe um CPF válido.');
     $('#profileCpf').focus();
     return;
   }
@@ -299,10 +302,10 @@ $('#profileForm').onsubmit=async e=>{
   }catch(err){
     console.error(err);
     const code=String(err?.code||'');
-    if(code.includes('cpf_already_registered')) alert('Este CPF já está vinculado a outra conta.');
-    else if(code.includes('cpf_change_not_allowed')) alert('O CPF confirmado desta conta não pode ser alterado pelo site.');
-    else if(code.includes('invalid_phone')) alert('Informe um telefone válido com DDD.');
-    else alert('Não foi possível salvar seus dados. Tente novamente.');
+    if(code.includes('cpf_already_registered')) showToast('Este CPF já está vinculado a outra conta.','error');
+    else if(code.includes('cpf_change_not_allowed')) showToast('O CPF confirmado desta conta não pode ser alterado pelo site.','warning');
+    else if(code.includes('invalid_phone')) showToast('Informe um telefone válido com DDD.');
+    else showToast('Não foi possível salvar seus dados. Tente novamente.','error');
   }
 };
 
@@ -314,7 +317,8 @@ function addressText(a){
 
 function renderAddresses(){
   if(!addresses.length){
-    $('#accountAddressList').innerHTML='<div class="panel empty-state">Nenhum endereço cadastrado.</div>';
+    $('#accountAddressList').innerHTML=emptyStateHtml({icon:'map-pin',title:'Nenhum endereço cadastrado',description:'Adicione um endereço para agilizar seus próximos pedidos.',actionHtml:'<button id="emptyNewAddressBtn" class="btn btn-primary" type="button">Adicionar endereço</button>'});
+    $('#emptyNewAddressBtn')?.addEventListener('click',()=>openAddress(null));
     return;
   }
 
@@ -325,7 +329,7 @@ function renderAddresses(){
       :'';
 
     return '<article class="account-address-card panel">'+
-      '<div class="account-address-head"><span class="address-symbol">📍</span><div><strong>'+esc(a.label||'Endereço')+'</strong>'+principal+'</div></div>'+
+      '<div class="account-address-head"><span class="address-symbol">'+iconHtml('map-pin')+'</span><div><strong>'+esc(a.label||'Endereço')+'</strong>'+principal+'</div></div>'+
       '<p>'+esc(addressText(a))+'</p>'+
       (a.complement?'<small class="muted">'+esc(a.complement)+'</small>':'')+
       '<div class="data-actions">'+setMain+
@@ -345,7 +349,7 @@ function renderAddresses(){
 
   $$('.delete-account-address').forEach(b=>b.onclick=async()=>{
     const a=addresses.find(x=>x.id===b.dataset.id);
-    if(!confirm('Excluir o endereço “'+(a?.label||'Endereço')+'”?')) return;
+    if(!await confirmAction('Excluir o endereço “'+(a?.label||'Endereço')+'”?',{title:'Excluir endereço',confirmText:'Excluir',danger:true})) return;
     await deleteAddress(user.uid,b.dataset.id);
     addresses=await getAddresses(user.uid);
     profile=await getCustomerProfile(user.uid);
@@ -491,7 +495,7 @@ function canCustomerCancel(order){
 
 function renderOrders(){
   if(!orders.length){
-    $('#accountOrdersList').innerHTML='<div class="panel empty-state">Você ainda não fez nenhum pedido.</div>';
+    $('#accountOrdersList').innerHTML=emptyStateHtml({icon:'receipt-text',title:'Você ainda não fez nenhum pedido',description:'Quando você fizer um pedido, o acompanhamento e o histórico aparecerão aqui.',actionHtml:'<a class="btn btn-primary" href="../">Ver cardápio</a>'});
     return;
   }
 
@@ -520,7 +524,7 @@ function renderOrders(){
   $$('.reorder-btn').forEach(b=>b.onclick=()=>reorder(b.dataset.id));
   $$('.cancel-order-btn').forEach(b=>b.onclick=async()=>{
     const order=orders.find(x=>x.id===b.dataset.id);
-    if(!order||!confirm('Cancelar o pedido #'+String(order.orderNumber||0).padStart(4,'0')+'?')) return;
+    if(!order||!await confirmAction('Cancelar o pedido #'+String(order.orderNumber||0).padStart(4,'0')+'?',{title:'Cancelar pedido',confirmText:'Cancelar pedido',danger:true})) return;
     b.disabled=true;
     b.textContent='Cancelando...';
     try{
@@ -528,7 +532,7 @@ function renderOrders(){
     }catch(err){
       console.error(err);
       const code=String(err?.code||'');
-      alert(code.includes('cancel_window_expired')
+      showToast(code.includes('cancel_window_expired')
         ?'O prazo para cancelamento deste pedido terminou.'
         :code.includes('cancel_not_allowed')
           ?'Este pedido já avançou e não pode mais ser cancelado pelo site.'
@@ -558,7 +562,7 @@ function renderCoupons(){
   if(!host) return;
 
   if(!couponRewards.length){
-    host.innerHTML='<div class="panel empty-state">Você ainda não possui cupons conquistados. Continue pedindo para desbloquear vantagens.</div>';
+    host.innerHTML=emptyStateHtml({icon:'ticket-percent',title:'Nenhum cupom conquistado ainda',description:'Continue pedindo para desbloquear vantagens e benefícios da pizzaria.'});
     return;
   }
 
@@ -591,7 +595,7 @@ function renderCoupons(){
       b.textContent='Copiado ✓';
       setTimeout(()=>b.textContent=original,1400);
     }catch{
-      alert('Código do cupom: '+code);
+      showToast('Código do cupom: '+code,'info',{duration:7000});
     }
   });
 }
@@ -606,7 +610,7 @@ function renderFavorites(){
   const list=products.filter(p=>favorites.has(p.id)&&p.active!==false);
 
   if(!list.length){
-    $('#accountFavoritesList').innerHTML='<div class="panel empty-state">Você ainda não favoritou produtos.</div>';
+    $('#accountFavoritesList').innerHTML=emptyStateHtml({icon:'heart',title:'Nenhum favorito ainda',description:'Marque seus produtos preferidos para encontrá-los rapidamente depois.',actionHtml:'<a class="btn btn-primary" href="../">Explorar cardápio</a>'});
     return;
   }
 
