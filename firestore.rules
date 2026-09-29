@@ -140,7 +140,12 @@ service cloud.firestore {
           request.resource.data.role != 'master'
         );
 
+      // Edição de perfil continua no navegador, mas status e exclusão passam
+      // obrigatoriamente pela Cloud Function manageStaffUser para manter
+      // Firestore e Firebase Authentication sincronizados.
       allow update: if hasPermission('usersManage') &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['username','displayName','role','updatedAt']) &&
         (
           isMaster() ||
           (
@@ -149,11 +154,7 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if hasPermission('usersManage') &&
-        (
-          isMaster() ||
-          resource.data.role != 'master'
-        );
+      allow delete: if false;
     }
 
     match /roles/{roleId} {
