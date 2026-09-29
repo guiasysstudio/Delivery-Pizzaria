@@ -64,6 +64,7 @@ internal sealed class TrayContext : ApplicationContext
 {
     private const string StartupValueName = "DeliveryPizzariaPrintAgent";
     private const string AppRegistryPath = @"Software\DeliveryPizzaria\PrintAgent";
+    private const string SelectedPrinterValueName = "SelectedPrinter";
     private readonly NotifyIcon _tray;
     private readonly LocalPrintServer _server;
     private readonly ToolStripMenuItem _startupItem;
@@ -72,8 +73,9 @@ internal sealed class TrayContext : ApplicationContext
     public TrayContext()
     {
         EnsureFirstRunStartup();
+        EnsureSelectedPrinter();
 
-        _server = new LocalPrintServer();
+        _server = new LocalPrintServer(GetSelectedPrinter);
         _server.Start();
 
         _startupItem = new ToolStripMenuItem("Iniciar com o Windows")
@@ -128,7 +130,9 @@ internal sealed class TrayContext : ApplicationContext
                 {
                     SetStartup(enabled);
                     _startupItem.Checked = enabled;
-                });
+                },
+                GetSelectedPrinter,
+                SetSelectedPrinter);
             _settingsForm.FormClosed += (_, _) => _settingsForm = null;
         }
 
@@ -148,7 +152,8 @@ internal sealed class TrayContext : ApplicationContext
         MessageBox.Show(
             "Delivery Pizzaria Print Agent está ativo.\n\n" +
             "Endereço local: http://127.0.0.1:17329\n" +
-            "O painel da pizzaria pode listar e usar qualquer impressora instalada no Windows.",
+            "Impressora selecionada: " + (GetSelectedPrinter() ?? "nenhuma") + "\n\n" +
+            "A impressora física é escolhida e salva no próprio Print Agent.",
             "Delivery Pizzaria Print Agent",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
@@ -186,6 +191,39 @@ internal sealed class TrayContext : ApplicationContext
         return key?.GetValue(StartupValueName) is string;
     }
 
+    private static string? GetSelectedPrinter()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(AppRegistryPath);
+        return key?.GetValue(SelectedPrinterValueName) as string;
+    }
+
+    private static void SetSelectedPrinter(string? printerName)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(AppRegistryPath);
+
+        if (string.IsNullOrWhiteSpace(printerName))
+            key.DeleteValue(SelectedPrinterValueName, false);
+        else
+            key.SetValue(SelectedPrinterValueName, printerName.Trim());
+    }
+
+    private static void EnsureSelectedPrinter()
+    {
+        var printers = PrinterSettings.InstalledPrinters.Cast<string>().ToArray();
+        var selected = GetSelectedPrinter();
+
+        if (!string.IsNullOrWhiteSpace(selected) &&
+            printers.Any(p => string.Equals(p, selected, StringComparison.CurrentCultureIgnoreCase)))
+            return;
+
+        var windowsDefault = new PrinterSettings().PrinterName;
+        var fallback = printers.FirstOrDefault(p =>
+            string.Equals(p, windowsDefault, StringComparison.CurrentCultureIgnoreCase))
+            ?? printers.FirstOrDefault();
+
+        SetSelectedPrinter(fallback);
+    }
+
     private static void SetStartup(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
@@ -205,14 +243,23 @@ internal sealed class AgentSettingsForm : Form
 {
     private readonly Func<bool> _getStartup;
     private readonly Action<bool> _setStartup;
+    private readonly Func<string?> _getSelectedPrinter;
+    private readonly Action<string?> _setSelectedPrinter;
     private readonly CheckBox _startupCheck;
     private readonly ComboBox _printers;
     private readonly Label _statusLabel;
+    private bool _refreshingPrinters;
 
-    public AgentSettingsForm(Func<bool> getStartup, Action<bool> setStartup)
+    public AgentSettingsForm(
+        Func<bool> getStartup,
+        Action<bool> setStartup,
+        Func<string?> getSelectedPrinter,
+        Action<string?> setSelectedPrinter)
     {
         _getStartup = getStartup;
         _setStartup = setStartup;
+        _getSelectedPrinter = getSelectedPrinter;
+        _setSelectedPrinter = setSelectedPrinter;
 
         Text = "Delivery Pizzaria • Print Agent";
         Icon = BrandIconFactory.Create();
@@ -267,6 +314,12 @@ internal sealed class AgentSettingsForm : Form
             Top = 160,
             Width = 455,
             DropDownStyle = ComboBoxStyle.DropDownList
+        };
+        _printers.SelectedIndexChanged += (_, _) =>
+        {
+            if (_refreshingPrinters) return;
+            _setSelectedPrinter(_printers.SelectedItem?.ToString());
+            UpdatePrinterStatus();
         };
 
         var refresh = new Button
@@ -341,28 +394,52 @@ internal sealed class AgentSettingsForm : Form
 
     public void RefreshPrinters()
     {
-        var selected = _printers.SelectedItem?.ToString();
+        var selected = _printers.SelectedItem?.ToString() ?? _getSelectedPrinter();
         var printers = PrinterSettings.InstalledPrinters.Cast<string>()
             .OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
 
-        _printers.Items.Clear();
-        _printers.Items.AddRange(printers);
+        _refreshingPrinters = true;
+        try
+        {
+            _printers.Items.Clear();
+            _printers.Items.AddRange(printers);
 
-        if (printers.Length == 0)
+            if (printers.Length == 0)
+            {
+                _setSelectedPrinter(null);
+                UpdatePrinterStatus();
+                return;
+            }
+
+            var preferred = printers.FirstOrDefault(p =>
+                string.Equals(p, selected, StringComparison.CurrentCultureIgnoreCase))
+                ?? printers.FirstOrDefault(p =>
+                    string.Equals(p, new PrinterSettings().PrinterName, StringComparison.CurrentCultureIgnoreCase))
+                ?? printers[0];
+
+            _printers.SelectedItem = preferred;
+            _setSelectedPrinter(preferred);
+            UpdatePrinterStatus();
+        }
+        finally
+        {
+            _refreshingPrinters = false;
+        }
+    }
+
+    private void UpdatePrinterStatus()
+    {
+        var selected = _printers.SelectedItem?.ToString() ?? _getSelectedPrinter();
+        if (string.IsNullOrWhiteSpace(selected))
         {
             _statusLabel.Text = "● Serviço ativo • nenhuma impressora instalada foi encontrada";
             _statusLabel.ForeColor = Color.DarkOrange;
             return;
         }
 
-        _statusLabel.Text = $"● Serviço ativo • {printers.Length} impressora(s) detectada(s)";
+        _statusLabel.Text = "● Serviço ativo • impressora selecionada: " + selected;
         _statusLabel.ForeColor = Color.ForestGreen;
-
-        if (!string.IsNullOrWhiteSpace(selected) && printers.Contains(selected))
-            _printers.SelectedItem = selected;
-        else
-            _printers.SelectedIndex = 0;
     }
 }
 
@@ -370,8 +447,14 @@ internal sealed class LocalPrintServer : IDisposable
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly object _printLock = new();
+    private readonly Func<string?> _getSelectedPrinter;
     private WebApplication? _app;
     private Task? _runTask;
+
+    public LocalPrintServer(Func<string?> getSelectedPrinter)
+    {
+        _getSelectedPrinter = getSelectedPrinter;
+    }
 
     public void Start()
     {
@@ -416,14 +499,14 @@ internal sealed class LocalPrintServer : IDisposable
         {
             ok = true,
             name = "Delivery Pizzaria Print Agent",
-            version = "1.2.0"
+            version = "1.3.0"
         }));
 
         _app.MapGet("/health", () => Results.Json(new
         {
             ok = true,
             name = "Delivery Pizzaria Print Agent",
-            version = "1.2.0"
+            version = "1.3.0"
         }));
 
         _app.MapGet("/printers", () =>
@@ -432,7 +515,12 @@ internal sealed class LocalPrintServer : IDisposable
                 .OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase)
                 .ToArray();
 
-            return Results.Json(new { printers });
+            return Results.Json(new
+            {
+                printers,
+                selectedPrinter = _getSelectedPrinter(),
+                version = "1.3.0"
+            });
         });
 
         _app.MapPost("/print", async (HttpContext context) =>
@@ -450,15 +538,21 @@ internal sealed class LocalPrintServer : IDisposable
                 return Results.BadRequest(new { error = "invalid_json" });
             }
 
-            if (request is null ||
-                string.IsNullOrWhiteSpace(request.Printer) ||
-                string.IsNullOrWhiteSpace(request.Text))
+            if (request is null || string.IsNullOrWhiteSpace(request.Text))
             {
                 return Results.BadRequest(new { error = "invalid_request" });
             }
 
+            // A impressora física é sempre definida pelo próprio Agent.
+            // O painel web controla somente o modelo/conteúdo da comanda.
+            var printerName = _getSelectedPrinter();
+            if (string.IsNullOrWhiteSpace(printerName))
+            {
+                return Results.BadRequest(new { error = "printer_not_configured" });
+            }
+
             var installed = PrinterSettings.InstalledPrinters.Cast<string>()
-                .Any(p => string.Equals(p, request.Printer, StringComparison.CurrentCultureIgnoreCase));
+                .Any(p => string.Equals(p, printerName, StringComparison.CurrentCultureIgnoreCase));
 
             if (!installed)
             {
@@ -470,7 +564,7 @@ internal sealed class LocalPrintServer : IDisposable
                 lock (_printLock)
                 {
                     PrintText(
-                        request.Printer,
+                        printerName,
                         request.Text,
                         Math.Clamp(request.Copies <= 0 ? 1 : request.Copies, 1, 5));
                 }
