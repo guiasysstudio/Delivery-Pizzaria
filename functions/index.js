@@ -150,14 +150,9 @@ export const uploadProductImage = onRequest(
   }
 );
 
-function couponIsCurrentlyActive(coupon) {
+function couponIsCurrentlyActive(coupon, timezone = "America/Porto_Velho") {
   if (coupon?.active === false || coupon?.autoReward !== true) return false;
-  const now = Date.now();
-  const start = coupon?.startsAt ? new Date(coupon.startsAt).getTime() : 0;
-  const end = coupon?.endsAt ? new Date(coupon.endsAt).getTime() : 0;
-  if (start && Number.isFinite(start) && now < start) return false;
-  if (end && Number.isFinite(end) && now > end) return false;
-  return true;
+  return dateTimeWindowActive(coupon?.startsAt, coupon?.endsAt, timezone);
 }
 
 export const uploadStoreLogo = onRequest(
@@ -242,10 +237,12 @@ export const grantLoyaltyCoupons = onDocumentUpdated(
 
     const db = getFirestore();
 
-    const [ordersSnap, couponsSnap] = await Promise.all([
+    const [ordersSnap, couponsSnap, settingsSnap] = await Promise.all([
       db.collection("orders").where("customerId", "==", customerId).get(),
-      db.collection("coupons").get()
+      db.collection("coupons").get(),
+      db.doc("settings/store").get()
     ]);
+    const timezone = settingsSnap.data()?.timezone || "America/Porto_Velho";
 
     const completedOrders = ordersSnap.docs
       .map(docSnap => docSnap.data())
@@ -259,7 +256,7 @@ export const grantLoyaltyCoupons = onDocumentUpdated(
 
     const eligible = couponsSnap.docs
       .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-      .filter(coupon => couponIsCurrentlyActive(coupon))
+      .filter(coupon => couponIsCurrentlyActive(coupon, timezone))
       .filter(coupon => completedCount >= Number(coupon.minOrders || 0))
       .filter(coupon => spent >= Number(coupon.minSpent || 0));
 
@@ -470,6 +467,35 @@ function normalizeCouponCode(value) {
     .slice(0, 30);
 }
 
+function businessDateTimeKey(date = new Date(), timezone = "America/Porto_Velho") {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(p => [p.type, p.value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+}
+
+function dateTimeWindowActive(startsAt, endsAt, timezone = "America/Porto_Velho") {
+  const nowMs = Date.now();
+  const nowKey = businessDateTimeKey(new Date(nowMs), timezone);
+  const boundary = (value, isStart) => {
+    if (!value) return true;
+    const raw = String(value).trim();
+    const localMatch = raw.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::\d{2})?$/);
+    if (localMatch) return isStart ? nowKey >= localMatch[1] : nowKey <= localMatch[1];
+    const epoch = Date.parse(raw);
+    if (!Number.isFinite(epoch)) return true;
+    return isStart ? nowMs >= epoch : nowMs <= epoch;
+  };
+  return boundary(startsAt, true) && boundary(endsAt, false);
+}
+
 function currentScheduleState(settings) {
   if (settings.openMode === "open") return true;
   if (settings.openMode === "closed") return false;
@@ -513,18 +539,17 @@ function currentScheduleState(settings) {
   return false;
 }
 
-function promoActive(promo) {
+function promoActive(promo, timezone) {
   if (!promo || promo.active === false) return false;
-  const now = Date.now();
-  const start = promo.startsAt ? new Date(promo.startsAt).getTime() : 0;
-  const end = promo.endsAt ? new Date(promo.endsAt).getTime() : 0;
-  if (start && Number.isFinite(start) && now < start) return false;
-  if (end && Number.isFinite(end) && now > end) return false;
-  return true;
+  return dateTimeWindowActive(
+    promo.startsAt,
+    promo.endsAt,
+    timezone || "America/Porto_Velho"
+  );
 }
 
-function promoMatches(promo, product) {
-  if (!promoActive(promo)) return false;
+function promoMatches(promo, product, timezone) {
+  if (!promoActive(promo, timezone)) return false;
   if (promo.targetType === "all") return true;
   if (promo.targetType === "category") return promo.targetId === product.categoryId;
   if (promo.targetType === "product") return promo.targetId === product.id;
@@ -539,9 +564,9 @@ function applyPromotion(base, promo) {
   return Math.max(0, Number(base || 0) - Number(promo.discountValue || 0));
 }
 
-function bestPromotion(promotions, product, base) {
+function bestPromotion(promotions, product, base, timezone) {
   const candidates = promotions
-    .filter(p => promoMatches(p, product))
+    .filter(p => promoMatches(p, product, timezone))
     .map(p => ({ promo:p, price:applyPromotion(base,p) }))
     .sort((a,b) => a.price - b.price);
   return candidates[0] || null;
@@ -1019,7 +1044,12 @@ export const createOrder = onRequest(
           }
         }
 
-        const best=bestPromotion(promotions,first,base);
+        const best=bestPromotion(
+          promotions,
+          first,
+          base,
+          settings.timezone || "America/Porto_Velho"
+        );
         let promotedBase=best?best.price:base;
 
         const requestedExtras=(Array.isArray(raw.extras)?raw.extras:[])
@@ -1076,10 +1106,14 @@ export const createOrder = onRequest(
           return;
         }
         const cp={id:couponSnap.id,...couponSnap.data()};
-        const now=Date.now();
-        const start=cp.startsAt?new Date(cp.startsAt).getTime():0;
-        const end=cp.endsAt?new Date(cp.endsAt).getTime():0;
-        if (cp.active===false || (start&&now<start) || (end&&now>end)) {
+        if (
+          cp.active===false ||
+          !dateTimeWindowActive(
+            cp.startsAt,
+            cp.endsAt,
+            settings.timezone || "America/Porto_Velho"
+          )
+        ) {
           res.status(400).json({error:"coupon_inactive"});
           return;
         }
