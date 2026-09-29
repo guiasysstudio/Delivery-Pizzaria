@@ -89,6 +89,7 @@ let printConfig={
 const PRINT_AGENT='http://127.0.0.1:17329';
 const IMAGE_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadProductImage';
 const STORE_LOGO_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadStoreLogo';
+const STAFF_USER_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageStaffUser';
 const printedOrderIds=new Set(JSON.parse(sessionStorage.getItem('deliveryPrintedOrders')||'[]'));
 
 const defaults={
@@ -2830,12 +2831,16 @@ function renderUsers(){
       <span class="status-pill ${u.active===false?'status-cancelled':'status-completed'}">${u.active===false?'Desativado':'Ativo'}</span>
       <div class="data-actions">
         <button class="btn btn-secondary edit-user" data-uid="${u.uid}">${u.bootstrap?'Registrar perfil':'Editar'}</button>
+        ${!u.bootstrap?`<button class="btn btn-secondary password-user" data-uid="${u.uid}">Trocar senha</button>`:''}
         ${u.uid!==auth.currentUser?.uid&&!u.bootstrap?`<button class="btn ${u.active===false?'btn-secondary':'btn-danger'} toggle-user" data-uid="${u.uid}">${u.active===false?'Ativar':'Desativar'}</button>`:''}
+        ${u.uid!==auth.currentUser?.uid&&!u.bootstrap?`<button class="btn btn-danger delete-user" data-uid="${u.uid}">Excluir</button>`:''}
       </div>
     </div>`).join(''):'<div class="empty-state">Nenhum usuário cadastrado.</div>';
 
-  $$('.edit-user').forEach(b=>b.onclick=()=>editUser(b.dataset.uid));
-  $$('.toggle-user').forEach(b=>b.onclick=()=>toggleUser(b.dataset.uid));
+  $('.edit-user').forEach(b=>b.onclick=()=>editUser(b.dataset.uid));
+  $('.password-user').forEach(b=>b.onclick=()=>openUserPasswordDialog(b.dataset.uid));
+  $('.toggle-user').forEach(b=>b.onclick=()=>toggleUser(b.dataset.uid));
+  $('.delete-user').forEach(b=>b.onclick=()=>removeUser(b.dataset.uid));
 }
 
 $('#newUserBtn').onclick=()=>{
@@ -2858,8 +2863,11 @@ function editUser(uid){
   $('#userPasswordField').classList.toggle('hidden',!!u);
   $('#userRole').value=u?.role||'cashier';
   $('#userRole').disabled=u?.uid===auth.currentUser?.uid;
-  $('#userActive').checked=u?.active!==false;
-  $('#userActive').disabled=u?.uid===auth.currentUser?.uid;
+  $('#userActive').checked=true;
+  $('#userActive').closest('.check-row')?.classList.add('hidden');
+  $('#userEditorHelp').textContent=u
+    ?'Use os botões da lista para ativar/desativar, trocar a senha ou excluir o usuário.'
+    :'O novo usuário será criado ativo. Depois você pode desativá-lo pela lista.';
   $('#userEditorError').classList.add('hidden');
   $('#userEditor').showModal();
 }
@@ -2874,7 +2882,8 @@ $('#userEditorForm').onsubmit=async e=>{
   const role=existingUid===auth.currentUser?.uid&&isMaster()
     ?'master'
     :(requestedRole==='master'&&!isMaster()?currentProfile.role:requestedRole);
-  const active=existingUid===auth.currentUser?.uid?true:$('#userActive').checked;
+  const existingUser=users.find(x=>x.uid===existingUid);
+  const isBootstrap=existingUser?.bootstrap===true;
   $('#userEditorError').classList.add('hidden');
 
   if(!username||username.length<3){
@@ -2883,15 +2892,16 @@ $('#userEditorForm').onsubmit=async e=>{
 
   try{
     if(existingUid){
-      await setDoc(doc(db,'users',existingUid),{
+      const patch={
         username,
         displayName,
         role,
-        active,
         updatedAt:serverTimestamp()
-      },{merge:true});
+      };
+      if(isBootstrap) patch.active=true;
+      await setDoc(doc(db,'users',existingUid),patch,{merge:true});
       if(existingUid===auth.currentUser?.uid){
-        currentProfile={...currentProfile,username,displayName,role,active,bootstrap:false};
+        currentProfile={...currentProfile,username,displayName,role,active:true,bootstrap:false};
       }
     }else{
       const password=$('#userPassword').value;
@@ -2905,7 +2915,7 @@ $('#userEditorForm').onsubmit=async e=>{
           username,
           displayName,
           role,
-          active,
+          active:true,
           createdBy:auth.currentUser.uid,
           createdAt:serverTimestamp(),
           updatedAt:serverTimestamp()
@@ -2942,12 +2952,118 @@ function userEditorError(message){
   $('#userEditorError').classList.remove('hidden');
 }
 
+async function staffUserAdminAction(action,uid,extra={}){
+  const user=auth.currentUser;
+  if(!user) throw new Error('auth-required');
+  const token=await user.getIdToken();
+  const response=await fetch(STAFF_USER_ADMIN_ENDPOINT,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization':'Bearer '+token
+    },
+    body:JSON.stringify({action,uid,...extra})
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok){
+    const err=new Error(data?.error||'staff-user-action-failed');
+    err.code=data?.error||'staff-user-action-failed';
+    throw err;
+  }
+  return data;
+}
+
+function staffUserActionMessage(err){
+  const code=String(err?.code||err?.message||'');
+  if(code.includes('last_master')) return 'Não é possível desativar ou excluir o último Master ativo do sistema.';
+  if(code.includes('master_protected')) return 'Somente um Master pode administrar outra conta Master.';
+  if(code.includes('self_status_change')) return 'Você não pode desativar a própria conta.';
+  if(code.includes('self_delete')) return 'Você não pode excluir a própria conta.';
+  if(code.includes('invalid_password')) return 'A senha precisa ter entre 6 e 128 caracteres.';
+  if(code.includes('user_not_found')) return 'Este usuário não existe mais.';
+  if(code.includes('permission_denied')) return 'Seu perfil não possui permissão para administrar este usuário.';
+  return 'Não foi possível concluir a ação. Verifique as Firebase Functions e tente novamente.';
+}
+
 async function toggleUser(uid){
   if(!hasPermission('usersManage')||uid===auth.currentUser?.uid) return;
   const u=users.find(x=>x.uid===uid);
   if(!u) return;
+
   const next=u.active===false;
-  if(!next&&!confirm(`Desativar o usuário “${u.username}”? Ele não conseguirá acessar o sistema.`)) return;
-  await updateDoc(doc(db,'users',uid),{active:next,updatedAt:serverTimestamp()});
-  await loadUsers();
+  if(!next&&!confirm(`Desativar o usuário “${u.username}”? O login dele será bloqueado no Firebase Authentication.`)) return;
+
+  try{
+    await staffUserAdminAction('setActive',uid,{active:next});
+    await loadUsers();
+  }catch(err){
+    console.error(err);
+    alert(staffUserActionMessage(err));
+  }
+}
+
+function openUserPasswordDialog(uid){
+  if(!hasPermission('usersManage')) return;
+  const u=users.find(x=>x.uid===uid);
+  if(!u||u.bootstrap) return;
+
+  $('#userPasswordTargetUid').value=uid;
+  $('#userPasswordTargetName').textContent=u.displayName||u.username||'Usuário';
+  $('#userNewPassword').value='';
+  $('#userConfirmPassword').value='';
+  $('#userPasswordError').classList.add('hidden');
+  $('#userPasswordDialog').showModal();
+  setTimeout(()=>$('#userNewPassword').focus(),50);
+}
+
+$('#userPasswordForm')?.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const uid=$('#userPasswordTargetUid').value;
+  const password=$('#userNewPassword').value;
+  const confirmPassword=$('#userConfirmPassword').value;
+  $('#userPasswordError').classList.add('hidden');
+
+  if(password.length<6){
+    $('#userPasswordError').textContent='A senha precisa ter pelo menos 6 caracteres.';
+    $('#userPasswordError').classList.remove('hidden');
+    return;
+  }
+  if(password!==confirmPassword){
+    $('#userPasswordError').textContent='As senhas não coincidem.';
+    $('#userPasswordError').classList.remove('hidden');
+    return;
+  }
+
+  const submit=$('#saveUserPasswordBtn');
+  submit.disabled=true;
+  submit.textContent='Alterando...';
+  try{
+    await staffUserAdminAction('setPassword',uid,{password});
+    $('#userPasswordDialog').close();
+    alert('Senha alterada com sucesso.');
+  }catch(err){
+    console.error(err);
+    $('#userPasswordError').textContent=staffUserActionMessage(err);
+    $('#userPasswordError').classList.remove('hidden');
+  }finally{
+    submit.disabled=false;
+    submit.textContent='Alterar senha';
+  }
+});
+
+async function removeUser(uid){
+  if(!hasPermission('usersManage')||uid===auth.currentUser?.uid) return;
+  const u=users.find(x=>x.uid===uid);
+  if(!u||u.bootstrap) return;
+
+  const name=u.displayName||u.username||'Usuário';
+  if(!confirm(`Excluir o usuário “${name}”?\n\nA conta de login também será excluída do Firebase Authentication. Esta ação não pode ser desfeita.`)) return;
+
+  try{
+    await staffUserAdminAction('delete',uid);
+    await loadUsers();
+  }catch(err){
+    console.error(err);
+    alert(staffUserActionMessage(err));
+  }
 }
