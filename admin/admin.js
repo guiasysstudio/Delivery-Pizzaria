@@ -80,7 +80,7 @@ const defaultRoleTemplates={
 };
 
 let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=[],promotions=[],coupons=[],cashSessions=[],cashMovements=[],currentCashSession=null,currentProfile=null;
-let unsubscribeOrders=null,soundEnabled=false,knownOrderIds=new Set();
+let unsubscribeOrders=null,soundEnabled=localStorage.getItem('deliverySoundEnabled')==='1',knownOrderIds=new Set();
 let printConfig={
   printer:localStorage.getItem('deliveryPrinter')||'',
   autoPrint:localStorage.getItem('deliveryAutoPrint')==='1',
@@ -332,6 +332,7 @@ async function initializeAdmin(){
   }
 
   if(hasPermission('cashView')) renderCash();
+  if($('#soundBtn')) $('#soundBtn').textContent=soundEnabled?'🔔 Som ativado':'🔕 Ativar som';
 }
 async function loadRoles(){
   try{
@@ -453,6 +454,7 @@ function beep(){playNotificationSound();}
 
 $('#soundBtn').onclick=async()=>{
   soundEnabled=!soundEnabled;
+  localStorage.setItem('deliverySoundEnabled',soundEnabled?'1':'0');
   if(soundEnabled&&'Notification' in window&&Notification.permission==='default'){
     await Notification.requestPermission();
   }
