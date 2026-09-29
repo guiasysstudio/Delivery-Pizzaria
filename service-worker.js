@@ -1,4 +1,4 @@
-const CACHE_NAME='delivery-pizzaria-v6';
+const CACHE_NAME='delivery-pizzaria-v7';
 const SHELL=[
   './',
   './index.html',
