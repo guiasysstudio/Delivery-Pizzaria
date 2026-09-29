@@ -2249,9 +2249,21 @@ function renderSchedules(){
 function renderSettings(){
   $('#setStoreName').value=settings.storeName||'';
   $('#setSubtitle').value=settings.subtitle||'';
-  $('#setPhone').value=settings.phone||'';
-  $('#setStoreZip').value=settings.storeZip||'';
-  $('#setStoreAddress').value=settings.storeAddress||'';
+  $('#setPhone').value=formatPhoneInput(settings.phone||'');
+  $('#setWhatsapp').value=formatPhoneInput(settings.whatsapp||settings.phone||'');
+  $('#setStoreZip').value=formatCepInput(settings.storeZip||'');
+  $('#setStoreStreet').value=settings.storeStreet||'';
+  $('#setStoreNumber').value=settings.storeNumber||'';
+  $('#setStoreNeighborhood').value=settings.storeNeighborhood||'';
+  $('#setStoreComplement').value=settings.storeComplement||'';
+  $('#setStoreCity').value=settings.storeCity||'';
+  $('#setStoreState').value=settings.storeState||'';
+  $('#setStoreLogo').value=settings.storeLogo||'';
+  $('#setGoogleMapsUrl').value=settings.googleMapsUrl||'';
+  $('#setCustomerCancelMinutes').value=settings.customerCancelMinutes??2;
+  $('#setNotificationSound').value=settings.notificationSound||'bell';
+  $('#setNotificationVolume').value=settings.notificationVolume??70;
+  renderStoreLogoPreview();
   $('#setOpenMode').value=settings.openMode||'schedule';
   $('#setDeliveryFee').value=settings.deliveryFee??0;
   const mode=settings.deliveryPricingMode||'fixed';
@@ -2329,9 +2341,25 @@ $('#settingsForm').onsubmit=async e=>{
     storeName:$('#setStoreName').value.trim(),
     subtitle:$('#setSubtitle').value.trim(),
     phone:$('#setPhone').value.trim(),
+    whatsapp:$('#setWhatsapp').value.trim(),
     storeZip,
     storeLocation,
-    storeAddress:$('#setStoreAddress').value.trim(),
+    storeStreet:$('#setStoreStreet').value.trim(),
+    storeNumber:$('#setStoreNumber').value.trim(),
+    storeNeighborhood:$('#setStoreNeighborhood').value.trim(),
+    storeComplement:$('#setStoreComplement').value.trim(),
+    storeCity:$('#setStoreCity').value.trim(),
+    storeState:$('#setStoreState').value.trim().toUpperCase(),
+    storeLogo:$('#setStoreLogo').value.trim(),
+    googleMapsUrl:$('#setGoogleMapsUrl').value.trim(),
+    storeAddress:[
+      [$('#setStoreStreet').value.trim(),$('#setStoreNumber').value.trim()].filter(Boolean).join(', '),
+      $('#setStoreNeighborhood').value.trim(),
+      [$('#setStoreCity').value.trim(),$('#setStoreState').value.trim().toUpperCase()].filter(Boolean).join('/')
+    ].filter(Boolean).join(' • '),
+    customerCancelMinutes:Math.max(0,Math.min(30,Number($('#setCustomerCancelMinutes').value||2))),
+    notificationSound:$('#setNotificationSound').value,
+    notificationVolume:Math.max(0,Math.min(100,Number($('#setNotificationVolume').value||70))),
     openMode:$('#setOpenMode').value,
     deliveryPricingMode,
     deliveryFee:Number($('#setDeliveryFee').value||0),
