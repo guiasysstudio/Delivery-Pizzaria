@@ -13,21 +13,21 @@
   "categories": ["food", "shopping"],
   "icons": [
     {
-      "src": "./assets/pwa/icon-192.svg",
+      "src": "./assets/pwa/icon-192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "./assets/pwa/icon-512.svg",
+      "src": "./assets/pwa/icon-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "./assets/pwa/icon-maskable.svg",
+      "src": "./assets/pwa/icon-maskable-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "maskable"
     }
   ],
@@ -38,9 +38,9 @@
       "url": "./account/#orders",
       "icons": [
         {
-          "src": "./assets/pwa/icon-192.svg",
+          "src": "./assets/pwa/icon-192.png",
           "sizes": "192x192",
-          "type": "image/svg+xml"
+          "type": "image/png"
         }
       ]
     }
