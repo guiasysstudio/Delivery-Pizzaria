@@ -2468,7 +2468,7 @@ function addDeliveryZoneRow(row={neighborhood:'',fee:''}){
   el.innerHTML=`
     <label class="field repeat-field"><span>Bairro</span><input class="zone-name" maxlength="80" placeholder="Ex.: Centro" value="${esc(row.neighborhood||'')}"></label>
     <label class="field repeat-price"><span>Taxa (R$)</span><input class="zone-fee" type="number" min="0" step="0.01" value="${Number.isFinite(Number(row.fee))?Number(row.fee):''}"></label>
-    <button class="repeat-remove" type="button" title="Remover">${iconHtml('trash')}</button>`;
+    <button class="repeat-remove" type="button" title="Remover" aria-label="Remover">${iconHtml('trash')}</button>`;
   el.querySelector('.repeat-remove').onclick=()=>{el.remove();updateDeliveryZoneEmpty();};
   host.appendChild(el);
   updateDeliveryZoneEmpty();
@@ -2502,7 +2502,7 @@ function addDeliveryKmBandRow(row={maxKm:'',fee:''}){
   el.innerHTML=`
     <label class="field repeat-field"><span>Até quantos km</span><input class="km-max" type="number" min="0.1" step="0.1" placeholder="Ex.: 3" value="${Number.isFinite(Number(row.maxKm))?Number(row.maxKm):''}"></label>
     <label class="field repeat-price"><span>Valor (R$)</span><input class="km-fee" type="number" min="0" step="0.01" placeholder="0,00" value="${Number.isFinite(Number(row.fee))?Number(row.fee):''}"></label>
-    <button class="repeat-remove" type="button" title="Remover">${iconHtml('trash')}</button>`;
+    <button class="repeat-remove" type="button" title="Remover" aria-label="Remover">${iconHtml('trash')}</button>`;
   el.querySelector('.repeat-remove').onclick=()=>{el.remove();updateDeliveryKmBandsEmpty();};
   host.appendChild(el);
   updateDeliveryKmBandsEmpty();
@@ -2695,7 +2695,7 @@ function addPaymentMethodRow(value=''){
   const host=$('#paymentMethodsEditor');
   const el=document.createElement('div');
   el.className='simple-repeat-row';
-  el.innerHTML=`<input class="payment-method-value" maxlength="60" placeholder="Ex.: Cartão de crédito" value="${esc(value)}"><button class="repeat-remove" type="button" title="Remover">${iconHtml('trash')}</button>`;
+  el.innerHTML=`<input class="payment-method-value" maxlength="60" placeholder="Ex.: Cartão de crédito" value="${esc(value)}"><button class="repeat-remove" type="button" title="Remover" aria-label="Remover">${iconHtml('trash')}</button>`;
   el.querySelector('.repeat-remove').onclick=()=>{el.remove();updatePaymentMethodsEmpty();};
   host.appendChild(el);
   updatePaymentMethodsEmpty();
