@@ -1,7 +1,7 @@
 import {
   db, watchCustomer, logoutCustomer, getCustomerProfile, saveCustomerProfile,
   getAddresses, saveAddress, deleteAddress, setDefaultAddress, getFavorites, setFavorite, lookupBrazilianZip,
-  getCustomerIdentity, saveCustomerIdentity, cancelCustomerOrder, formatCpf, validCpf, formatPhone, validFullName,
+  getCustomerIdentity, saveCustomerIdentity, cancelCustomerOrder, formatCpf, validCpf, formatPhone, validPhone, validFullName,
   resendCustomerEmailVerification
 } from '../assets/customer-auth.js';
 import {
@@ -259,6 +259,11 @@ $('#profileForm').onsubmit=async e=>{
     $('#profileName').focus();
     return;
   }
+  if(!validPhone(phone)){
+    alert('Informe um telefone válido com DDD.');
+    $('#profilePhone').focus();
+    return;
+  }
   if(!validCpf(cpf)){
     alert('Informe um CPF válido.');
     $('#profileCpf').focus();
@@ -411,6 +416,21 @@ $('#accAddressZip')?.addEventListener('blur',async()=>{
 
 $('#accountAddressForm').onsubmit=async e=>{
   e.preventDefault();
+
+  const phone=$('#accAddressPhone').value.trim();
+  const cep=$('#accAddressZip').value.replace(/\D/g,'');
+  if(!validPhone(phone)){
+    $('#accountAddressError').textContent='Informe um telefone válido com DDD.';
+    $('#accountAddressError').classList.remove('hidden');
+    $('#accAddressPhone').focus();
+    return;
+  }
+  if(cep&&cep.length!==8){
+    $('#accountAddressError').textContent='Informe um CEP válido no formato 00000-000.';
+    $('#accountAddressError').classList.remove('hidden');
+    $('#accAddressZip').focus();
+    return;
+  }
 
   try{
     const id=await saveAddress(user.uid,{
