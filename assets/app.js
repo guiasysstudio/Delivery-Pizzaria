@@ -669,6 +669,13 @@ function renderCatalog(){
       .sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'pt-BR'));
     $('#catalogTitle').textContent=selectedCategory==='all'?'Resultados da busca':categories.find(x=>x.id===selectedCategory)?.name||'Resultados';
     $('#catalogEmpty').classList.toggle('hidden',list.length>0);
+    if(!list.length){
+      $('#catalogEmpty').innerHTML=emptyStateHtml({
+        icon:'search',
+        title:'Nenhum produto encontrado',
+        description:'Tente buscar por outro nome ou escolha uma categoria diferente.'
+      });
+    }
     flat.innerHTML=list.map(productCard).join('');
     bindProductCards(flat);
   }else{
@@ -684,6 +691,13 @@ function renderCatalog(){
     })).filter(group=>group.items.length);
 
     $('#catalogEmpty').classList.toggle('hidden',groups.length>0);
+    if(!groups.length){
+      $('#catalogEmpty').innerHTML=emptyStateHtml({
+        icon:'pizza',
+        title:'Cardápio ainda vazio',
+        description:'Os produtos disponíveis aparecerão aqui assim que forem cadastrados.'
+      });
+    }
     sections.innerHTML=groups.map(({category,items})=>`
       <section id="category-section-${category.id}" class="catalog-category-section" data-catalog-category="${category.id}">
         <div class="section-heading category-section-heading">
