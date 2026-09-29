@@ -12,6 +12,44 @@ const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
 
+function readStoredJson(storage,key,fallback){
+  try{
+    const raw=storage.getItem(key);
+    if(!raw) return fallback;
+    const parsed=JSON.parse(raw);
+    return parsed??fallback;
+  }catch(err){
+    console.warn(`Storage inválido em ${key}; restaurando valor padrão.`,err);
+    storage.removeItem(key);
+    return fallback;
+  }
+}
+
+function businessDateTimeKey(date=new Date(),timezone='America/Porto_Velho'){
+  const parts=new Intl.DateTimeFormat('en-CA',{
+    timeZone:timezone,
+    year:'numeric',month:'2-digit',day:'2-digit',
+    hour:'2-digit',minute:'2-digit',hourCycle:'h23'
+  }).formatToParts(date);
+  const values=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+}
+
+function dateTimeWindowActive(startsAt,endsAt,timezone='America/Porto_Velho'){
+  const nowMs=Date.now();
+  const nowKey=businessDateTimeKey(new Date(nowMs),timezone);
+  const boundary=(value,isStart)=>{
+    if(!value) return true;
+    const raw=String(value).trim();
+    const localMatch=raw.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::\d{2})?$/);
+    if(localMatch) return isStart?nowKey>=localMatch[1]:nowKey<=localMatch[1];
+    const epoch=Date.parse(raw);
+    if(!Number.isFinite(epoch)) return true;
+    return isStart?nowMs>=epoch:nowMs<=epoch;
+  };
+  return boundary(startsAt,true)&&boundary(endsAt,false);
+}
+
 const statusLabels={
   pending:'Aguardando confirmação',
   accepted:'Confirmado',
@@ -91,7 +129,8 @@ const PRINT_AGENT='http://127.0.0.1:17329';
 const IMAGE_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadProductImage';
 const STORE_LOGO_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadStoreLogo';
 const STAFF_USER_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageStaffUser';
-const printedOrderIds=new Set(JSON.parse(sessionStorage.getItem('deliveryPrintedOrders')||'[]'));
+const storedPrintedOrderIds=readStoredJson(sessionStorage,'deliveryPrintedOrders',[]);
+const printedOrderIds=new Set(Array.isArray(storedPrintedOrderIds)?storedPrintedOrderIds:[]);
 
 const defaults={
   storeName:'Delivery Pizzaria',
@@ -1938,12 +1977,11 @@ $('#cashCloseForm')?.addEventListener('submit',async e=>{
 
 function adminPromotionActive(promo){
   if(!promo||promo.active===false) return false;
-  const now=Date.now();
-  const start=promo.startsAt?new Date(promo.startsAt).getTime():0;
-  const end=promo.endsAt?new Date(promo.endsAt).getTime():0;
-  if(start&&Number.isFinite(start)&&now<start) return false;
-  if(end&&Number.isFinite(end)&&now>end) return false;
-  return true;
+  return dateTimeWindowActive(
+    promo.startsAt,
+    promo.endsAt,
+    settings.timezone||'America/Porto_Velho'
+  );
 }
 
 function promotionsForProduct(product){
