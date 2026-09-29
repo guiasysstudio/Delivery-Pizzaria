@@ -1935,7 +1935,7 @@ function renderDeliveryPricingMode(){
   $('#deliveryKmSettings')?.classList.toggle('hidden',mode!=='km');
 }
 
-$('input[name="deliveryPricingMode"]').forEach(r=>r.addEventListener('change',renderDeliveryPricingMode));
+$$('input[name="deliveryPricingMode"]').forEach(r=>r.addEventListener('change',renderDeliveryPricingMode));
 
 async function lookupZipGeo(zip){
   const digits=String(zip||'').replace(/\D/g,'');
