@@ -180,8 +180,10 @@ O caixa permite:
 - PIX;
 - débito;
 - crédito;
+- suprimentos de caixa;
+- sangrias;
 - fechamento com dinheiro contado;
-- valor esperado;
+- valor esperado considerando abertura + vendas em dinheiro + suprimentos − sangrias;
 - diferença de caixa;
 - observação e histórico.
 
@@ -285,6 +287,7 @@ As regras devem ser publicadas sempre que esse arquivo mudar.
 A pasta `functions/` contém:
 
 - `uploadProductImage`: envia WebP autenticado ao GitHub.
+- `createOrder`: valida o pedido no servidor, recalcula cardápio, promoções, cupom, frete e numeração antes de gravar.
 - `grantLoyaltyCoupons`: entrega automaticamente recompensas de fidelidade após pedidos concluídos.
 
 Para o upload de imagem, configurar o secret:
@@ -298,6 +301,22 @@ Esse token deve ser fine-grained, restrito ao repositório Delivery-Pizzaria e c
 Depois, publicar as Functions com Firebase CLI.
 
 > Cloud Functions em produção pode exigir o plano Blaze do Firebase.
+
+### Criação segura de pedidos
+
+O site público tenta usar a Function `createOrder` antes de qualquer gravação direta. Quando publicada, ela ignora valores enviados pelo navegador e recalcula no servidor:
+
+- produtos e disponibilidade;
+- tamanho e meio a meio;
+- adicionais;
+- promoções;
+- cupom e elegibilidade;
+- pedido mínimo;
+- forma de pagamento e troco;
+- frete fixo, por bairro ou por km;
+- contador sequencial do pedido.
+
+Enquanto a Function ainda não estiver publicada, existe um fallback de compatibilidade para não interromper os testes atuais. Depois da publicação e validação da Function, esse fallback pode ser removido e as regras do Firestore podem bloquear completamente a criação direta pelo navegador.
 
 ## Validação automática
 
