@@ -1089,7 +1089,17 @@ async function checkPrintAgent(){
 
     const data=await response.json();
     const printers=Array.isArray(data.printers)?data.printers:[];
+    const supportsAgentPrinter=Object.prototype.hasOwnProperty.call(data,'selectedPrinter');
     const selectedPrinter=String(data.selectedPrinter||'').trim();
+
+    if(!supportsAgentPrinter){
+      status.textContent='● Print Agent desatualizado';
+      status.classList.add('off');
+      status.classList.remove('ok');
+      if($('#printerAgentInfoState')) $('#printerAgentInfoState').textContent='Atualize para a versão 1.3.0 ou superior';
+      if($('#printerAgentVersion')) $('#printerAgentVersion').textContent=data.version||data.agentVersion||'Anterior à 1.3.0';
+      return false;
+    }
 
     status.textContent='● Print Agent conectado';
     status.classList.add('ok');
