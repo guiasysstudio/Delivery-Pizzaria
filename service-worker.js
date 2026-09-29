@@ -1,4 +1,4 @@
-const CACHE_NAME='delivery-pizzaria-v8';
+const CACHE_NAME='delivery-pizzaria-v9';
 const SHELL=[
   './',
   './index.html',
@@ -11,7 +11,9 @@ const SHELL=[
   './assets/products/placeholder.svg',
   './account/',
   './account/index.html',
-  './account/account.js'
+  './account/account.js',
+  './account/receipt.html',
+  './account/receipt.js'
 ];
 
 self.addEventListener('install',event=>{
