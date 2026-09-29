@@ -665,3 +665,9 @@ dialog[open]{animation:dialog-in .16s ease-out}
 .mobile-app-nav-item>.ui-icon,.mobile-app-nav-item>span>.ui-icon{width:1.2rem;height:1.2rem}
 .public-search>.ui-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--muted)}
 .product-promotion-line{display:flex!important;align-items:center;gap:5px}
+
+.hero-banner-image{
+  width:min(100%,420px);height:250px;object-fit:cover;border-radius:28px;
+  box-shadow:0 24px 55px rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.22)
+}
+@media(max-width:760px){.hero-banner-image{height:210px;width:min(100%,360px)}}
