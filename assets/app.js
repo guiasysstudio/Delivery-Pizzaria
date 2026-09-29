@@ -738,8 +738,11 @@ function openProduct(id){
   modalImage.src=pathImage(currentProduct.image);
   $('#modalFeatured').classList.toggle('hidden',!currentProduct.featured);
   $('#itemNote').value='';
-  $('#favoriteBtn').textContent=customer&&favorites.has(currentProduct.id)?'♥':'♡';
-  $('#favoriteBtn').classList.toggle('active',customer&&favorites.has(currentProduct.id));
+  const isFavorite=customer&&favorites.has(currentProduct.id);
+  $('#favoriteBtn').innerHTML=iconHtml('heart');
+  $('#favoriteBtn').classList.toggle('active',isFavorite);
+  $('#favoriteBtn').setAttribute('aria-pressed',isFavorite?'true':'false');
+  $('#favoriteBtn').setAttribute('aria-label',isFavorite?'Remover dos favoritos':'Adicionar aos favoritos');
   renderFlavorOptions();
   renderOptionGroups();
   updateModalPrice();
@@ -848,8 +851,10 @@ async function toggleFavorite(productId){
     renderCatalog();
     renderFeatured();
     if(currentProduct?.id===productId){
-      $('#favoriteBtn').textContent=next?'♥':'♡';
+      $('#favoriteBtn').innerHTML=iconHtml('heart');
       $('#favoriteBtn').classList.toggle('active',next);
+      $('#favoriteBtn').setAttribute('aria-pressed',next?'true':'false');
+      $('#favoriteBtn').setAttribute('aria-label',next?'Remover dos favoritos':'Adicionar aos favoritos');
     }
   }catch(err){console.error(err);}
 }
