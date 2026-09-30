@@ -42,6 +42,56 @@ googleProvider.setCustomParameters({prompt:'select_account'});
 const CUSTOMER_IDENTITY_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/customerIdentity';
 const CUSTOMER_CANCEL_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/cancelCustomerOrder';
 const CUSTOMER_DELETE_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/deleteCustomerAccount';
+const DEMO_IDENTITY_PREFIX='deliveryDemoIdentity:';
+
+function demoIdentityKey(uid){
+  return DEMO_IDENTITY_PREFIX+String(uid||'');
+}
+
+function maskCpfForFallback(value){
+  const digits=normalizeCpf(value);
+  if(digits.length!==11) return '';
+  return '***.***.***-'+digits.slice(-2);
+}
+
+function readDemoIdentity(uid){
+  if(!uid) return null;
+  try{
+    const raw=localStorage.getItem(demoIdentityKey(uid));
+    if(!raw) return null;
+    const parsed=JSON.parse(raw);
+    return parsed?.identityComplete===true?parsed:null;
+  }catch(err){
+    console.warn('Identidade local de demonstração inválida; limpando cache.',err);
+    localStorage.removeItem(demoIdentityKey(uid));
+    return null;
+  }
+}
+
+function saveDemoIdentity(uid,{name,phone,cpf}){
+  const data={
+    ok:true,
+    identityComplete:true,
+    cpfMasked:maskCpfForFallback(cpf),
+    name:String(name||'').trim(),
+    phone:normalizePhone(phone),
+    demoFallback:true,
+    savedAt:new Date().toISOString()
+  };
+  localStorage.setItem(demoIdentityKey(uid),JSON.stringify(data));
+  return data;
+}
+
+function clearDemoIdentity(uid){
+  if(uid) localStorage.removeItem(demoIdentityKey(uid));
+}
+
+function identityBackendUnavailable(err){
+  const code=String(err?.code||'');
+  if(['http/404','http/500','http/502','http/503','http/504'].includes(code)) return true;
+  const message=String(err?.message||'');
+  return err instanceof TypeError || /failed to fetch|networkerror|network error|load failed/i.test(message);
+}
 
 export function normalizeCpf(value){
   return String(value||'').replace(/\D/g,'').slice(0,11);
@@ -117,14 +167,67 @@ async function authenticatedJson(endpoint,options={}){
 }
 
 export async function getCustomerIdentity(){
-  return authenticatedJson(CUSTOMER_IDENTITY_ENDPOINT,{method:'GET',cache:'no-store'});
+  try{
+    const result=await authenticatedJson(CUSTOMER_IDENTITY_ENDPOINT,{method:'GET',cache:'no-store'});
+    clearDemoIdentity(auth.currentUser?.uid);
+    return result;
+  }catch(err){
+    if(identityBackendUnavailable(err)&&auth.currentUser){
+      const local=readDemoIdentity(auth.currentUser.uid);
+      if(local){
+        return {
+          ...local,
+          email:auth.currentUser.email||'',
+          emailVerified:auth.currentUser.emailVerified===true
+        };
+      }
+    }
+    throw err;
+  }
 }
 
 export async function saveCustomerIdentity({name,phone,cpf}){
-  return authenticatedJson(CUSTOMER_IDENTITY_ENDPOINT,{
-    method:'POST',
-    body:JSON.stringify({name:String(name||'').trim(),phone:String(phone||'').trim(),cpf:normalizeCpf(cpf)})
-  });
+  const cleanName=String(name||'').trim();
+  const cleanPhone=String(phone||'').trim();
+  const cleanCpf=normalizeCpf(cpf);
+
+  try{
+    const result=await authenticatedJson(CUSTOMER_IDENTITY_ENDPOINT,{
+      method:'POST',
+      body:JSON.stringify({name:cleanName,phone:cleanPhone,cpf:cleanCpf})
+    });
+    clearDemoIdentity(auth.currentUser?.uid);
+    return result;
+  }catch(err){
+    if(!identityBackendUnavailable(err)||!auth.currentUser) throw err;
+
+    if(!validFullName(cleanName)){
+      throw Object.assign(new Error('full_name_required'),{code:'full_name_required'});
+    }
+    if(!validPhone(cleanPhone)){
+      throw Object.assign(new Error('invalid_phone'),{code:'invalid_phone'});
+    }
+    if(!validCpf(cleanCpf)){
+      throw Object.assign(new Error('invalid_cpf'),{code:'invalid_cpf'});
+    }
+
+    const local=saveDemoIdentity(auth.currentUser.uid,{
+      name:cleanName,
+      phone:cleanPhone,
+      cpf:cleanCpf
+    });
+
+    console.warn(
+      'Firebase Function customerIdentity indisponível; usando fallback local de demonstração. '+
+      'O CPF bruto não foi armazenado no navegador.'
+    );
+
+    return {
+      ...local,
+      email:auth.currentUser.email||'',
+      emailVerified:auth.currentUser.emailVerified===true
+    };
+  }
 }
 
 export async function cancelCustomerOrder(orderId){
