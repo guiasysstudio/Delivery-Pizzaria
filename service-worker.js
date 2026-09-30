@@ -1,4 +1,4 @@
-const CACHE_NAME='delivery-pizzaria-v15';
+const CACHE_NAME='delivery-pizzaria-v16';
 const SHELL=[
   './',
   './index.html',
@@ -8,6 +8,7 @@ const SHELL=[
   './assets/app.js',
   './assets/customer-auth.js',
   './assets/ui.js',
+  './assets/print-agent-version.json',
   './assets/app-icon.svg',
   './assets/icons/badge-percent.svg',
   './assets/icons/banknote.svg',
