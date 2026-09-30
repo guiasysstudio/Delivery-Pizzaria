@@ -33,7 +33,9 @@ async function staffPermissions(uid) {
 
   const roleSnap = await db.doc(`roles/${user.role}`).get();
   if (!roleSnap.exists) return null;
-  return roleSnap.data()?.permissions || {};
+  const role=roleSnap.data()||{};
+  if (role.active === false) return null;
+  return role.permissions || {};
 }
 
 async function staffCanUpload(uid) {
@@ -48,6 +50,35 @@ async function staffCanUpload(uid) {
 async function staffCanManageSettings(uid) {
   const permissions=await staffPermissions(uid);
   return !!permissions && (permissions.master===true||permissions.settingsManage===true);
+}
+
+async function verifyActiveStaffRequest(req, requiredPermission) {
+  const authHeader=req.headers.authorization||"";
+  const match=authHeader.match(/^Bearer\s+(.+)$/i);
+  if(!match) throw Object.assign(new Error("missing_auth"),{status:401,code:"missing_auth"});
+
+  const decoded=await getAuth().verifyIdToken(match[1]);
+  const db=getFirestore();
+  const callerSnap=await db.doc(`users/${decoded.uid}`).get();
+  if(!callerSnap.exists) {
+    throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
+  }
+
+  const caller=callerSnap.data()||{};
+  if(caller.active===false) {
+    throw Object.assign(new Error("user_disabled"),{status:403,code:"user_disabled"});
+  }
+
+  const permissions=await staffPermissions(decoded.uid);
+  const allowed=permissions && (
+    permissions.master===true ||
+    permissions[requiredPermission]===true
+  );
+  if(!allowed) {
+    throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
+  }
+
+  return {decoded,caller,permissions,isMaster:caller.role==="master"};
 }
 
 async function githubJson(url, options = {}) {
@@ -447,6 +478,448 @@ export const manageStaffUser = onRequest(
       res.status(Number(err?.status)||500).json({
         error:err?.code||err?.message||"staff_user_action_failed"
       });
+    }
+  }
+);
+
+
+const cashCors=[
+  "https://guiasysstudio.github.io",
+  "https://guiasys.online",
+  /https:\/\/.*\.guiasys\.online$/
+];
+
+function cashBusinessDate(timezone="America/Porto_Velho",date=new Date()) {
+  return new Intl.DateTimeFormat("en-CA",{timeZone:timezone}).format(date);
+}
+
+function cleanCashMoney(value,{min=0,max=10_000_000}={}) {
+  return finiteNumber(value,{min,max});
+}
+
+function emptyCashSalesSummary() {
+  return {count:0,gross:0,money:0,pix:0,debit:0,credit:0,other:0};
+}
+
+function emptyCashMovementSummary() {
+  return {supplies:0,withdrawals:0};
+}
+
+function safeCashSalesSummary(value={}) {
+  const count=finiteNumber(value.count??0,{min:0,max:10_000_000,integer:true});
+  const gross=cleanCashMoney(value.gross??0);
+  const money=cleanCashMoney(value.money??0);
+  const pix=cleanCashMoney(value.pix??0);
+  const debit=cleanCashMoney(value.debit??0);
+  const credit=cleanCashMoney(value.credit??0);
+  const other=cleanCashMoney(value.other??0);
+  if([count,gross,money,pix,debit,credit,other].some(v=>v==null)) return null;
+  return {count,gross,money,pix,debit,credit,other};
+}
+
+function safeCashMovementSummary(value={}) {
+  const supplies=cleanCashMoney(value.supplies??0);
+  const withdrawals=cleanCashMoney(value.withdrawals??0);
+  if([supplies,withdrawals].some(v=>v==null)) return null;
+  return {supplies,withdrawals};
+}
+
+function cashPaymentBucket(method) {
+  const value=String(method||"").toLowerCase();
+  if(value.includes("dinheiro")) return "money";
+  if(value.includes("pix")) return "pix";
+  if(value.includes("débito")||value.includes("debito")) return "debit";
+  if(value.includes("crédito")||value.includes("credito")) return "credit";
+  return "other";
+}
+
+function cashSummarySnapshot(sales,movements) {
+  return {
+    count:sales.count,
+    gross:sales.gross,
+    money:sales.money,
+    pix:sales.pix,
+    debit:sales.debit,
+    credit:sales.credit,
+    other:sales.other,
+    supplies:movements.supplies,
+    withdrawals:movements.withdrawals
+  };
+}
+
+export const manageCash = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:cashCors,
+    timeoutSeconds:30,
+    memory:"256MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    try{
+      const action=normalizeText(req.body?.action,40);
+      if(!["open","movement","close","completeOrder"].includes(action)){
+        res.status(400).json({error:"invalid_action"});
+        return;
+      }
+
+      const requiredPermission=action==="completeOrder"?"ordersComplete":"cashOperate";
+      const {decoded,caller}=await verifyActiveStaffRequest(req,requiredPermission);
+      const db=getFirestore();
+      const now=new Date();
+      const operatorName=normalizeText(
+        caller.displayName||caller.username||decoded.name||"Usuário",
+        100
+      )||"Usuário";
+
+      if(action==="open"){
+        const openingAmount=cleanCashMoney(req.body?.openingAmount,{min:0,max:1_000_000});
+        const openingNote=normalizeText(req.body?.openingNote,300);
+        if(openingAmount==null){
+          res.status(400).json({error:"invalid_opening_amount"});
+          return;
+        }
+
+        const settingsSnap=await db.doc("settings/store").get();
+        const timezone=settingsSnap.data()?.timezone||"America/Porto_Velho";
+        const businessDate=cashBusinessDate(timezone,now);
+        const stateRef=db.doc("cashState/current");
+        const dayRef=db.doc(`cashDays/${businessDate}`);
+        const sessionRef=db.collection("cashSessions").doc();
+
+        await db.runTransaction(async tx=>{
+          const [stateSnap,daySnap]=await Promise.all([
+            tx.get(stateRef),
+            tx.get(dayRef)
+          ]);
+
+          if(stateSnap.exists&&stateSnap.data()?.sessionId){
+            throw Object.assign(new Error("cash_already_open"),{code:"cash_already_open"});
+          }
+          if(daySnap.exists){
+            throw Object.assign(new Error("cash_day_already_exists"),{code:"cash_day_already_exists"});
+          }
+
+          const salesSummary=emptyCashSalesSummary();
+          const movementSummary=emptyCashMovementSummary();
+          tx.set(sessionRef,{
+            status:"open",
+            locked:false,
+            summaryVersion:2,
+            businessDate,
+            timezone,
+            openingAmount,
+            openingNote,
+            openedBy:decoded.uid,
+            openedByName:operatorName,
+            openedAt:now,
+            updatedAt:now,
+            financialRevision:0,
+            salesSummary,
+            movementSummary
+          });
+          tx.set(stateRef,{
+            sessionId:sessionRef.id,
+            businessDate,
+            status:"open",
+            openedBy:decoded.uid,
+            openedAt:now,
+            updatedAt:now
+          });
+          tx.set(dayRef,{
+            sessionId:sessionRef.id,
+            businessDate,
+            status:"open",
+            openedAt:now,
+            updatedAt:now
+          });
+        });
+
+        res.json({
+          ok:true,
+          action,
+          sessionId:sessionRef.id,
+          businessDate,
+          openingAmount
+        });
+        return;
+      }
+
+      if(action==="movement"){
+        const sessionId=normalizeText(req.body?.sessionId,120);
+        const type=req.body?.type==="withdrawal"?"withdrawal":
+          req.body?.type==="supply"?"supply":"";
+        const amount=cleanCashMoney(req.body?.amount,{min:0.01,max:1_000_000});
+        const note=normalizeText(req.body?.note,300);
+        if(!sessionId||!type||amount==null){
+          res.status(400).json({error:"invalid_cash_movement"});
+          return;
+        }
+
+        const stateRef=db.doc("cashState/current");
+        const sessionRef=db.doc(`cashSessions/${sessionId}`);
+        const movementRef=sessionRef.collection("movements").doc();
+
+        await db.runTransaction(async tx=>{
+          const [stateSnap,sessionSnap]=await Promise.all([
+            tx.get(stateRef),
+            tx.get(sessionRef)
+          ]);
+          if(!stateSnap.exists||stateSnap.data()?.sessionId!==sessionId){
+            throw Object.assign(new Error("cash_session_changed"),{code:"cash_session_changed"});
+          }
+          if(!sessionSnap.exists||sessionSnap.data()?.status!=="open"){
+            throw Object.assign(new Error("cash_not_open"),{code:"cash_not_open"});
+          }
+
+          const session=sessionSnap.data()||{};
+          const movementSummary=safeCashMovementSummary(session.movementSummary);
+          if(!movementSummary){
+            throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+          }
+
+          if(type==="supply") movementSummary.supplies+=amount;
+          else movementSummary.withdrawals+=amount;
+
+          tx.set(movementRef,{
+            type,
+            amount,
+            note,
+            createdBy:decoded.uid,
+            createdByName:operatorName,
+            createdAt:now
+          });
+          tx.update(sessionRef,{
+            movementSummary,
+            financialRevision:(finiteNumber(session.financialRevision??0,{min:0,max:1_000_000_000,integer:true})??0)+1,
+            updatedAt:now
+          });
+        });
+
+        res.json({ok:true,action,movementId:movementRef.id,sessionId,type,amount});
+        return;
+      }
+
+      if(action==="completeOrder"){
+        const orderId=normalizeText(req.body?.orderId,120);
+        if(!orderId){
+          res.status(400).json({error:"order_required"});
+          return;
+        }
+
+        const orderRef=db.doc(`orders/${orderId}`);
+        const stateRef=db.doc("cashState/current");
+        let responseData=null;
+
+        await db.runTransaction(async tx=>{
+          const [orderSnap,stateSnap]=await Promise.all([
+            tx.get(orderRef),
+            tx.get(stateRef)
+          ]);
+          if(!orderSnap.exists){
+            throw Object.assign(new Error("order_not_found"),{code:"order_not_found"});
+          }
+
+          const order=orderSnap.data()||{};
+          if(order.status==="completed"&&order.cashSessionId){
+            responseData={
+              ok:true,
+              action,
+              orderId,
+              sessionId:order.cashSessionId,
+              status:"completed",
+              idempotent:true
+            };
+            return;
+          }
+
+          const validTransition=
+            order.status==="out_for_delivery" ||
+            (order.status==="ready"&&order.fulfillment==="pickup");
+          if(!validTransition){
+            throw Object.assign(new Error("invalid_order_transition"),{code:"invalid_order_transition"});
+          }
+
+          if(!stateSnap.exists||!stateSnap.data()?.sessionId){
+            throw Object.assign(new Error("cash_not_open"),{code:"cash_not_open"});
+          }
+
+          const sessionId=stateSnap.data().sessionId;
+          const sessionRef=db.doc(`cashSessions/${sessionId}`);
+          const sessionSnap=await tx.get(sessionRef);
+          if(!sessionSnap.exists||sessionSnap.data()?.status!=="open"){
+            throw Object.assign(new Error("cash_not_open"),{code:"cash_not_open"});
+          }
+
+          const session=sessionSnap.data()||{};
+          const total=cleanCashMoney(order.total,{min:0,max:5_000_000});
+          const salesSummary=safeCashSalesSummary(session.salesSummary);
+          if(total==null||!salesSummary){
+            throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+          }
+
+          const bucket=cashPaymentBucket(order.payment?.method);
+          salesSummary.count+=1;
+          salesSummary.gross+=total;
+          salesSummary[bucket]+=total;
+          const revision=finiteNumber(
+            session.financialRevision??0,
+            {min:0,max:1_000_000_000,integer:true}
+          );
+          if(revision==null){
+            throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+          }
+
+          tx.update(orderRef,{
+            status:"completed",
+            completedAt:now,
+            updatedAt:now,
+            cashSessionId:sessionId,
+            cashBusinessDate:session.businessDate||stateSnap.data()?.businessDate||null
+          });
+          tx.update(sessionRef,{
+            salesSummary,
+            financialRevision:revision+1,
+            updatedAt:now
+          });
+
+          responseData={
+            ok:true,
+            action,
+            orderId,
+            sessionId,
+            status:"completed"
+          };
+        });
+
+        res.json(responseData||{ok:true,action,orderId,status:"completed"});
+        return;
+      }
+
+      // close
+      const sessionId=normalizeText(req.body?.sessionId,120);
+      const closingAmount=cleanCashMoney(req.body?.closingAmount,{min:0,max:10_000_000});
+      const closingNote=normalizeText(req.body?.closingNote,300);
+      if(!sessionId||closingAmount==null){
+        res.status(400).json({error:"invalid_closing_amount"});
+        return;
+      }
+
+      const stateRef=db.doc("cashState/current");
+      const sessionRef=db.doc(`cashSessions/${sessionId}`);
+      let closeResult=null;
+
+      await db.runTransaction(async tx=>{
+        const [stateSnap,sessionSnap]=await Promise.all([
+          tx.get(stateRef),
+          tx.get(sessionRef)
+        ]);
+        if(!sessionSnap.exists){
+          throw Object.assign(new Error("cash_session_not_found"),{code:"cash_session_not_found"});
+        }
+
+        const session=sessionSnap.data()||{};
+        if(session.status==="closed"){
+          closeResult={
+            ok:true,
+            action,
+            sessionId,
+            status:"closed",
+            idempotent:true,
+            expectedCash:session.expectedCash??0,
+            difference:session.difference??0,
+            summary:session.summary||{}
+          };
+          return;
+        }
+
+        if(!stateSnap.exists||stateSnap.data()?.sessionId!==sessionId){
+          throw Object.assign(new Error("cash_session_changed"),{code:"cash_session_changed"});
+        }
+        if(session.status!=="open"||session.locked===true){
+          throw Object.assign(new Error("cash_not_open"),{code:"cash_not_open"});
+        }
+
+        const openingAmount=cleanCashMoney(session.openingAmount,{min:0,max:1_000_000});
+        const sales=safeCashSalesSummary(session.salesSummary);
+        const movements=safeCashMovementSummary(session.movementSummary);
+        const revision=finiteNumber(
+          session.financialRevision??0,
+          {min:0,max:1_000_000_000,integer:true}
+        );
+        if(openingAmount==null||!sales||!movements||revision==null){
+          throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+        }
+
+        const summary=cashSummarySnapshot(sales,movements);
+        const expectedCash=openingAmount+sales.money+movements.supplies-movements.withdrawals;
+        if(!Number.isFinite(expectedCash)){
+          throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+        }
+        const difference=closingAmount-expectedCash;
+        const dayRef=db.doc(`cashDays/${session.businessDate}`);
+
+        tx.update(sessionRef,{
+          status:"closed",
+          locked:true,
+          closingAmount,
+          expectedCash,
+          difference,
+          closingNote,
+          closedBy:decoded.uid,
+          closedByName:operatorName,
+          closedAt:now,
+          summary,
+          financialRevision:revision+1,
+          updatedAt:now
+        });
+        tx.set(dayRef,{
+          sessionId,
+          businessDate:session.businessDate,
+          status:"closed",
+          closedAt:now,
+          updatedAt:now
+        },{merge:true});
+        tx.delete(stateRef);
+
+        closeResult={
+          ok:true,
+          action,
+          sessionId,
+          status:"closed",
+          expectedCash,
+          difference,
+          summary
+        };
+      });
+
+      res.json(closeResult||{ok:true,action,sessionId,status:"closed"});
+    }catch(err){
+      console.error("manageCash failed",err);
+      const code=err?.code||err?.message||"cash_operation_failed";
+      const status=
+        ["missing_auth"].includes(code)?401:
+        ["permission_denied","user_disabled"].includes(code)?403:
+        ["order_not_found","cash_session_not_found"].includes(code)?404:
+        [
+          "cash_already_open",
+          "cash_day_already_exists",
+          "cash_session_changed",
+          "cash_not_open",
+          "invalid_order_transition"
+        ].includes(code)?409:
+        [
+          "invalid_action",
+          "invalid_opening_amount",
+          "invalid_cash_movement",
+          "invalid_closing_amount",
+          "order_required"
+        ].includes(code)?400:500;
+      res.status(status).json({error:code});
     }
   }
 );
