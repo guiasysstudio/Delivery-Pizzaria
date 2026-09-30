@@ -2339,8 +2339,14 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
       cashOpenRequestId='';
       cashOpenFingerprint='';
     }
-    showToast(cashOperationMessage(err),'error',{duration:7000});
     await loadCashSessions();
+    if(currentCashSession){
+      cashOpenRequestId='';
+      cashOpenFingerprint='';
+      showToast('O caixa está aberto e o painel foi sincronizado.','success');
+    }else{
+      showToast(cashOperationMessage(err),'error',{duration:7000});
+    }
   }finally{
     button.disabled=false;
   }
