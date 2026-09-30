@@ -775,22 +775,41 @@ export const manageCash = onRequest(
           req.body?.type==="supply"?"supply":"";
         const amount=cleanCashMoney(req.body?.amount,{min:0.01,max:1_000_000});
         const note=normalizeText(req.body?.note,300);
-        if(!sessionId||!type||amount==null){
+        const requestId=normalizeText(req.body?.requestId,80);
+        if(!sessionId||!type||amount==null||!/^[A-Za-z0-9_-]{16,80}$/.test(requestId)){
           res.status(400).json({error:"invalid_cash_movement"});
           return;
         }
 
+        const requestFingerprint=createHash("sha256").update(JSON.stringify({
+          sessionId,type,amount,note
+        })).digest("hex");
+        const requestKey=createHash("sha256")
+          .update(decoded.uid+":cash-movement:"+requestId)
+          .digest("hex");
+        const requestRef=db.doc(`cashOperationRequests/${requestKey}`);
         const stateRef=db.doc("cashState/current");
         const sessionRef=db.doc(`cashSessions/${sessionId}`);
         const movementRef=sessionRef.collection("movements").doc();
+        let duplicateResult=null;
 
         await ensureCashLedgerV2(db,sessionId);
 
         await db.runTransaction(async tx=>{
-          const [stateSnap,sessionSnap]=await Promise.all([
+          const [requestSnap,stateSnap,sessionSnap]=await Promise.all([
+            tx.get(requestRef),
             tx.get(stateRef),
             tx.get(sessionRef)
           ]);
+
+          if(requestSnap.exists){
+            const stored=requestSnap.data()||{};
+            if(stored.requestFingerprint!==requestFingerprint){
+              throw Object.assign(new Error("idempotency_conflict"),{code:"idempotency_conflict"});
+            }
+            duplicateResult=stored;
+            return;
+          }
           if(!stateSnap.exists||stateSnap.data()?.sessionId!==sessionId){
             throw Object.assign(new Error("cash_session_changed"),{code:"cash_session_changed"});
           }
@@ -846,8 +865,23 @@ export const manageCash = onRequest(
             financialRevision:revision+1,
             updatedAt:now
           });
+          tx.set(requestRef,{
+            action,
+            requestId,
+            requestFingerprint,
+            operatorId:decoded.uid,
+            movementId:movementRef.id,
+            sessionId,
+            type,
+            amount,
+            createdAt:now
+          });
         });
 
+        if(duplicateResult){
+          res.json({ok:true,idempotent:true,...duplicateResult});
+          return;
+        }
         res.json({ok:true,action,movementId:movementRef.id,sessionId,type,amount});
         return;
       }
@@ -1082,6 +1116,7 @@ export const manageCash = onRequest(
           "cash_not_open",
           "cash_changed_recheck",
           "insufficient_cash",
+          "idempotency_conflict",
           "invalid_order_transition"
         ].includes(code)?409:
         [
