@@ -294,54 +294,71 @@ Projeto:
 delivery-pizzaria-f5b08
 ```
 
-### Authentication
+O ambiente de produção usa Cloud Firestore, Cloud Functions v2 e Firebase Hosting.
+O procedimento completo está em `docs/FIREBASE_PRODUCTION.md`.
 
-Habilitar:
+Antes de publicar:
 
-- E-mail/Senha.
-- Google.
-
-Adicionar `guiasysstudio.github.io` aos domínios autorizados do Firebase Authentication.
-
-### Firestore
-
-As regras oficiais estão em:
-
-```text
-firestore.rules
+```powershell
+node scripts/production-preflight.mjs
 ```
 
-As regras devem ser publicadas sempre que esse arquivo mudar.
+Deploy controlado no Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy-production.ps1
+```
+
+O deploy publica em conjunto:
+
+- Firestore Rules;
+- índices e políticas TTL;
+- Cloud Functions;
+- Firebase Hosting.
+
+O Hosting é montado em `.firebase-hosting/` por allowlist. Fontes internos como
+`functions/`, Rules, testes, scripts e Print Agent não são enviados ao site.
+
+### Authentication
+
+Habilitar E-mail/Senha e Google. Os domínios padrão do Firebase Hosting e o
+domínio final da pizzaria devem constar em **Authorized domains**.
 
 ### Firebase Functions
 
-A pasta `functions/` contém:
+Entre as funções server-side estão:
 
-- `uploadProductImage`: envia WebP autenticado ao GitHub.
-- `uploadStoreLogo`: envia a logo da pizzaria ao GitHub com autorização de configuração.
-- `customerIdentity`: valida nome, telefone e CPF no backend, mantém o CPF privado e garante unicidade.
-- `cancelCustomerOrder`: aplica a janela configurável de cancelamento e valida o dono/status do pedido.
-- `manageStaffUser`: ativa/desativa contas internas, troca senhas e exclui usuários com Firebase Admin e proteção para contas Master.
-- `createOrder`: valida o pedido no servidor, recalcula cardápio, promoções, cupom, frete e numeração antes de gravar.
-- `grantLoyaltyCoupons`: entrega automaticamente recompensas de fidelidade após pedidos concluídos.
+- `backendHealth`;
+- `createOrder`;
+- `manageCash`;
+- `customerIdentity`;
+- `cancelCustomerOrder`;
+- `deleteCustomerAccount`;
+- `resolveStaffLogin`;
+- `manageStaffUser`;
+- `manageStaffRole`;
+- `staffOrderPrivate`;
+- `migrateCustomerPrivacy`;
+- `migrateOrderPrivacy`;
+- `uploadProductImage`;
+- `uploadStoreLogo`;
+- `grantLoyaltyCoupons`.
 
-Para o upload de imagem, configurar o secret:
+Uploads de produto/logo usam o secret `DELIVERY_GITHUB_TOKEN`, que deve ser um
+token fine-grained limitado ao repositório e a **Contents: Read and write**.
+O secret nunca deve ser colocado no JavaScript do navegador.
 
-```text
-DELIVERY_GITHUB_TOKEN
+Os documentos transitórios usados para idempotência e rate limit possuem TTL,
+evitando crescimento indefinido do Firestore.
+
+Após o deploy:
+
+```powershell
+node scripts/smoke-production.mjs https://delivery-pizzaria-f5b08.web.app
 ```
 
-Esse token deve ser fine-grained, restrito ao repositório Delivery-Pizzaria e com permissão de Contents: Read and write.
-
-Depois, publique Functions e regras com Firebase CLI:
-
-```bash
-firebase deploy --only functions,firestore:rules
-```
-
-As regras atuais bloqueiam a criação direta de pedidos e a manipulação do contador pelo navegador. Por isso, `createOrder`, `customerIdentity` e `cancelCustomerOrder` precisam estar publicadas no projeto Firebase para o fluxo de cliente funcionar por completo.
-
-> Cloud Functions em produção pode exigir o plano Blaze do Firebase.
+As Rules bloqueiam os caminhos antigos inseguros. Portanto Functions, Rules e
+Hosting devem ser publicados como uma unidade, e não em etapas incompatíveis.
 
 ### Criação segura de pedidos
 

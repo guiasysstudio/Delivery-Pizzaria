@@ -1,5 +1,6 @@
 import { onRequest } from "firebase-functions/v2/https";
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { setGlobalOptions } from "firebase-functions/v2";
 import { defineSecret } from "firebase-functions/params";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -7,6 +8,21 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { createHash, randomBytes } from "node:crypto";
 
 initializeApp();
+
+// Limite global de escalabilidade para evitar explosão acidental de custo.
+// As funções continuam escalando a zero quando ociosas.
+setGlobalOptions({
+  region:"southamerica-east1",
+  maxInstances:20
+});
+
+const webCors=[
+  "https://guiasysstudio.github.io",
+  "https://guiasys.online",
+  /https:\/\/.*\.guiasys\.online$/,
+  "https://delivery-pizzaria-f5b08.web.app",
+  "https://delivery-pizzaria-f5b08.firebaseapp.com"
+];
 
 const githubToken = defineSecret("DELIVERY_GITHUB_TOKEN");
 const OWNER = "guiasysstudio";
@@ -84,6 +100,7 @@ async function verifyActiveStaffRequest(req, requiredPermission) {
 async function githubJson(url, options = {}) {
   const response = await fetch(url, {
     ...options,
+    signal:options.signal||AbortSignal.timeout(15000),
     headers: {
       Accept: "application/vnd.github+json",
       Authorization: `Bearer ${githubToken.value()}`,
@@ -102,15 +119,39 @@ async function githubJson(url, options = {}) {
   return body;
 }
 
+export const backendHealth = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:webCors,
+    timeoutSeconds:10,
+    memory:"128MiB",
+    maxInstances:5
+  },
+  async (req,res)=>{
+    if(req.method!=="GET"&&req.method!=="HEAD"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+    res.set("Cache-Control","no-store");
+    if(req.method==="HEAD"){
+      res.status(204).end();
+      return;
+    }
+    res.json({
+      ok:true,
+      service:"delivery-pizzaria-backend",
+      project:"delivery-pizzaria-f5b08",
+      region:"southamerica-east1",
+      apiVersion:4
+    });
+  }
+);
+
 export const uploadProductImage = onRequest(
   {
     region: "southamerica-east1",
     secrets: [githubToken],
-    cors: [
-      "https://guiasysstudio.github.io",
-      "https://guiasys.online",
-      /https:\/\/.*\.guiasys\.online$/
-    ],
+    cors:webCors,
     timeoutSeconds: 60,
     memory: "256MiB"
   },
@@ -166,16 +207,17 @@ export const uploadProductImage = onRequest(
         body: JSON.stringify(payload)
       });
 
+      const revision=result?.commit?.sha||result?.content?.sha||Date.now().toString();
       res.json({
-        ok: true,
+        ok:true,
         path,
-        publicUrl: `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${path}`
+        publicUrl:`https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${path}?v=${encodeURIComponent(revision)}`
       });
     } catch (err) {
       console.error(err);
       res.status(500).json({
         error: "upload_failed",
-        message: err?.message || "Falha ao enviar imagem."
+        message:"Falha ao enviar imagem."
       });
     }
   }
@@ -190,11 +232,7 @@ export const uploadStoreLogo = onRequest(
   {
     region: "southamerica-east1",
     secrets: [githubToken],
-    cors: [
-      "https://guiasysstudio.github.io",
-      "https://guiasys.online",
-      /https:\/\/.*\.guiasys\.online$/
-    ],
+    cors:webCors,
     timeoutSeconds: 60,
     memory: "256MiB"
   },
@@ -242,10 +280,16 @@ export const uploadStoreLogo = onRequest(
         body:JSON.stringify(payload)
       });
 
-      res.json({ok:true,path,sha:result?.content?.sha||""});
+      const revision=result?.commit?.sha||result?.content?.sha||Date.now().toString();
+      res.json({
+        ok:true,
+        path,
+        publicUrl:`https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${path}?v=${encodeURIComponent(revision)}`,
+        sha:result?.content?.sha||""
+      });
     }catch(err){
       console.error("uploadStoreLogo failed",err);
-      res.status(500).json({error:"upload_failed",message:err?.message||"Falha ao enviar logo."});
+      res.status(500).json({error:"upload_failed",message:"Falha ao enviar logo."});
     }
   }
 );
@@ -323,11 +367,7 @@ function normalizeText(value, max = 200) {
   return String(value || "").trim().slice(0, max);
 }
 
-const staffAdminCors=[
-  "https://guiasysstudio.github.io",
-  "https://guiasys.online",
-  /https:\/\/.*\.guiasys\.online$/
-];
+const staffAdminCors=webCors;
 
 async function verifyStaffAdminRequest(req) {
   const authHeader=req.headers.authorization||"";
@@ -974,11 +1014,7 @@ export const migrateOrderPrivacy = onRequest(
 );
 
 
-const cashCors=[
-  "https://guiasysstudio.github.io",
-  "https://guiasys.online",
-  /https:\/\/.*\.guiasys\.online$/
-];
+const cashCors=webCors;
 
 function cashBusinessDate(timezone="America/Porto_Velho",date=new Date()) {
   const parts=new Intl.DateTimeFormat("en-CA",{
@@ -1276,7 +1312,8 @@ export const manageCash = onRequest(
             businessDate,
             sessionNumber,
             openingAmount,
-            createdAt:now
+            createdAt:now,
+            expiresAt:new Date(now.getTime()+7*24*60*60*1000)
           });
         });
 
@@ -1400,7 +1437,8 @@ export const manageCash = onRequest(
             sessionId,
             type,
             amount,
-            createdAt:now
+            createdAt:now,
+            expiresAt:new Date(now.getTime()+7*24*60*60*1000)
           });
         });
 
@@ -2095,11 +2133,7 @@ function phoneDigits(value) {
   return String(value||"").replace(/\D/g,"").slice(0,11);
 }
 
-const customerCors=[
-  "https://guiasysstudio.github.io",
-  "https://guiasys.online",
-  /https:\/\/.*\.guiasys\.online$/
-];
+const customerCors=webCors;
 
 export const customerIdentity = onRequest(
   {
@@ -2252,7 +2286,7 @@ export const customerIdentity = onRequest(
         res.status(409).json({error:"cpf_change_not_allowed"});
         return;
       }
-      res.status(500).json({error:"identity_failed",message:err?.message||"Falha ao salvar os dados."});
+      res.status(500).json({error:"identity_failed",message:"Falha ao salvar os dados."});
     }
   }
 );
@@ -2574,11 +2608,7 @@ export const cancelCustomerOrder = onRequest(
 export const createOrder = onRequest(
   {
     region:"southamerica-east1",
-    cors:[
-      "https://guiasysstudio.github.io",
-      "https://guiasys.online",
-      /https:\/\/.*\.guiasys\.online$/
-    ],
+    cors:webCors,
     timeoutSeconds:60,
     memory:"256MiB"
   },
@@ -3158,13 +3188,15 @@ export const createOrder = onRequest(
           ...resultData,
           customerId:decoded.uid,
           requestId,
-          requestFingerprint
+          requestFingerprint,
+          expiresAt:new Date(now.getTime()+7*24*60*60*1000)
         });
         tx.set(rateRef,{
           lastCreatedAt:now,
           windowStart:new Date(windowStartMs),
           windowCount:windowCount+1,
-          updatedAt:now
+          updatedAt:now,
+          expiresAt:new Date(now.getTime()+24*60*60*1000)
         },{merge:true});
       });
 
@@ -3198,7 +3230,7 @@ export const createOrder = onRequest(
         res.status(500).json({error:"invalid_order_counter"});
         return;
       }
-      res.status(500).json({error:"order_failed",message:err?.message||"Falha ao criar pedido."});
+      res.status(500).json({error:"order_failed",message:"Falha ao criar pedido."});
     }
   }
 );

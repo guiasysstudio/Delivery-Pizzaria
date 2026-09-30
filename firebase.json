@@ -5,5 +5,186 @@
   },
   "functions": {
     "source": "functions"
+  },
+  "hosting": {
+    "public": ".firebase-hosting",
+    "predeploy": [
+      "node scripts/build-hosting.mjs"
+    ],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "cleanUrls": false,
+    "trailingSlash": false,
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "X-Content-Type-Options",
+            "value": "nosniff"
+          },
+          {
+            "key": "X-Frame-Options",
+            "value": "DENY"
+          },
+          {
+            "key": "Referrer-Policy",
+            "value": "strict-origin-when-cross-origin"
+          },
+          {
+            "key": "Permissions-Policy",
+            "value": "camera=(), microphone=(), geolocation=()"
+          }
+        ]
+      },
+      {
+        "source": "service-worker.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "**/*.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "firebase-config.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "**/*.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=300, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "**/*.css",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=300, must-revalidate"
+          }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "/api/health",
+        "function": {
+          "functionId": "backendHealth",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/order/create",
+        "function": {
+          "functionId": "createOrder",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/customer/identity",
+        "function": {
+          "functionId": "customerIdentity",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/customer/cancel-order",
+        "function": {
+          "functionId": "cancelCustomerOrder",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/customer/delete",
+        "function": {
+          "functionId": "deleteCustomerAccount",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/staff/resolve-login",
+        "function": {
+          "functionId": "resolveStaffLogin",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/staff/users",
+        "function": {
+          "functionId": "manageStaffUser",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/staff/roles",
+        "function": {
+          "functionId": "manageStaffRole",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/staff/order-private",
+        "function": {
+          "functionId": "staffOrderPrivate",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/cash",
+        "function": {
+          "functionId": "manageCash",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/assets/product",
+        "function": {
+          "functionId": "uploadProductImage",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/assets/logo",
+        "function": {
+          "functionId": "uploadStoreLogo",
+          "region": "southamerica-east1"
+        }
+      }
+    ]
+  },
+  "emulators": {
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "hosting": {
+      "port": 5000
+    },
+    "ui": {
+      "enabled": false
+    }
   }
 }
