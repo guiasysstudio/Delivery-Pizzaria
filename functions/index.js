@@ -206,10 +206,11 @@ export const uploadProductImage = onRequest(
         body: JSON.stringify(payload)
       });
 
+      const revision=result?.commit?.sha||result?.content?.sha||Date.now().toString();
       res.json({
-        ok: true,
+        ok:true,
         path,
-        publicUrl: `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${path}`
+        publicUrl:`https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${path}?v=${encodeURIComponent(revision)}`
       });
     } catch (err) {
       console.error(err);
