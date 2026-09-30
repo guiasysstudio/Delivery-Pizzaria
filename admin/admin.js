@@ -115,6 +115,7 @@ const defaultRoleTemplates={
 };
 
 let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=[],promotions=[],coupons=[],cashSessions=[],cashMovements=[],currentCashSession=null,currentProfile=null;
+const orderPrivateCache=new Map();
 let unsubscribeOrders=null,unsubscribeCashState=null,unsubscribeCashSession=null,unsubscribeCashMovements=null,cashLiveSessionId='',soundEnabled=localStorage.getItem('deliverySoundEnabled')==='1',knownOrderIds=new Set();
 let cashOpenRequestId='',cashOpenFingerprint='',cashMovementRequestId='',cashMovementFingerprint='',cashCloseRevision=0;
 
@@ -188,6 +189,66 @@ async function cashOperation(action,payload={}){
     throw err;
   }
   return data;
+}
+
+function staffCanViewOrderPrivate(){
+  return isMaster() || [
+    'ordersAccept','ordersDispatch','ordersComplete','ordersCancel','printingManage','cashOperate'
+  ].some(key=>hasPermission(key));
+}
+
+async function fetchOrderPrivate(orderId){
+  if(!staffCanViewOrderPrivate()||!orderId) return null;
+  if(orderPrivateCache.has(orderId)) return orderPrivateCache.get(orderId);
+
+  const user=auth.currentUser;
+  if(!user) return null;
+  const token=await user.getIdToken();
+  const response=await fetch(STAFF_ORDER_PRIVATE_ENDPOINT,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:JSON.stringify({orderId})
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok){
+    if(response.status===403) return null;
+    const err=new Error(data?.error||'order-private-failed');
+    err.code=data?.error||'order-private-failed';
+    throw err;
+  }
+  const safe={customer:data.customer||null,address:data.address||null};
+  orderPrivateCache.set(orderId,safe);
+  return safe;
+}
+
+async function hydrateOrderPrivate(order,{required=false}={}){
+  const base={...order};
+  if(!staffCanViewOrderPrivate()){
+    delete base.customer;
+    delete base.address;
+    return base;
+  }
+
+  if(order?.customer||order?.address){
+    base.customer=order.customer||null;
+    base.address=order.address||null;
+  }
+
+  try{
+    const data=await fetchOrderPrivate(order?.id);
+    if(data){
+      base.customer=data.customer;
+      base.address=data.address;
+    }
+  }catch(err){
+    if(required) throw err;
+    console.warn('Dados privados do pedido indisponíveis.',err);
+  }
+
+  if(required&&!base.customer){
+    throw Object.assign(new Error('order-private-unavailable'),{code:'order-private-unavailable'});
+  }
+  return base;
 }
 
 function cashOperationMessage(err){
@@ -1121,7 +1182,8 @@ function renderOrders(){
   const list=orders.filter(o=>{
     if(f==='active'&&['completed','cancelled'].includes(o.status)) return false;
     if(f!=='all'&&f!=='active'&&o.status!==f) return false;
-    const text=`${o.orderNumber} ${o.customer?.name||''} ${o.customer?.phone||''}`.toLowerCase();
+    const itemText=(o.items||[]).map(item=>item.name||'').join(' ');
+    const text=`${o.orderNumber} ${o.fulfillment||''} ${itemText}`.toLowerCase();
     return !term||text.includes(term);
   });
 
@@ -1131,7 +1193,7 @@ function renderOrders(){
     return `<article class="order-row order-row-modern" data-id="${o.id}">
       <button class="order-main-hit" data-open-order="${o.id}" type="button" aria-label="Abrir pedido #${o.orderNumber}">
         <span class="order-number">#${String(o.orderNumber||0).padStart(4,'0')}</span>
-        <span class="order-meta"><strong>${esc(o.customer?.name||'Cliente')}</strong><small>${esc(o.customer?.phone||'')} • ${formatDate(o.createdAt)}${pricing.valid?'':' • ⚠ valores divergentes'}</small></span>
+        <span class="order-meta"><strong>Pedido #${String(o.orderNumber||0).padStart(4,'0')}</strong><small>${o.fulfillment==='pickup'?'Retirada':'Entrega'} • ${formatDate(o.createdAt)}${pricing.valid?'':' • ⚠ valores divergentes'}</small></span>
         <span class="status-pill status-${o.status}">${statusLabels[o.status]||o.status}</span>
         <strong class="order-total">${money(o.total)}</strong>
       </button>
