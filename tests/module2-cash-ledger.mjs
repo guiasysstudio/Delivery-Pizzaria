@@ -23,6 +23,10 @@ assert.match(backend,/cashSessionId:sessionId/);
 assert.match(backend,/salesSummary/);
 assert.match(backend,/movementSummary/);
 assert.match(backend,/roundCashMoney/);
+assert.match(backend,/ensureCashLedgerV2/);
+assert.match(backend,/buildLegacyCashLedger/);
+assert.match(backend,/cashOperationRequests\/\$\{requestKey\}/);
+assert.match(backend,/requestFingerprint/);
 
 // Sessões podem ser sequenciais no mesmo dia, mas não simultâneas.
 assert.match(backend,/cash_already_open/);
@@ -57,6 +61,10 @@ assert.doesNotMatch(admin,/patch\.completedAt=serverTimestamp\(\)/);
 assert.doesNotMatch(admin,/runTransaction\(db/);
 assert.match(admin,/getDoc\(doc\(db,'cashState','current'\)\)/);
 assert.match(admin,/expectedRevision:cashCloseRevision/);
+assert.match(admin,/cashOpenRequestId/);
+assert.match(admin,/cashMovementRequestId/);
+assert.match(admin,/requestId:cashOpenRequestId/);
+assert.match(admin,/requestId:cashMovementRequestId/);
 
 // Testes funcionais dos cálculos financeiros em centavos.
 function roundCashMoney(value){
