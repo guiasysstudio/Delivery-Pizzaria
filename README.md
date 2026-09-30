@@ -260,7 +260,7 @@ O **Delivery Pizzaria Print Agent** roda apenas no computador da pizzaria e conv
 http://127.0.0.1:17329
 ```
 
-Recursos (Print Agent 1.4.0):
+Recursos (Print Agent 1.7.0):
 
 - detecta impressoras instaladas no Windows;
 - recupera automaticamente a impressora quando a selecionada foi removida ou renomeada;
@@ -281,7 +281,7 @@ Recursos (Print Agent 1.4.0):
 Pacote estável:
 
 ```text
-https://github.com/guiasysstudio/Delivery-Pizzaria/releases/download/print-agent-latest/DeliveryPizzaria-PrintAgent-win-x64.zip
+https://github.com/guiasysstudio/Delivery-Pizzaria/releases/download/print-agent-v1.7.0/DeliveryPizzaria-PrintAgent-win-x64.zip
 ```
 
 Use `Instalar.cmd` dentro do pacote para instalar em `%LOCALAPPDATA%\DeliveryPizzaria\PrintAgent`.
@@ -388,6 +388,13 @@ O workflow **Validate Delivery Pizzaria** verifica:
 - guardrails de UI profissional: sem `alert()/confirm()` nativos, sem emojis na interface, botões com `type` explícito e SVGs locais válidos;
 - arquivos obrigatórios.
 
-O workflow **Build Print Agent** compila o Windows x64 e atualiza o pacote estável.
+O workflow **Build Print Agent** compila o Windows x64 e publica uma release versionada, mantendo a versão do executável, manifesto e tag sincronizadas.
 
-O GitHub Pages publica automaticamente a branch `main`.
+O domínio público é `https://pizzaria.guiasys.online/`. O deploy de produção é feito pelo Firebase Hosting após o preflight e os testes automáticos; a branch `main` permanece como fonte do código.
+
+
+## Módulo 5 — Print Agent, PWA e publicação
+
+O Print Agent 1.7.0 limita origens e payloads de impressão, detecta falha ao abrir a porta local 17329 e valida o serviço após a instalação. O pacote continua sem assinatura Authenticode, portanto o Windows pode exibir SmartScreen ou aviso de fornecedor desconhecido na primeira execução.
+
+O PWA possui fallback offline dedicado, evita cache de rotas `/api/` e força consulta fresca do manifesto de versão do Print Agent. Canonical, OpenGraph, sitemap, robots e atalhos de operação usam o domínio `pizzaria.guiasys.online`.
