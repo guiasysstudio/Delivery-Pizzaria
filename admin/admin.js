@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, deleteUser } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, writeBatch } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig } from '../firebase-config.js';
 import { showToast, confirmAction, emptyStateHtml, iconHtml, skeletonListHtml, applyBrandTheme } from '../assets/ui.js';
@@ -7,8 +7,6 @@ import { showToast, confirmAction, emptyStateHtml, iconHtml, skeletonListHtml, a
 const app=initializeApp(firebaseConfig);
 const auth=getAuth(app);
 const db=getFirestore(app);
-const userCreatorApp=initializeApp(firebaseConfig,'delivery-user-creator');
-const userCreatorAuth=getAuth(userCreatorApp);
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
@@ -76,50 +74,48 @@ const permissionDefinitions=[
   ['categoriesManage','Cardápio','Gerenciar categorias'],
   ['promotionsManage','Comercial','Gerenciar promoções'],
   ['couponsManage','Comercial','Gerenciar cupons'],
-  ['customersView','Clientes','Visualizar clientes'],
-  ['customersEdit','Clientes','Editar dados públicos de clientes'],
+  ['customersView','Clientes','Visualizar resumo operacional de clientes'],
   ['printingManage','Operação','Configurar impressão'],
   ['cashView','Financeiro','Visualizar caixa e financeiro'],
   ['cashOperate','Financeiro','Abrir e fechar caixa'],
-  ['settingsManage','Sistema','Alterar configurações da pizzaria'],
-  ['usersManage','Sistema','Criar e editar usuários'],
-  ['rolesManage','Sistema','Criar e editar perfis de acesso']
+  ['settingsManage','Sistema','Alterar configurações da pizzaria']
 ];
 
 const defaultRoleTemplates={
   manager:{name:'Gerente',permissions:{
     ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true,
     productsView:true,productsCreate:true,productsEdit:true,productsDelete:true,categoriesManage:true,
-    promotionsManage:true,couponsManage:true,customersView:true,customersEdit:true,printingManage:true,cashView:true,cashOperate:true,
-    settingsManage:true,usersManage:false,rolesManage:false
+    promotionsManage:true,couponsManage:true,customersView:true,printingManage:true,cashView:true,cashOperate:true,
+    settingsManage:true
   }},
   cashier:{name:'Caixa',permissions:{
     ordersView:true,ordersAccept:true,ordersPrepare:false,ordersDispatch:false,ordersComplete:false,ordersCancel:true,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
-    promotionsManage:false,couponsManage:false,customersView:true,customersEdit:false,printingManage:true,cashView:true,cashOperate:true,
-    settingsManage:false,usersManage:false,rolesManage:false
+    promotionsManage:false,couponsManage:false,customersView:true,printingManage:true,cashView:true,cashOperate:true,
+    settingsManage:false
   }},
   kitchen:{name:'Cozinha',permissions:{
     ordersView:true,ordersAccept:false,ordersPrepare:true,ordersDispatch:false,ordersComplete:false,ordersCancel:false,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
-    promotionsManage:false,couponsManage:false,customersView:false,customersEdit:false,printingManage:false,cashView:false,cashOperate:false,
-    settingsManage:false,usersManage:false,rolesManage:false
+    promotionsManage:false,couponsManage:false,customersView:false,printingManage:false,cashView:false,cashOperate:false,
+    settingsManage:false
   }},
   delivery:{name:'Entrega',permissions:{
     ordersView:true,ordersAccept:false,ordersPrepare:false,ordersDispatch:true,ordersComplete:true,ordersCancel:false,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
-    promotionsManage:false,couponsManage:false,customersView:false,customersEdit:false,printingManage:false,cashView:false,cashOperate:false,
-    settingsManage:false,usersManage:false,rolesManage:false
+    promotionsManage:false,couponsManage:false,customersView:false,printingManage:false,cashView:false,cashOperate:false,
+    settingsManage:false
   }},
   operator:{name:'Operador',permissions:{
     ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
-    promotionsManage:false,couponsManage:false,customersView:false,customersEdit:false,printingManage:false,cashView:false,cashOperate:false,
-    settingsManage:false,usersManage:false,rolesManage:false
+    promotionsManage:false,couponsManage:false,customersView:false,printingManage:false,cashView:false,cashOperate:false,
+    settingsManage:false
   }}
 };
 
 let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=[],promotions=[],coupons=[],cashSessions=[],cashMovements=[],currentCashSession=null,currentProfile=null;
+const orderPrivateCache=new Map();
 let unsubscribeOrders=null,unsubscribeCashState=null,unsubscribeCashSession=null,unsubscribeCashMovements=null,cashLiveSessionId='',soundEnabled=localStorage.getItem('deliverySoundEnabled')==='1',knownOrderIds=new Set();
 let cashOpenRequestId='',cashOpenFingerprint='',cashMovementRequestId='',cashMovementFingerprint='',cashCloseRevision=0;
 
@@ -168,7 +164,12 @@ let printAgentUpdateTimer=null;
 let promptedPrintAgentVersion='';
 const IMAGE_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadProductImage';
 const STORE_LOGO_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadStoreLogo';
+const STAFF_LOGIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/resolveStaffLogin';
 const STAFF_USER_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageStaffUser';
+const STAFF_ROLE_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageStaffRole';
+const STAFF_ORDER_PRIVATE_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/staffOrderPrivate';
+const ORDER_PRIVACY_MIGRATION_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/migrateOrderPrivacy';
+const CUSTOMER_PRIVACY_MIGRATION_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/migrateCustomerPrivacy';
 const CASH_OPERATION_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageCash';
 async function cashOperation(action,payload={}){
   const user=auth.currentUser;
@@ -190,6 +191,69 @@ async function cashOperation(action,payload={}){
     throw err;
   }
   return data;
+}
+
+function staffCanViewOrderPrivate(){
+  return isMaster() || [
+    'ordersAccept','ordersDispatch','ordersComplete','ordersCancel','printingManage'
+  ].some(key=>hasPermission(key));
+}
+
+async function fetchOrderPrivate(orderId){
+  if(!staffCanViewOrderPrivate()||!orderId) return null;
+  if(orderPrivateCache.has(orderId)) return orderPrivateCache.get(orderId);
+
+  const user=auth.currentUser;
+  if(!user) return null;
+  const token=await user.getIdToken();
+  const response=await fetch(STAFF_ORDER_PRIVATE_ENDPOINT,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:JSON.stringify({orderId})
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok){
+    if(response.status===403) return null;
+    const err=new Error(data?.error||'order-private-failed');
+    err.code=data?.error||'order-private-failed';
+    throw err;
+  }
+  const safe={customer:data.customer||null,address:data.address||null};
+  orderPrivateCache.set(orderId,safe);
+  return safe;
+}
+
+async function hydrateOrderPrivate(order,{required=false}={}){
+  const base={...order};
+  if(!staffCanViewOrderPrivate()){
+    delete base.customer;
+    delete base.address;
+    return base;
+  }
+
+  if(order?.customer||order?.address){
+    base.customer=order.customer||null;
+    base.address=order.address||null;
+  }
+
+  try{
+    const data=await fetchOrderPrivate(order?.id);
+    if(data){
+      base.customer=data.customer;
+      base.address=data.address;
+    }
+  }catch(err){
+    // Compatibilidade transitória: pedidos legados ainda podem carregar seus
+    // próprios snapshots até a migração do Módulo 4. Depois dela, o endpoint
+    // seguro passa a ser a única fonte.
+    if(required&&!base.customer) throw err;
+    console.warn('Endpoint privado indisponível; usando snapshot legado quando existente.',err);
+  }
+
+  if(required&&!base.customer){
+    throw Object.assign(new Error('order-private-unavailable'),{code:'order-private-unavailable'});
+  }
+  return base;
 }
 
 function cashOperationMessage(err){
@@ -264,22 +328,75 @@ const defaults={
 function normalizeUsername(value){
   return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9._-]/g,'');
 }
-function legacyUsernameEmail(username){
-  return `${normalizeUsername(username)}@delivery-pizzaria.local`;
+async function runPrivacyMigration(endpoint,storageKey,label){
+  if(!isMaster()||sessionStorage.getItem(storageKey)==='1') return;
+  const token=await auth.currentUser?.getIdToken();
+  if(!token) return;
+  const response=await fetch(endpoint,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:'{}'
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok){
+    const err=new Error(data?.error||('privacy-migration-http-'+response.status));
+    err.code=data?.error||'privacy-migration-failed';
+    throw err;
+  }
+  sessionStorage.setItem(storageKey,'1');
+  console.info(label,data);
 }
-function randomStaffEmail(username){
-  const token=crypto.randomUUID().replace(/-/g,'').slice(0,18);
-  return `staff.${normalizeUsername(username)}.${token}@delivery-pizzaria.local`;
+
+async function migrateLegacyPrivacyIfAvailable(){
+  if(!isMaster()) return;
+  try{
+    await runPrivacyMigration(
+      CUSTOMER_PRIVACY_MIGRATION_ENDPOINT,
+      'deliveryCustomerPrivacyMigrated',
+      'Migração de privacidade dos clientes concluída:'
+    );
+  }catch(err){
+    console.warn('Migração de privacidade dos clientes ainda indisponível.',err);
+  }
+
+  try{
+    await runPrivacyMigration(
+      ORDER_PRIVACY_MIGRATION_ENDPOINT,
+      'deliveryOrderPrivacyMigrated',
+      'Migração de privacidade dos pedidos concluída:'
+    );
+    orderPrivateCache.clear();
+  }catch(err){
+    // Antes do deploy das Functions (Módulo 4), o painel continua operando.
+    // Após o deploy, o próximo acesso Master tentará novamente automaticamente.
+    console.warn('Migração de privacidade dos pedidos ainda indisponível.',err);
+  }
 }
+
 async function resolveStaffEmail(username){
   const normalized=normalizeUsername(username);
+  try{
+    const response=await fetch(STAFF_LOGIN_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:normalized})
+    });
+    const data=await response.json().catch(()=>({}));
+    if(response.ok&&data?.email) return String(data.email);
+  }catch(err){
+    console.warn('Resolvedor seguro de login ainda indisponível.',err);
+  }
+
+  // Ponte temporária para a demonstração antes do deploy do Módulo 4.
+  // Assim que as novas regras forem publicadas, staffLogins deixa de ser
+  // legível no navegador e somente o endpoint acima continuará funcionando.
   try{
     const snap=await getDoc(doc(db,'staffLogins',normalized));
     if(snap.exists()&&snap.data()?.email) return String(snap.data().email);
   }catch(err){
-    console.warn('Não foi possível consultar o mapa de login administrativo.',err);
+    console.warn('Fallback de login legado indisponível.',err);
   }
-  return legacyUsernameEmail(normalized);
+  return `${normalized}@delivery-pizzaria.local`;
 }
 function roleLabel(role){
   if(role==='master') return 'Master';
@@ -299,8 +416,7 @@ const permissionDependencies={
   productsDelete:'productsView',
   categoriesManage:'productsView',
   promotionsManage:'productsView',
-  cashOperate:'cashView',
-  customersEdit:'customersView'
+  cashOperate:'cashView'
 };
 
 function withPermissionDependencies(source={}){
@@ -322,8 +438,8 @@ function rolePermissions(role=currentProfile?.role){
   if(role==='master'){
     return Object.fromEntries(permissionDefinitions.map(([key])=>[key,true]));
   }
-  const raw=roles.find(r=>r.id===role)?.permissions||defaultRoleTemplates[role]?.permissions||{};
-  return withPermissionDependencies(raw);
+  const resolved=roles.find(r=>r.id===role&&r.active!==false);
+  return withPermissionDependencies(resolved?.permissions||{});
 }
 function hasPermission(key){
   return isMaster()||rolePermissions()[key]===true;
@@ -348,6 +464,7 @@ $('#loginForm').onsubmit=async e=>{
 };
 
 $('#logoutBtn').onclick=async()=>{
+  orderPrivateCache.clear();
   stopCashLedgerListeners();
   await signOut(auth);
 };
@@ -357,6 +474,7 @@ onAuthStateChanged(auth,async user=>{
 
   if(!user){
     currentProfile=null;
+    orderPrivateCache.clear();
     stopCashLedgerListeners();
     $('#loginView').classList.remove('hidden');
     $('#adminApp').classList.add('hidden');
@@ -388,19 +506,6 @@ onAuthStateChanged(auth,async user=>{
       await signOut(auth);
       showLoginError('Este usuário está desativado.');
       return;
-    }
-
-    // Garante que logins antigos (inclusive o Master inicial) ganhem o novo
-    // mapeamento username -> e-mail sem expor isso na interface.
-    const normalized=currentProfile.username||username;
-    try{
-      await setDoc(doc(db,'staffLogins',normalizeUsername(normalized)),{
-        uid:user.uid,
-        email:user.email||'',
-        updatedAt:serverTimestamp()
-      },{merge:true});
-    }catch(mappingError){
-      console.warn('Não foi possível atualizar o mapa de login.',mappingError);
     }
 
     // A autenticação terminou com sucesso. O painel não volta para a tela
@@ -463,6 +568,7 @@ async function initializeAdmin(){
   $('#currentUserDisplay').textContent=`${currentProfile.displayName||currentProfile.username||'Usuário'} • ${roleLabel(currentProfile.role)}`;
 
   await loadSettings();
+  await migrateLegacyPrivacyIfAvailable();
 
   showAdminSkeletons();
   const tasks=[];
@@ -481,15 +587,15 @@ async function initializeAdmin(){
     tasks.push(loadCategories(),loadProducts());
   }
 
-  if(hasPermission('customersView')||hasPermission('customersEdit')) tasks.push(loadCustomers());
-  if(hasPermission('usersManage')||hasPermission('rolesManage')) tasks.push(loadUsers());
+  if(hasPermission('customersView')) tasks.push(loadCustomers());
+  if(isMaster()) tasks.push(loadUsers());
   if(hasPermission('ordersView')||hasPermission('promotionsManage')) tasks.push(loadPromotions());
-  if(hasPermission('ordersView')||hasPermission('couponsManage')) tasks.push(loadCoupons());
+  if(hasPermission('couponsManage')) tasks.push(loadCoupons());
   if(hasPermission('cashView')) tasks.push(loadCashSessions());
 
   await Promise.all(tasks);
 
-  if(hasPermission('ordersView')||hasPermission('cashView')) listenOrders();
+  if(hasPermission('ordersView')) listenOrders();
   if(hasPermission('cashView')) listenCashLedger();
 
   if(hasPermission('settingsManage')){
@@ -508,30 +614,47 @@ async function initializeAdmin(){
   if(hasPermission('cashView')) renderCash();
   renderSoundButton();
 }
+async function staffRoleAdminAction(action,payload={}){
+  const user=auth.currentUser;
+  if(!user) throw Object.assign(new Error('auth-required'),{code:'auth-required'});
+  const token=await user.getIdToken();
+  const response=await fetch(STAFF_ROLE_ADMIN_ENDPOINT,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:JSON.stringify({action,...payload})
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok){
+    const err=new Error(data?.error||'staff-role-action-failed');
+    err.code=data?.error||'staff-role-action-failed';
+    throw err;
+  }
+  return data;
+}
+
 async function loadRoles(){
   try{
-    const snap=await getDocs(collection(db,'roles'));
-    roles=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+    if(isMaster()){
+      let snap=await getDocs(collection(db,'roles'));
+      roles=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
 
-    if(!roles.length&&isMaster()){
-      const batch=writeBatch(db);
-      for(const [id,template] of Object.entries(defaultRoleTemplates)){
-        batch.set(doc(db,'roles',id),{
-          name:template.name,
-          permissions:template.permissions,
-          system:true,
-          active:true,
-          createdAt:serverTimestamp(),
-          updatedAt:serverTimestamp()
-        });
+      if(!roles.length){
+        await staffRoleAdminAction('seedDefaults');
+        snap=await getDocs(collection(db,'roles'));
+        roles=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
       }
-      await batch.commit();
-      const seeded=await getDocs(collection(db,'roles'));
-      roles=seeded.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+    }else{
+      const roleId=currentProfile?.role;
+      if(roleId&&roleId!=='master'){
+        const snap=await getDoc(doc(db,'roles',roleId));
+        roles=snap.exists()?[{id:snap.id,...snap.data()}]:[];
+      }else{
+        roles=[];
+      }
     }
   }catch(err){
-    console.warn('Perfis personalizados ainda não disponíveis. Usando perfis padrão.',err);
-    roles=Object.entries(defaultRoleTemplates).map(([id,v])=>({id,name:v.name,permissions:v.permissions,system:true,active:true}));
+    console.warn('Perfil de acesso não disponível; permissões operacionais bloqueadas por segurança.',err);
+    roles=[];
   }
   refreshUserRoleSelect();
   renderRoles();
@@ -611,7 +734,7 @@ function listenOrders(){
 
     renderOrders();
     renderStats();
-    if(customers.length) renderCustomers();
+    if(hasPermission('customersView')) renderCustomers();
     if(hasPermission('cashView')) renderCash();
 
     if(!first&&incoming.length){
@@ -643,7 +766,7 @@ function notifyNewOrder(o){
   if(soundEnabled) beep();
   if('Notification' in window&&Notification.permission==='granted'){
     new Notification(`Novo pedido #${String(o.orderNumber||'').padStart(4,'0')}`,{
-      body:`${o.customer?.name||'Cliente'} • ${money(o.total)}`
+      body:`${o.fulfillment==='pickup'?'Retirada':'Entrega'} • ${money(o.total)}`
     });
   }
 }
@@ -670,10 +793,9 @@ function allowedViews(){
   if(hasPermission('categoriesManage')) views.push('categories');
   if(hasPermission('promotionsManage')) views.push('promotions');
   if(hasPermission('couponsManage')) views.push('coupons');
-  if(hasPermission('customersView')||hasPermission('customersEdit')) views.push('customers');
+  if(hasPermission('customersView')) views.push('customers');
   if(hasPermission('printingManage')) views.push('printing');
-  if(hasPermission('usersManage')) views.push('users');
-  if(hasPermission('rolesManage')) views.push('roles');
+  if(isMaster()) views.push('users','roles');
   if(hasPermission('settingsManage')) views.push('settings');
   return views.length?views:['orders'];
 }
@@ -1130,7 +1252,8 @@ function renderOrders(){
   const list=orders.filter(o=>{
     if(f==='active'&&['completed','cancelled'].includes(o.status)) return false;
     if(f!=='all'&&f!=='active'&&o.status!==f) return false;
-    const text=`${o.orderNumber} ${o.customer?.name||''} ${o.customer?.phone||''}`.toLowerCase();
+    const itemText=(o.items||[]).map(item=>item.name||'').join(' ');
+    const text=`${o.orderNumber} ${o.fulfillment||''} ${itemText}`.toLowerCase();
     return !term||text.includes(term);
   });
 
@@ -1140,7 +1263,7 @@ function renderOrders(){
     return `<article class="order-row order-row-modern" data-id="${o.id}">
       <button class="order-main-hit" data-open-order="${o.id}" type="button" aria-label="Abrir pedido #${o.orderNumber}">
         <span class="order-number">#${String(o.orderNumber||0).padStart(4,'0')}</span>
-        <span class="order-meta"><strong>${esc(o.customer?.name||'Cliente')}</strong><small>${esc(o.customer?.phone||'')} • ${formatDate(o.createdAt)}${pricing.valid?'':' • ⚠ valores divergentes'}</small></span>
+        <span class="order-meta"><strong>Pedido #${String(o.orderNumber||0).padStart(4,'0')}</strong><small>${o.fulfillment==='pickup'?'Retirada':'Entrega'} • ${formatDate(o.createdAt)}${pricing.valid?'':' • ⚠ valores divergentes'}</small></span>
         <span class="status-pill status-${o.status}">${statusLabels[o.status]||o.status}</span>
         <strong class="order-total">${money(o.total)}</strong>
       </button>
@@ -1205,14 +1328,22 @@ function deliveryPricingText(order){
     return `Frete por km • ${Number(snap.distanceKm).toFixed(1).replace('.',',')} km • ${money(order.deliveryFee)}`;
   }
   if(snap.mode==='neighborhood'){
-    return `Frete por bairro${snap.zone?` • ${snap.zone}`:''} • ${money(order.deliveryFee)}`;
+    return `Frete por bairro • ${money(order.deliveryFee)}`;
   }
   return `Frete fixo • ${money(order.deliveryFee)}`;
 }
 
-function openOrder(id){
-  const o=orders.find(x=>x.id===id);
-  if(!o) return;
+async function openOrder(id){
+  const raw=orders.find(x=>x.id===id);
+  if(!raw) return;
+
+  let o;
+  try{
+    o=await hydrateOrderPrivate(raw);
+  }catch(err){
+    console.error('Falha ao carregar dados operacionais do pedido.',err);
+    o={...raw};
+  }
 
   const address=orderAddressText(o);
   const changeInfo=o.payment?.needsChange
@@ -1241,10 +1372,11 @@ function openOrder(id){
     <div class="order-detail-grid">
       <div class="detail-card">
         <h3>Cliente</h3>
-        <p><strong>${esc(o.customer?.name||'')}</strong></p>
-        <p>${esc(o.customer?.phone||'')}</p>
-        <p>${esc(o.customer?.email||'')}</p>
-        <p>${esc(address)}</p>
+        ${o.customer
+          ?`<p><strong>${esc(o.customer?.name||'Cliente')}</strong></p>
+             <p>${esc(o.customer?.phone||'')}</p>
+             <p>${esc(address)}</p>`
+          :`<p class="muted">Dados pessoais ocultos para este perfil. Itens, valores e andamento continuam disponíveis.</p>`}
       </div>
 
       <div class="detail-card">
@@ -1272,7 +1404,7 @@ function openOrder(id){
     </div>
 
     <div class="section-actions" style="margin-top:16px">
-      <button class="btn btn-secondary icon-button-label" id="printOrderBtn" type="button">${iconHtml('printer')}<span>Imprimir comanda</span></button>
+      ${staffCanViewOrderPrivate()?`<button class="btn btn-secondary icon-button-label" id="printOrderBtn" type="button">${iconHtml('printer')}<span>Imprimir comanda</span></button>`:''}
     </div>
   `;
 
@@ -1288,7 +1420,7 @@ function openOrder(id){
 
   $$('.quick-status').forEach(b=>b.onclick=()=>changeStatus(b.dataset.status));
   $$('.status-change').forEach(b=>b.onclick=()=>changeStatus(b.dataset.status));
-  $('#printOrderBtn').onclick=()=>printOrder(o,false);
+  if($('#printOrderBtn')) $('#printOrderBtn').onclick=()=>printOrder(o,false);
   $('#orderDialog').showModal();
 }
 
@@ -1628,11 +1760,23 @@ async function sendToPrintAgent(text){
 async function printOrder(order,automatic=false){
   if(automatic&&order?.id&&printedOrderIds.has(order.id)) return true;
 
+  let printable=order;
+  if(order?.id){
+    try{
+      printable=await hydrateOrderPrivate(order,{required:true});
+    }catch(err){
+      console.error('Dados privados do pedido indisponíveis para impressão.',err);
+      if(automatic) showSystemAlert('Pedido recebido, mas os dados de contato não puderam ser carregados para a impressão.');
+      else showToast('Seu perfil não pode acessar os dados necessários para imprimir esta comanda.','error');
+      return false;
+    }
+  }
+
   const connected=await checkPrintAgent();
 
   if(connected){
     try{
-      await sendToPrintAgent(receiptText(order));
+      await sendToPrintAgent(receiptText(printable));
       if(order?.id){
         printedOrderIds.add(order.id);
         sessionStorage.setItem('deliveryPrintedOrders',JSON.stringify([...printedOrderIds]));
@@ -1721,7 +1865,7 @@ $('#testPrintBtn')?.addEventListener('click',async()=>{
 /* ===== Perfis de acesso ===== */
 function renderRoles(){
   const table=$('#rolesTable');
-  if(!table) return;
+  if(!table||!isMaster()) return;
   const list=roles.filter(r=>r.id!=='master');
   table.innerHTML=list.length?list.map(r=>{
     const enabled=Object.values(r.permissions||{}).filter(Boolean).length;
@@ -1773,7 +1917,7 @@ function renderPermissionEditor(selected={}){
 }
 
 function editRole(id=null){
-  if(!hasPermission('rolesManage')) return;
+  if(!isMaster()) return;
   const role=roles.find(r=>r.id===id);
   $('#roleEditorTitle').textContent=role?'Editar perfil':'Novo perfil';
   $('#roleId').value=role?.id||'';
@@ -1787,7 +1931,7 @@ $('#newRoleBtn')?.addEventListener('click',()=>editRole());
 
 $('#roleEditorForm')?.addEventListener('submit',async e=>{
   e.preventDefault();
-  if(!hasPermission('rolesManage')) return;
+  if(!isMaster()) return;
   const id=$('#roleId').value;
   const name=$('#roleName').value.trim();
   if(!name){
@@ -1799,14 +1943,11 @@ $('#roleEditorForm')?.addEventListener('submit',async e=>{
   $$('[data-permission]').forEach(input=>permissions[input.dataset.permission]=input.checked);
   permissions=withPermissionDependencies(permissions);
   try{
-    if(id){
-      await updateDoc(doc(db,'roles',id),{name,permissions,active:true,updatedAt:serverTimestamp()});
-    }else{
-      await addDoc(collection(db,'roles'),{name,permissions,active:true,system:false,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
-    }
+    const roleId=id||('role-'+crypto.randomUUID().replace(/-/g,'').slice(0,12));
+    await staffRoleAdminAction('save',{roleId,name,permissions,active:true});
     $('#roleEditor').close();
     await loadRoles();
-    if(hasPermission('usersManage')) await loadUsers();
+    await loadUsers();
   }catch(err){
     console.error(err);
     $('#roleEditorError').textContent='Não foi possível salvar o perfil.';
@@ -1815,13 +1956,21 @@ $('#roleEditorForm')?.addEventListener('submit',async e=>{
 });
 
 async function deleteRole(id){
-  if(!hasPermission('rolesManage')) return;
+  if(!isMaster()) return;
   if(users.some(u=>u.role===id)) return showToast('Este perfil está sendo usado por um ou mais usuários. Troque o perfil desses usuários antes de excluir.','warning');
   const role=roles.find(r=>r.id===id);
   if(!role||role.system) return;
   if(!await confirmAction(`Excluir o perfil “${role.name}”?`,{title:'Excluir perfil',confirmText:'Excluir',danger:true})) return;
-  await deleteDoc(doc(db,'roles',id));
-  await loadRoles();
+  try{
+    await staffRoleAdminAction('delete',{roleId:id});
+    await loadRoles();
+  }catch(err){
+    console.error(err);
+    const code=String(err?.code||'');
+    if(code.includes('role_in_use')) showToast('Este perfil ainda está associado a um usuário.','warning');
+    else if(code.includes('system_role')) showToast('Perfis padrão não podem ser excluídos.','warning');
+    else showToast('Não foi possível excluir o perfil.','error');
+  }
 }
 
 /* ===== Promoções ===== */
@@ -3441,47 +3590,66 @@ function esc(v){
 
 
 async function loadCustomers(){
-  try{
-    const s=await getDocs(collection(db,'customers'));
-    customers=s.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-    renderCustomers();
-  }catch(err){
-    console.warn('Não foi possível carregar clientes.',err);
-    customers=[];
-    renderCustomers();
+  customers=[];
+  renderCustomers();
+}
+
+function customerOperationalRows(){
+  const grouped=new Map();
+  for(const order of orders){
+    const customerId=String(order.customerId||'');
+    if(!customerId) continue;
+    const current=grouped.get(customerId)||{
+      uid:customerId,
+      orders:0,
+      completed:0,
+      spent:0,
+      lastAt:null
+    };
+    current.orders++;
+    if(order.status==='completed'){
+      current.completed++;
+      const total=Number(order.total||0);
+      if(Number.isFinite(total)&&total>=0) current.spent+=total;
+    }
+    const stamp=order.createdAt?.toMillis?.()||0;
+    const previous=current.lastAt?.toMillis?.()||0;
+    if(stamp>previous) current.lastAt=order.createdAt;
+    grouped.set(customerId,current);
   }
+  return [...grouped.values()].sort((a,b)=>
+    (b.lastAt?.toMillis?.()||0)-(a.lastAt?.toMillis?.()||0)
+  );
 }
 
 function renderCustomers(){
   if(!$('#customersTable')) return;
 
   const term=($('#customerSearch')?.value||'').trim().toLowerCase();
-  const list=customers.filter(customer=>{
-    const text=`${customer.name||''} ${customer.email||''} ${customer.phone||''}`.toLowerCase();
-    return !term||text.includes(term);
+  const rows=customerOperationalRows();
+  const list=rows.filter(customer=>{
+    const reference='cliente '+customer.uid.slice(-6);
+    return !term||reference.toLowerCase().includes(term);
   });
 
   $('#customersTable').innerHTML=list.length?list.map(customer=>{
-    const customerOrders=orders.filter(o=>o.customerId===customer.uid);
-    const completed=customerOrders.filter(o=>o.status==='completed');
-    const spent=completed.reduce((sum,o)=>sum+Number(o.total||0),0);
-
+    const reference='Cliente • '+customer.uid.slice(-6).toUpperCase();
     return `<div class="data-row">
       <div class="data-main">
-        <strong>${esc(customer.name||'Cliente')}</strong>
-        <small>${esc(customer.phone||'Sem telefone')} • ${esc(customer.email||'Sem e-mail')}</small>
+        <strong>${esc(reference)}</strong>
+        <small>Resumo operacional anonimizado • último pedido: ${formatDate(customer.lastAt)}</small>
       </div>
-      <span>${customerOrders.length} pedido(s)</span>
-      <div><strong>${money(spent)}</strong><small class="muted" style="display:block">concluídos</small></div>
+      <span>${customer.orders} pedido(s)</span>
+      <div><strong>${money(customer.spent)}</strong><small class="muted" style="display:block">${customer.completed} concluído(s)</small></div>
     </div>`;
-  }).join(''):emptyStateHtml({icon:'users',title:'Nenhum cliente encontrado',description:'Tente outro termo de busca ou aguarde novos cadastros.'});
+  }).join(''):emptyStateHtml({icon:'users',title:'Nenhum cliente encontrado',description:'O resumo aparece a partir dos pedidos, sem expor ficha cadastral, telefone ou e-mail.'});
 }
 
 $('#customerSearch')?.addEventListener('input',renderCustomers);
 
 
 async function loadUsers(){
-  if(!(hasPermission('usersManage')||hasPermission('rolesManage'))) return;
+  if(!isMaster()) return;
   try{
     const s=await getDocs(collection(db,'users'));
     users=s.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(a.username||'').localeCompare(b.username||''));
@@ -3492,12 +3660,12 @@ async function loadUsers(){
   if(!users.some(u=>u.uid===auth.currentUser?.uid) && currentProfile?.bootstrap){
     users.unshift({...currentProfile});
   }
-  if(hasPermission('usersManage')) renderUsers();
-  if(hasPermission('rolesManage')) renderRoles();
+  renderUsers();
+  renderRoles();
 }
 
 function renderUsers(){
-  if(!hasPermission('usersManage')) return;
+  if(!isMaster()) return;
   $('#usersTable').innerHTML=users.length?users.map(u=>`
     <div class="data-row">
       <div class="data-main">
@@ -3520,14 +3688,13 @@ function renderUsers(){
 }
 
 $('#newUserBtn').onclick=()=>{
-  if(!hasPermission('usersManage')) return;
+  if(!isMaster()) return;
   editUser(null);
 };
 
 function editUser(uid){
-  if(!hasPermission('usersManage')) return;
+  if(!isMaster()) return;
   const u=users.find(x=>x.uid===uid);
-  if(u?.role==='master'&&!isMaster()) return;
   const isExisting=!!u&&!u.bootstrap;
   $('#userEditorTitle').textContent=u?(u.bootstrap?'Registrar Master':'Editar usuário'):'Novo usuário';
   $('#userUid').value=u?.uid||'';
@@ -3537,8 +3704,11 @@ function editUser(uid){
   $('#userPassword').value='';
   $('#userPassword').required=!u;
   $('#userPasswordField').classList.toggle('hidden',!!u);
-  $('#userRole').value=u?.role||'cashier';
-  $('#userRole').disabled=u?.uid===auth.currentUser?.uid;
+  const roleSelect=$('#userRole');
+  const masterOption=[...roleSelect.options].find(option=>option.value==='master');
+  if(masterOption) masterOption.hidden=!(u?.role==='master');
+  roleSelect.value=u?.role||'cashier';
+  roleSelect.disabled=u?.uid===auth.currentUser?.uid||u?.role==='master';
   $('#userActive').checked=true;
   $('#userActive').closest('.check-row')?.classList.add('hidden');
   $('#userEditorHelp').textContent=u
@@ -3550,75 +3720,51 @@ function editUser(uid){
 
 $('#userEditorForm').onsubmit=async e=>{
   e.preventDefault();
-  if(!hasPermission('usersManage')) return;
+  if(!isMaster()) return;
+
   const existingUid=$('#userUid').value;
   const username=normalizeUsername($('#userUsername').value);
   const displayName=$('#userDisplayName').value.trim()||username;
   const requestedRole=$('#userRole').value;
-  const role=existingUid===auth.currentUser?.uid&&isMaster()
-    ?'master'
-    :(requestedRole==='master'&&!isMaster()?currentProfile.role:requestedRole);
   const existingUser=users.find(x=>x.uid===existingUid);
-  const isBootstrap=existingUser?.bootstrap===true;
   $('#userEditorError').classList.add('hidden');
 
   if(!username||username.length<3){
     return userEditorError('O usuário precisa ter pelo menos 3 caracteres.');
   }
 
+  if(existingUser?.role==='master'&&existingUid!==auth.currentUser?.uid){
+    return userEditorError('Outra conta Master não pode ser rebaixada por esta tela.');
+  }
+
   try{
     if(existingUid){
-      const patch={
-        username,
-        displayName,
-        role,
-        updatedAt:serverTimestamp()
-      };
-      if(isBootstrap) patch.active=true;
-      await setDoc(doc(db,'users',existingUid),patch,{merge:true});
+      const role=existingUser?.role==='master'?'master':requestedRole;
+      await staffUserAdminAction('update',existingUid,{displayName,role});
       if(existingUid===auth.currentUser?.uid){
-        currentProfile={...currentProfile,username,displayName,role,active:true,bootstrap:false};
+        currentProfile={...currentProfile,displayName};
       }
     }else{
       const password=$('#userPassword').value;
-      if(password.length<6) return userEditorError('A senha precisa ter pelo menos 6 caracteres.');
-      let credential=null;
-      try{
-        const internalEmail=randomStaffEmail(username);
-        credential=await createUserWithEmailAndPassword(userCreatorAuth,internalEmail,password);
-        const batch=writeBatch(db);
-        batch.set(doc(db,'users',credential.user.uid),{
-          username,
-          displayName,
-          role,
-          active:true,
-          createdBy:auth.currentUser.uid,
-          createdAt:serverTimestamp(),
-          updatedAt:serverTimestamp()
-        });
-        batch.set(doc(db,'staffLogins',username),{
-          uid:credential.user.uid,
-          email:internalEmail,
-          createdAt:serverTimestamp(),
-          updatedAt:serverTimestamp()
-        });
-        await batch.commit();
-      }catch(err){
-        if(credential?.user){
-          try{await deleteUser(credential.user);}catch{}
-        }
-        throw err;
-      }finally{
-        try{await signOut(userCreatorAuth);}catch{}
+      if(password.length<10||!/[A-Za-z]/.test(password)||!/\d/.test(password)){
+        return userEditorError('A senha precisa ter pelo menos 10 caracteres, com letra e número.');
       }
+      if(requestedRole==='master'){
+        return userEditorError('Novos usuários operacionais não podem receber o perfil Master.');
+      }
+      await staffUserAdminAction('create','',{username,displayName,role:requestedRole,password});
     }
+
     $('#userEditor').close();
     await loadUsers();
-    $('#currentUserDisplay').textContent=`${currentProfile.displayName||currentProfile.username} • ${roleLabel(currentProfile.role)}`;
+    $('#currentUserDisplay').textContent=(currentProfile.displayName||currentProfile.username)+' • '+roleLabel(currentProfile.role);
   }catch(err){
     console.error(err);
-    if(err?.code==='auth/email-already-in-use') return userEditorError('Esse nome de usuário já existe.');
-    if(err?.code==='auth/operation-not-allowed') return userEditorError('Ative E-mail/Senha no Firebase Authentication antes de criar usuários.');
+    const code=String(err?.code||err?.message||'');
+    if(code.includes('username_in_use')) return userEditorError('Esse nome de usuário já existe.');
+    if(code.includes('invalid_role')) return userEditorError('Escolha um perfil operacional ativo.');
+    if(code.includes('invalid_password')) return userEditorError('A senha precisa ter pelo menos 10 caracteres, com letra e número.');
+    if(code.includes('master_protected')) return userEditorError('A conta Master é protegida.');
     userEditorError('Não foi possível salvar o usuário.');
   }
 };
@@ -3655,14 +3801,18 @@ function staffUserActionMessage(err){
   if(code.includes('master_protected')) return 'Somente um Master pode administrar outra conta Master.';
   if(code.includes('self_status_change')) return 'Você não pode desativar a própria conta.';
   if(code.includes('self_delete')) return 'Você não pode excluir a própria conta.';
-  if(code.includes('invalid_password')) return 'A senha precisa ter entre 6 e 128 caracteres.';
+  if(code.includes('invalid_password')) return 'A senha precisa ter pelo menos 10 caracteres, com letra e número.';
+  if(code.includes('invalid_username')) return 'O usuário precisa ter de 3 a 32 caracteres e usar apenas letras minúsculas, números, ponto, hífen ou sublinhado.';
+  if(code.includes('username_in_use')) return 'Esse nome de usuário já existe.';
+  if(code.includes('invalid_role')) return 'Escolha um perfil operacional ativo.';
+  if(code.includes('self_role_change')) return 'A própria conta Master não pode ter o perfil alterado.';
   if(code.includes('user_not_found')) return 'Este usuário não existe mais.';
   if(code.includes('permission_denied')) return 'Seu perfil não possui permissão para administrar este usuário.';
   return 'Não foi possível concluir a ação. Verifique as Firebase Functions e tente novamente.';
 }
 
 async function toggleUser(uid){
-  if(!hasPermission('usersManage')||uid===auth.currentUser?.uid) return;
+  if(!isMaster()||uid===auth.currentUser?.uid) return;
   const u=users.find(x=>x.uid===uid);
   if(!u) return;
 
@@ -3679,7 +3829,7 @@ async function toggleUser(uid){
 }
 
 function openUserPasswordDialog(uid){
-  if(!hasPermission('usersManage')) return;
+  if(!isMaster()) return;
   const u=users.find(x=>x.uid===uid);
   if(!u||u.bootstrap) return;
 
@@ -3699,8 +3849,8 @@ $('#userPasswordForm')?.addEventListener('submit',async e=>{
   const confirmPassword=$('#userConfirmPassword').value;
   $('#userPasswordError').classList.add('hidden');
 
-  if(password.length<6){
-    $('#userPasswordError').textContent='A senha precisa ter pelo menos 6 caracteres.';
+  if(password.length<10||!/[A-Za-z]/.test(password)||!/\d/.test(password)){
+    $('#userPasswordError').textContent='A senha precisa ter pelo menos 10 caracteres, com letra e número.';
     $('#userPasswordError').classList.remove('hidden');
     return;
   }
@@ -3728,7 +3878,7 @@ $('#userPasswordForm')?.addEventListener('submit',async e=>{
 });
 
 async function removeUser(uid){
-  if(!hasPermission('usersManage')||uid===auth.currentUser?.uid) return;
+  if(!isMaster()||uid===auth.currentUser?.uid) return;
   const u=users.find(x=>x.uid===uid);
   if(!u||u.bootstrap) return;
 

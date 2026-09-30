@@ -3,8 +3,8 @@ import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
-import { createHash } from "node:crypto";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { createHash, randomBytes } from "node:crypto";
 
 initializeApp();
 
@@ -341,13 +341,45 @@ async function verifyStaffAdminRequest(req) {
 
   const caller=callerSnap.data()||{};
   if(caller.active===false) throw Object.assign(new Error("user_disabled"),{status:403,code:"user_disabled"});
-
-  const permissions=await staffPermissions(decoded.uid);
-  if(!permissions || !(permissions.master===true || permissions.usersManage===true)) {
+  if(caller.role!=="master") {
     throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
   }
 
-  return {decoded,caller,isMaster:caller.role==="master"};
+  return {decoded,caller,isMaster:true};
+}
+
+function normalizeStaffUsername(value) {
+  return String(value||"")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-z0-9._-]/g,"")
+    .slice(0,32);
+}
+
+function validStaffUsername(value) {
+  return /^[a-z0-9][a-z0-9._-]{2,31}$/.test(value);
+}
+
+function validStaffPassword(value) {
+  const password=String(value||"");
+  return password.length>=10 &&
+    password.length<=128 &&
+    /[A-Za-z]/.test(password) &&
+    /\d/.test(password);
+}
+
+async function validateNonMasterRole(db,roleId) {
+  const role=normalizeText(roleId,120);
+  if(!role || role==="master") {
+    throw Object.assign(new Error("invalid_role"),{status:400,code:"invalid_role"});
+  }
+  const snap=await db.doc(`roles/${role}`).get();
+  if(!snap.exists || snap.data()?.active===false) {
+    throw Object.assign(new Error("invalid_role"),{status:400,code:"invalid_role"});
+  }
+  return role;
 }
 
 async function ensureMasterCanBeChanged(db,targetUid,target) {
@@ -365,6 +397,42 @@ async function ensureMasterCanBeChanged(db,targetUid,target) {
   }
 }
 
+export const resolveStaffLogin = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:staffAdminCors,
+    timeoutSeconds:15,
+    memory:"128MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    const username=normalizeStaffUsername(req.body?.username);
+    const decoy=()=>{
+      const safeUsername=username||"unknown";
+      const token=createHash("sha256").update("invalid:"+safeUsername).digest("hex").slice(0,24);
+      return `staff.${safeUsername}.${token}@delivery-pizzaria.local`;
+    };
+
+    if(!validStaffUsername(username)){
+      res.json({ok:true,email:decoy()});
+      return;
+    }
+
+    try{
+      const snap=await getFirestore().doc(`staffLogins/${username}`).get();
+      const email=snap.exists?normalizeText(snap.data()?.email,240):"";
+      res.json({ok:true,email:email||decoy()});
+    }catch(err){
+      console.error("resolveStaffLogin failed",err);
+      res.json({ok:true,email:decoy()});
+    }
+  }
+);
+
 export const manageStaffUser = onRequest(
   {
     region:"southamerica-east1",
@@ -379,36 +447,118 @@ export const manageStaffUser = onRequest(
     }
 
     try{
-      const {decoded,isMaster}=await verifyStaffAdminRequest(req);
+      const {decoded}=await verifyStaffAdminRequest(req);
       const action=normalizeText(req.body?.action,40);
-      const targetUid=normalizeText(req.body?.uid,160);
+      const db=getFirestore();
 
+      if(action==="create"){
+        const username=normalizeStaffUsername(req.body?.username);
+        const displayName=normalizeText(req.body?.displayName,80)||username;
+        const password=String(req.body?.password||"");
+        if(!validStaffUsername(username)){
+          res.status(400).json({error:"invalid_username"});
+          return;
+        }
+        if(!validStaffPassword(password)){
+          res.status(400).json({error:"invalid_password"});
+          return;
+        }
+        const role=await validateNonMasterRole(db,req.body?.role);
+        const loginRef=db.doc(`staffLogins/${username}`);
+        const existing=await loginRef.get();
+        if(existing.exists){
+          res.status(409).json({error:"username_in_use"});
+          return;
+        }
+
+        const token=randomBytes(12).toString("hex");
+        const internalEmail=`staff.${username}.${token}@delivery-pizzaria.local`;
+        let created=null;
+        try{
+          created=await getAuth().createUser({
+            email:internalEmail,
+            password,
+            displayName,
+            disabled:false
+          });
+          const userRef=db.doc(`users/${created.uid}`);
+          await db.runTransaction(async tx=>{
+            const again=await tx.get(loginRef);
+            if(again.exists){
+              throw Object.assign(new Error("username_in_use"),{code:"username_in_use"});
+            }
+            tx.set(userRef,{
+              username,
+              displayName,
+              role,
+              active:true,
+              createdBy:decoded.uid,
+              createdAt:new Date(),
+              updatedAt:new Date()
+            });
+            tx.set(loginRef,{
+              uid:created.uid,
+              email:internalEmail,
+              createdAt:new Date(),
+              updatedAt:new Date()
+            });
+          });
+        }catch(err){
+          if(created?.uid){
+            try{await getAuth().deleteUser(created.uid);}catch{}
+          }
+          throw err;
+        }
+
+        res.json({ok:true,uid:created.uid,username,displayName,role,active:true});
+        return;
+      }
+
+      const targetUid=normalizeText(req.body?.uid,160);
       if(!targetUid){
         res.status(400).json({error:"user_required"});
         return;
       }
 
-      const db=getFirestore();
       const targetRef=db.doc(`users/${targetUid}`);
       const targetSnap=await targetRef.get();
       if(!targetSnap.exists){
         res.status(404).json({error:"user_not_found"});
         return;
       }
-
       const target=targetSnap.data()||{};
-      if(target.role==="master" && !isMaster){
-        res.status(403).json({error:"master_protected"});
+
+      if(action==="update"){
+        const displayName=normalizeText(req.body?.displayName,80)||normalizeText(target.username,32);
+        if(target.role==="master"){
+          if(targetUid!==decoded.uid || req.body?.role!=="master"){
+            res.status(403).json({error:"master_protected"});
+            return;
+          }
+          await targetRef.set({displayName,updatedAt:new Date()},{merge:true});
+          await getAuth().updateUser(targetUid,{displayName});
+          res.json({ok:true,uid:targetUid,displayName,role:"master"});
+          return;
+        }
+
+        if(targetUid===decoded.uid){
+          res.status(409).json({error:"self_role_change"});
+          return;
+        }
+        const role=await validateNonMasterRole(db,req.body?.role);
+        await targetRef.set({displayName,role,updatedAt:new Date()},{merge:true});
+        await getAuth().updateUser(targetUid,{displayName});
+        await getAuth().revokeRefreshTokens(targetUid);
+        res.json({ok:true,uid:targetUid,displayName,role});
         return;
       }
 
       if(action==="setPassword"){
         const password=String(req.body?.password||"");
-        if(password.length<6 || password.length>128){
+        if(!validStaffPassword(password)){
           res.status(400).json({error:"invalid_password"});
           return;
         }
-
         await getAuth().updateUser(targetUid,{password});
         await getAuth().revokeRefreshTokens(targetUid);
         await targetRef.set({
@@ -416,7 +566,6 @@ export const manageStaffUser = onRequest(
           passwordChangedBy:decoded.uid,
           updatedAt:new Date()
         },{merge:true});
-
         res.json({ok:true});
         return;
       }
@@ -426,21 +575,18 @@ export const manageStaffUser = onRequest(
           res.status(409).json({error:"self_status_change"});
           return;
         }
-
         const active=req.body?.active===true;
         if(!active && target.role==="master"){
           await ensureMasterCanBeChanged(db,targetUid,target);
         }
-
         await getAuth().updateUser(targetUid,{disabled:!active});
-        if(!active) await getAuth().revokeRefreshTokens(targetUid);
+        await getAuth().revokeRefreshTokens(targetUid);
         await targetRef.set({
           active,
           statusChangedAt:new Date(),
           statusChangedBy:decoded.uid,
           updatedAt:new Date()
         },{merge:true});
-
         res.json({ok:true,active});
         return;
       }
@@ -450,23 +596,18 @@ export const manageStaffUser = onRequest(
           res.status(409).json({error:"self_delete"});
           return;
         }
-
         if(target.role==="master"){
           await ensureMasterCanBeChanged(db,targetUid,target);
         }
 
-        const username=normalizeText(target.username,32);
+        const username=normalizeStaffUsername(target.username);
+        await getAuth().updateUser(targetUid,{disabled:true}).catch(()=>{});
+        await getAuth().revokeRefreshTokens(targetUid).catch(()=>{});
         const batch=db.batch();
         batch.delete(targetRef);
         if(username) batch.delete(db.doc(`staffLogins/${username}`));
         await batch.commit();
-
-        try{
-          await getAuth().deleteUser(targetUid);
-        }catch(err){
-          console.error("Authentication user deletion failed after profile removal",err);
-          throw Object.assign(new Error("auth_delete_failed"),{status:500,code:"auth_delete_failed"});
-        }
+        await getAuth().deleteUser(targetUid);
 
         res.json({ok:true,deleted:true});
         return;
@@ -475,8 +616,358 @@ export const manageStaffUser = onRequest(
       res.status(400).json({error:"invalid_action"});
     }catch(err){
       console.error("manageStaffUser failed",err);
+      const code=err?.code||err?.message||"staff_user_action_failed";
+      const status=Number(err?.status)||(code==="username_in_use"?409:500);
+      res.status(status).json({error:code});
+    }
+  }
+);
+
+const assignableRolePermissions=[
+  "ordersView","ordersAccept","ordersPrepare","ordersDispatch","ordersComplete","ordersCancel",
+  "productsView","productsCreate","productsEdit","productsDelete","categoriesManage",
+  "promotionsManage","couponsManage","customersView","printingManage","cashView","cashOperate",
+  "settingsManage"
+];
+
+export const manageStaffRole = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:staffAdminCors,
+    timeoutSeconds:30,
+    memory:"256MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    try{
+      await verifyStaffAdminRequest(req);
+      const db=getFirestore();
+      const action=normalizeText(req.body?.action,40);
+
+      if(action==="seedDefaults"){
+        const defaults={
+          manager:{name:"Gerente",permissions:{
+            ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true,
+            productsView:true,productsCreate:true,productsEdit:true,productsDelete:true,categoriesManage:true,
+            promotionsManage:true,couponsManage:true,customersView:true,printingManage:true,cashView:true,cashOperate:true,settingsManage:true
+          }},
+          cashier:{name:"Caixa",permissions:{
+            ordersView:true,ordersAccept:true,ordersCancel:true,customersView:true,printingManage:true,cashView:true,cashOperate:true
+          }},
+          kitchen:{name:"Cozinha",permissions:{ordersView:true,ordersPrepare:true}},
+          delivery:{name:"Entrega",permissions:{ordersView:true,ordersDispatch:true,ordersComplete:true}},
+          operator:{name:"Operador",permissions:{
+            ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true
+          }}
+        };
+        const batch=db.batch();
+        for(const [id,role] of Object.entries(defaults)){
+          batch.set(db.doc(`roles/${id}`),{
+            name:role.name,
+            permissions:role.permissions,
+            system:true,
+            active:true,
+            updatedAt:new Date()
+          },{merge:true});
+        }
+        await batch.commit();
+        res.json({ok:true});
+        return;
+      }
+
+      const roleId=normalizeText(req.body?.roleId,120);
+      if(!roleId || roleId==="master"){
+        res.status(400).json({error:"invalid_role"});
+        return;
+      }
+      const roleRef=db.doc(`roles/${roleId}`);
+
+      if(action==="save"){
+        const name=normalizeText(req.body?.name,80);
+        if(!name){
+          res.status(400).json({error:"role_name_required"});
+          return;
+        }
+        const input=req.body?.permissions||{};
+        const permissions={};
+        for(const key of assignableRolePermissions){
+          permissions[key]=input[key]===true;
+        }
+        if(permissions.ordersAccept||permissions.ordersPrepare||permissions.ordersDispatch||permissions.ordersComplete||permissions.ordersCancel){
+          permissions.ordersView=true;
+        }
+        if(permissions.productsCreate||permissions.productsEdit||permissions.productsDelete||permissions.categoriesManage||permissions.promotionsManage){
+          permissions.productsView=true;
+        }
+        if(permissions.cashOperate) permissions.cashView=true;
+
+        const existing=await roleRef.get();
+        await roleRef.set({
+          name,
+          permissions,
+          active:req.body?.active!==false,
+          system:existing.exists?existing.data()?.system===true:false,
+          updatedAt:new Date(),
+          ...(existing.exists?{}:{createdAt:new Date()})
+        },{merge:true});
+        res.json({ok:true,roleId});
+        return;
+      }
+
+      if(action==="delete"){
+        const existing=await roleRef.get();
+        if(!existing.exists){
+          res.status(404).json({error:"role_not_found"});
+          return;
+        }
+        if(existing.data()?.system===true){
+          res.status(409).json({error:"system_role"});
+          return;
+        }
+        const users=await db.collection("users").where("role","==",roleId).limit(1).get();
+        if(!users.empty){
+          res.status(409).json({error:"role_in_use"});
+          return;
+        }
+        await roleRef.delete();
+        res.json({ok:true,deleted:true});
+        return;
+      }
+
+      res.status(400).json({error:"invalid_action"});
+    }catch(err){
+      console.error("manageStaffRole failed",err);
       res.status(Number(err?.status)||500).json({
-        error:err?.code||err?.message||"staff_user_action_failed"
+        error:err?.code||err?.message||"staff_role_action_failed"
+      });
+    }
+  }
+);
+
+
+function minimalOrderCustomer(value={}) {
+  return {
+    name:normalizeText(value?.name,100),
+    phone:normalizeText(value?.phone,40)
+  };
+}
+
+function minimalOrderAddress(value) {
+  if(!value) return null;
+  return {
+    id:normalizeText(value.id,120),
+    label:normalizeText(value.label,40),
+    recipient:normalizeText(value.recipient,100),
+    phone:normalizeText(value.phone,40),
+    zip:normalizeText(value.zip,10),
+    street:normalizeText(value.street,160),
+    number:normalizeText(value.number,20),
+    complement:normalizeText(value.complement,100),
+    neighborhood:normalizeText(value.neighborhood,80),
+    city:normalizeText(value.city,80),
+    state:normalizeText(value.state,2),
+    reference:normalizeText(value.reference,140)
+  };
+}
+
+async function verifyStaffOrderPrivateRequest(req) {
+  const authHeader=req.headers.authorization||"";
+  const match=authHeader.match(/^Bearer\s+(.+)$/i);
+  if(!match) throw Object.assign(new Error("missing_auth"),{status:401,code:"missing_auth"});
+  const decoded=await getAuth().verifyIdToken(match[1]);
+  const permissions=await staffPermissions(decoded.uid);
+  if(!permissions) throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
+  const allowed=permissions.master===true ||
+    permissions.ordersAccept===true ||
+    permissions.ordersDispatch===true ||
+    permissions.ordersComplete===true ||
+    permissions.ordersCancel===true ||
+    permissions.printingManage===true;
+  if(!allowed) throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
+  return decoded;
+}
+
+export const staffOrderPrivate = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:staffAdminCors,
+    timeoutSeconds:20,
+    memory:"256MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+    try{
+      await verifyStaffOrderPrivateRequest(req);
+      const orderId=normalizeText(req.body?.orderId,120);
+      if(!orderId){
+        res.status(400).json({error:"order_required"});
+        return;
+      }
+      const db=getFirestore();
+      const privateRef=db.doc(`orderPrivate/${orderId}`);
+      let privateSnap=await privateRef.get();
+
+      if(!privateSnap.exists){
+        const orderRef=db.doc(`orders/${orderId}`);
+        let foundOrder=false;
+        await db.runTransaction(async tx=>{
+          const [currentPrivate,currentOrder]=await Promise.all([
+            tx.get(privateRef),
+            tx.get(orderRef)
+          ]);
+          if(currentPrivate.exists){
+            foundOrder=true;
+            return;
+          }
+          if(!currentOrder.exists) return;
+          foundOrder=true;
+          const order=currentOrder.data()||{};
+          if(!order.customer&&!order.address) return;
+
+          tx.set(privateRef,{
+            orderId,
+            customerId:order.customerId||"",
+            customer:order.customer?minimalOrderCustomer(order.customer):null,
+            address:minimalOrderAddress(order.address),
+            createdAt:order.createdAt||new Date(),
+            updatedAt:new Date()
+          },{merge:true});
+
+          const patch={
+            customer:FieldValue.delete(),
+            address:FieldValue.delete()
+          };
+          if(order.deliveryPricing?.verifiedNeighborhood!==undefined){
+            patch["deliveryPricing.verifiedNeighborhood"]=FieldValue.delete();
+          }
+          if(order.deliveryPricing?.zone!==undefined){
+            patch["deliveryPricing.zone"]=FieldValue.delete();
+          }
+          tx.update(orderRef,patch);
+        });
+
+        if(!foundOrder){
+          res.status(404).json({error:"order_not_found"});
+          return;
+        }
+        privateSnap=await privateRef.get();
+      }
+
+      if(!privateSnap.exists){
+        res.json({ok:true,orderId,customer:null,address:null});
+        return;
+      }
+
+      const data=privateSnap.data()||{};
+      const customer=data.customer?minimalOrderCustomer(data.customer):null;
+      const address=minimalOrderAddress(data.address);
+      if(
+        data.customer?.email!==undefined ||
+        data.address?.location!==undefined ||
+        data.deliveryPrivate!==undefined
+      ){
+        await privateRef.set({
+          customer,
+          address,
+          deliveryPrivate:FieldValue.delete(),
+          updatedAt:new Date()
+        },{merge:true});
+      }
+      res.json({
+        ok:true,
+        orderId,
+        customer,
+        address
+      });
+    }catch(err){
+      console.error("staffOrderPrivate failed",err);
+      res.status(Number(err?.status)||500).json({
+        error:err?.code||err?.message||"order_private_failed"
+      });
+    }
+  }
+);
+
+export const migrateOrderPrivacy = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:staffAdminCors,
+    timeoutSeconds:120,
+    memory:"512MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+    try{
+      await verifyStaffAdminRequest(req);
+      const db=getFirestore();
+      const migrationRef=db.doc("systemMigrations/orderPrivacyV1");
+      const migrationSnap=await migrationRef.get();
+      if(migrationSnap.exists&&migrationSnap.data()?.completed===true){
+        res.json({ok:true,alreadyCompleted:true,migrated:Number(migrationSnap.data()?.migrated||0)});
+        return;
+      }
+
+      const ordersSnap=await db.collection("orders").get();
+      let migrated=0;
+      let batch=db.batch();
+      let writes=0;
+      const flush=async()=>{
+        if(!writes) return;
+        await batch.commit();
+        batch=db.batch();
+        writes=0;
+      };
+
+      for(const orderDoc of ordersSnap.docs){
+        const order=orderDoc.data()||{};
+        if(!order.customer&&!order.address) continue;
+        const privateRef=db.doc(`orderPrivate/${orderDoc.id}`);
+        batch.set(privateRef,{
+          orderId:orderDoc.id,
+          customerId:order.customerId||"",
+          customer:order.customer?minimalOrderCustomer(order.customer):null,
+          address:minimalOrderAddress(order.address),
+          deliveryPrivate:FieldValue.delete(),
+          createdAt:order.createdAt||new Date(),
+          updatedAt:new Date()
+        },{merge:true});
+        const orderPatch={
+          customer:FieldValue.delete(),
+          address:FieldValue.delete()
+        };
+        if(order.deliveryPricing?.verifiedNeighborhood!==undefined){
+          orderPatch["deliveryPricing.verifiedNeighborhood"]=FieldValue.delete();
+        }
+        if(order.deliveryPricing?.zone!==undefined){
+          orderPatch["deliveryPricing.zone"]=FieldValue.delete();
+        }
+        batch.update(orderDoc.ref,orderPatch);
+        writes+=2;
+        migrated++;
+        if(writes>=400) await flush();
+      }
+      await flush();
+
+      await migrationRef.set({
+        completed:true,
+        migrated,
+        completedAt:new Date()
+      },{merge:true});
+      res.json({ok:true,migrated});
+    }catch(err){
+      console.error("migrateOrderPrivacy failed",err);
+      res.status(Number(err?.status)||500).json({
+        error:err?.code||err?.message||"privacy_migration_failed"
       });
     }
   }
@@ -1585,6 +2076,17 @@ function maskCpf(value) {
   return "***."+cpf.slice(3,6)+"."+cpf.slice(6,9)+"-**";
 }
 
+function privateIdentityVerified(data={}) {
+  const hash=String(data.cpfHash||"");
+  return (data.cpfVerified===true && /^[a-f0-9]{64}$/i.test(hash)) ||
+    validCpf(data.cpf);
+}
+
+function privateIdentityMasked(data={}) {
+  if(typeof data.cpfMasked==="string"&&data.cpfMasked) return data.cpfMasked;
+  return validCpf(data.cpf)?maskCpf(data.cpf):"";
+}
+
 function validFullName(value) {
   return normalizeText(value,100).split(/\s+/).filter(Boolean).length>=2;
 }
@@ -1621,11 +2123,32 @@ export const customerIdentity = onRequest(
       if (req.method==="GET") {
         const snap=await privateRef.get();
         const data=snap.exists?snap.data():{};
+        const verified=snap.exists&&privateIdentityVerified(data);
+        const masked=verified?privateIdentityMasked(data):"";
+
+        // Migração transparente de registros antigos que ainda continham CPF bruto.
+        const customerSnap=await customerRef.get();
+        const legacyPublicEmail=customerSnap.exists&&!!customerSnap.data()?.email;
+        if(verified&&(data.cpf||data.email)){
+          await privateRef.set({
+            cpf:FieldValue.delete(),
+            email:FieldValue.delete(),
+            cpfVerified:true,
+            cpfMasked:masked,
+            updatedAt:new Date()
+          },{merge:true});
+        }
+        if(legacyPublicEmail){
+          await customerRef.set({
+            email:FieldValue.delete(),
+            updatedAt:new Date()
+          },{merge:true});
+        }
+
         res.json({
           ok:true,
-          identityComplete:snap.exists&&validCpf(data?.cpf),
-          cpf:snap.exists?normalizeCpf(data?.cpf):"",
-          cpfMasked:snap.exists?maskCpf(data?.cpf):"",
+          identityComplete:verified,
+          cpfMasked:masked,
           email:decoded.email||"",
           emailVerified:decoded.email_verified===true
         });
@@ -1640,7 +2163,10 @@ export const customerIdentity = onRequest(
       const body=req.body||{};
       const name=normalizeText(body.name,100);
       const phone=phoneDigits(body.phone);
-      const cpf=normalizeCpf(body.cpf);
+      const providedCpf=normalizeCpf(body.cpf);
+      const existingSnap=await privateRef.get();
+      const existing=existingSnap.exists?existingSnap.data()||{}:{};
+      const existingVerified=privateIdentityVerified(existing);
 
       if (!validFullName(name)) {
         res.status(400).json({error:"full_name_required"});
@@ -1650,12 +2176,21 @@ export const customerIdentity = onRequest(
         res.status(400).json({error:"invalid_phone"});
         return;
       }
-      if (!validCpf(cpf)) {
+
+      let hash=existing.cpfHash||"";
+      let masked=privateIdentityMasked(existing);
+      if(providedCpf){
+        if (!validCpf(providedCpf)) {
+          res.status(400).json({error:"invalid_cpf"});
+          return;
+        }
+        hash=cpfHash(providedCpf);
+        masked=maskCpf(providedCpf);
+      }else if(!existingVerified||!hash){
         res.status(400).json({error:"invalid_cpf"});
         return;
       }
 
-      const hash=cpfHash(cpf);
       const indexRef=db.doc(`cpfIndex/${hash}`);
 
       await db.runTransaction(async tx=>{
@@ -1668,7 +2203,9 @@ export const customerIdentity = onRequest(
           throw Object.assign(new Error("cpf_already_registered"),{code:"cpf_already_registered"});
         }
 
-        const previousHash=privateSnap.exists?privateSnap.data()?.cpfHash:"";
+        const privateData=privateSnap.exists?privateSnap.data()||{}:{};
+        const previousHash=privateData.cpfHash||
+          (validCpf(privateData.cpf)?cpfHash(privateData.cpf):"");
         if (previousHash&&previousHash!==hash) {
           throw Object.assign(new Error("cpf_change_not_allowed"),{code:"cpf_change_not_allowed"});
         }
@@ -1679,9 +2216,12 @@ export const customerIdentity = onRequest(
         },{merge:true});
 
         tx.set(privateRef,{
-          cpf,
+          cpf:FieldValue.delete(),
+          email:FieldValue.delete(),
           cpfHash:hash,
-          email:decoded.email||"",
+          cpfMasked:masked,
+          cpfVerified:true,
+          verifiedAt:privateData.verifiedAt||new Date(),
           updatedAt:new Date(),
           ...(privateSnap.exists?{}:{createdAt:new Date()})
         },{merge:true});
@@ -1689,7 +2229,7 @@ export const customerIdentity = onRequest(
         tx.set(customerRef,{
           name,
           phone,
-          email:decoded.email||"",
+          email:FieldValue.delete(),
           identityComplete:true,
           updatedAt:new Date()
         },{merge:true});
@@ -1698,8 +2238,7 @@ export const customerIdentity = onRequest(
       res.json({
         ok:true,
         identityComplete:true,
-        cpf,
-        cpfMasked:maskCpf(cpf),
+        cpfMasked:masked,
         email:decoded.email||"",
         emailVerified:decoded.email_verified===true
       });
@@ -1714,6 +2253,252 @@ export const customerIdentity = onRequest(
         return;
       }
       res.status(500).json({error:"identity_failed",message:err?.message||"Falha ao salvar os dados."});
+    }
+  }
+);
+
+
+export const migrateCustomerPrivacy = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:customerCors,
+    timeoutSeconds:120,
+    memory:"512MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    try{
+      await verifyStaffAdminRequest(req);
+      const db=getFirestore();
+      const migrationRef=db.doc("systemMigrations/customerPrivacyV1");
+      const existingMigration=await migrationRef.get();
+      if(existingMigration.exists&&existingMigration.data()?.completed===true){
+        res.json({
+          ok:true,
+          alreadyCompleted:true,
+          migratedPrivate:Number(existingMigration.data()?.migratedPrivate||0),
+          migratedPublic:Number(existingMigration.data()?.migratedPublic||0)
+        });
+        return;
+      }
+
+      const [privateSnap,publicSnap]=await Promise.all([
+        db.collection("customerPrivate").get(),
+        db.collection("customers").get()
+      ]);
+      const writer=db.bulkWriter();
+      let migratedPrivate=0;
+      let migratedPublic=0;
+      const conflicts=[];
+
+      const legacyPrivate=privateSnap.docs.filter(docSnap=>{
+        const data=docSnap.data()||{};
+        return !!data.cpf || !!data.email || data.cpfVerified!==true;
+      });
+
+      for(let offset=0;offset<legacyPrivate.length;offset+=50){
+        const chunk=legacyPrivate.slice(offset,offset+50);
+        const resolved=await Promise.all(chunk.map(async docSnap=>{
+          const data=docSnap.data()||{};
+          const rawCpf=normalizeCpf(data.cpf);
+          const hash=data.cpfHash || (validCpf(rawCpf)?cpfHash(rawCpf):"");
+          const indexRef=hash?db.doc(`cpfIndex/${hash}`):null;
+          const indexSnap=indexRef?await indexRef.get():null;
+          return {docSnap,data,rawCpf,hash,indexRef,indexSnap};
+        }));
+
+        for(const item of resolved){
+          const {docSnap,data,rawCpf,hash,indexRef,indexSnap}=item;
+          const validLegacy=validCpf(rawCpf);
+          const validHash=/^[a-f0-9]{64}$/i.test(String(hash||""));
+          if(!validHash || (!data.cpfVerified&&data.cpf&&!validLegacy)){
+            conflicts.push({uid:docSnap.id,reason:"invalid_cpf"});
+            continue;
+          }
+          if(indexSnap?.exists&&indexSnap.data()?.uid!==docSnap.id){
+            conflicts.push({uid:docSnap.id,reason:"cpf_index_conflict"});
+            continue;
+          }
+
+          const masked=data.cpfMasked || (validLegacy?maskCpf(rawCpf):"");
+          writer.set(docSnap.ref,{
+            cpf:FieldValue.delete(),
+            email:FieldValue.delete(),
+            cpfHash:hash,
+            cpfMasked:masked,
+            cpfVerified:true,
+            migratedAt:new Date(),
+            updatedAt:new Date()
+          },{merge:true});
+          if(indexRef){
+            writer.set(indexRef,{
+              uid:docSnap.id,
+              updatedAt:new Date()
+            },{merge:true});
+          }
+          migratedPrivate++;
+        }
+      }
+
+      for(const customerDoc of publicSnap.docs){
+        const data=customerDoc.data()||{};
+        if(data.email!==undefined){
+          writer.update(customerDoc.ref,{
+            email:FieldValue.delete(),
+            updatedAt:new Date()
+          });
+          migratedPublic++;
+        }
+      }
+
+      await writer.close();
+
+      await migrationRef.set({
+        completed:conflicts.length===0,
+        migratedPrivate,
+        migratedPublic,
+        conflicts:conflicts.slice(0,100),
+        conflictCount:conflicts.length,
+        updatedAt:new Date(),
+        ...(conflicts.length?{}:{completedAt:new Date()})
+      },{merge:true});
+
+      if(conflicts.length){
+        res.status(409).json({
+          error:"privacy_migration_conflict",
+          migratedPrivate,
+          migratedPublic,
+          conflictCount:conflicts.length
+        });
+        return;
+      }
+
+      res.json({ok:true,migratedPrivate,migratedPublic});
+    }catch(err){
+      console.error("migrateCustomerPrivacy failed",err);
+      res.status(Number(err?.status)||500).json({
+        error:err?.code||err?.message||"customer_privacy_migration_failed"
+      });
+    }
+  }
+);
+
+export const deleteCustomerAccount = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:customerCors,
+    timeoutSeconds:120,
+    memory:"512MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    try{
+      const decoded=await verifyCustomerToken(req);
+      if(!decoded?.uid){
+        res.status(401).json({error:"unauthorized"});
+        return;
+      }
+
+      const confirmation=normalizeText(req.body?.confirmation,40).toUpperCase();
+      if(confirmation!=="EXCLUIR"){
+        res.status(400).json({error:"confirmation_required"});
+        return;
+      }
+
+      const authTimeMs=Number(decoded.auth_time||0)*1000;
+      if(!Number.isFinite(authTimeMs)||Date.now()-authTimeMs>15*60*1000){
+        res.status(401).json({error:"recent_login_required"});
+        return;
+      }
+
+      const db=getFirestore();
+      const uid=decoded.uid;
+      const customerRef=db.doc(`customers/${uid}`);
+      const privateRef=db.doc(`customerPrivate/${uid}`);
+      const privateSnap=await privateRef.get();
+      const cpfHashValue=privateSnap.exists?normalizeText(privateSnap.data()?.cpfHash,128):"";
+
+      const ordersSnap=await db.collection("orders").where("customerId","==",uid).get();
+      const activeOrders=ordersSnap.docs.filter(orderDoc=>
+        !["completed","cancelled"].includes(orderDoc.data()?.status)
+      );
+      if(activeOrders.length){
+        res.status(409).json({
+          error:"active_orders",
+          activeOrders:activeOrders.length
+        });
+        return;
+      }
+
+      await getAuth().updateUser(uid,{disabled:true});
+      await getAuth().revokeRefreshTokens(uid).catch(()=>{});
+
+      const [
+        addressesSnap,
+        favoritesSnap,
+        rewardsSnap,
+        requestSnap
+      ]=await Promise.all([
+        customerRef.collection("addresses").get(),
+        customerRef.collection("favorites").get(),
+        customerRef.collection("coupons").get(),
+        db.collection("orderRequests").where("customerId","==",uid).get()
+      ]);
+
+      const writer=db.bulkWriter();
+      for(const docSnap of addressesSnap.docs) writer.delete(docSnap.ref);
+      for(const docSnap of favoritesSnap.docs) writer.delete(docSnap.ref);
+      for(const docSnap of rewardsSnap.docs) writer.delete(docSnap.ref);
+      for(const docSnap of requestSnap.docs) writer.delete(docSnap.ref);
+
+      for(const orderDoc of ordersSnap.docs){
+        const order=orderDoc.data()||{};
+        const patch={
+          customerId:FieldValue.delete(),
+          customer:FieldValue.delete(),
+          address:FieldValue.delete(),
+          customerDeleted:true,
+          customerDeletedAt:new Date(),
+          updatedAt:new Date()
+        };
+        if(order.deliveryPricing?.verifiedNeighborhood!==undefined){
+          patch["deliveryPricing.verifiedNeighborhood"]=FieldValue.delete();
+        }
+        writer.update(orderDoc.ref,patch);
+        writer.delete(db.doc(`orderPrivate/${orderDoc.id}`));
+      }
+
+      writer.delete(customerRef);
+      writer.delete(privateRef);
+      writer.delete(db.doc(`orderRateLimits/${uid}`));
+      if(cpfHashValue) writer.delete(db.doc(`cpfIndex/${cpfHashValue}`));
+      await writer.close();
+
+      try{
+        await getAuth().deleteUser(uid);
+      }catch(err){
+        console.error("Auth deletion failed after privacy cleanup",err);
+        throw Object.assign(new Error("auth_delete_failed"),{status:500,code:"auth_delete_failed"});
+      }
+
+      res.json({
+        ok:true,
+        deleted:true,
+        retainedOrderRecords:ordersSnap.size
+      });
+    }catch(err){
+      console.error("deleteCustomerAccount failed",err);
+      res.status(Number(err?.status)||500).json({
+        error:err?.code||err?.message||"account_delete_failed"
+      });
     }
   }
 );
@@ -1869,7 +2654,7 @@ export const createOrder = onRequest(
 
       const customer=customerSnap.exists?customerSnap.data():{};
       const privateCustomer=privateCustomerSnap.exists?privateCustomerSnap.data():{};
-      if (!customer.identityComplete || !validCpf(privateCustomer.cpf)) {
+      if (!customer.identityComplete || !privateIdentityVerified(privateCustomer)) {
         res.status(409).json({error:"profile_incomplete"});
         return;
       }
@@ -2256,6 +3041,7 @@ export const createOrder = onRequest(
       const counterRef=db.doc("counters/orders");
       const rateRef=db.doc(`orderRateLimits/${decoded.uid}`);
       const orderRef=db.collection("orders").doc();
+      const orderPrivateRef=db.doc(`orderPrivate/${orderRef.id}`);
       let orderNumber=0;
       let duplicateResult=null;
       const now=new Date();
@@ -2312,34 +3098,12 @@ export const createOrder = onRequest(
           requestId,
           createdAt:now,
           acceptedAt:autoAccepted?now:null,
-          customer:{
-            name,
-            email:decoded.email||"",
-            phone
-          },
           fulfillment,
-          address:fulfillment==="delivery"?{
-            id:address.id,
-            label:address.label||"",
-            recipient:address.recipient||name,
-            phone:address.phone||phone,
-            zip:address.zip||"",
-            street:address.street||"",
-            number:address.number||"",
-            complement:address.complement||"",
-            neighborhood:address.neighborhood||"",
-            city:address.city||"",
-            state:address.state||"",
-            reference:address.reference||"",
-            location:delivery.addressLocation||null
-          }:null,
           deliveryPricing:fulfillment==="delivery"?{
             mode:delivery.mode||settings.deliveryPricingMode||"fixed",
             fee:deliveryFee,
             distanceKm:Number.isFinite(delivery.distanceKm)?Number(delivery.distanceKm.toFixed(3)):null,
             distanceMethod:delivery.distanceMethod||null,
-            zone:delivery.zone||null,
-            verifiedNeighborhood:delivery.verifiedNeighborhood||null,
             maxKm:delivery.maxKm??null
           }:{mode:"pickup",fee:0},
           payment:{
@@ -2356,6 +3120,28 @@ export const createOrder = onRequest(
           deliveryFee,
           total,
           createdBy:"secure-function"
+        });
+
+        tx.set(orderPrivateRef,{
+          orderId:orderRef.id,
+          customerId:decoded.uid,
+          customer:minimalOrderCustomer({name,phone}),
+          address:fulfillment==="delivery"?minimalOrderAddress({
+            id:address.id,
+            label:address.label||"",
+            recipient:address.recipient||name,
+            phone:address.phone||phone,
+            zip:address.zip||"",
+            street:address.street||"",
+            number:address.number||"",
+            complement:address.complement||"",
+            neighborhood:address.neighborhood||"",
+            city:address.city||"",
+            state:address.state||"",
+            reference:address.reference||""
+          }):null,
+          createdAt:now,
+          updatedAt:now
         });
 
         const resultData={

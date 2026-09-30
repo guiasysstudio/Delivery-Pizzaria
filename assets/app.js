@@ -1,8 +1,8 @@
 import {
   auth, authPersistenceReady, db, watchCustomer, loginWithGoogle, loginWithEmail, registerWithEmail,
   resetCustomerPassword, friendlyAuthError, lookupBrazilianZip, getCustomerProfile, saveCustomerProfile, getAddresses,
-  saveAddress, setDefaultAddress, getFavorites, setFavorite, saveCustomerIdentity,
-  formatCpf, validCpf, formatPhone, validPhone, validFullName
+  saveAddress, setDefaultAddress, getFavorites, setFavorite, saveCustomerIdentity, deleteCustomerAccount, logoutCustomer,
+  formatCpf, validCpf, formatPhone, validPhone, validFullName, validCustomerPassword
 } from './customer-auth.js';
 import {
   collection, doc, getDoc, getDocs, query, where
@@ -1461,6 +1461,16 @@ $('#registerCustomerForm').onsubmit=async e=>{
     $('#registerAuthError').classList.remove('hidden');
     return;
   }
+  if(!validCustomerPassword($('#registerPassword').value)){
+    $('#registerAuthError').textContent='Use uma senha com pelo menos 8 caracteres, incluindo letra e número.';
+    $('#registerAuthError').classList.remove('hidden');
+    return;
+  }
+  if(!$('#registerPrivacyNotice').checked){
+    $('#registerAuthError').textContent='Leia o Aviso de Privacidade antes de criar sua conta.';
+    $('#registerAuthError').classList.remove('hidden');
+    return;
+  }
 
   try{
     const user=await registerWithEmail({
@@ -1481,6 +1491,18 @@ $('#registerCustomerForm').onsubmit=async e=>{
       :code.includes('invalid_cpf')
         ?'Informe um CPF válido.'
         :friendlyAuthError(err);
+
+    if(code.includes('cpf_already_registered')&&auth.currentUser){
+      try{
+        await deleteCustomerAccount();
+      }catch(cleanupError){
+        console.warn('Não foi possível remover automaticamente o cadastro incompleto.',cleanupError);
+        await logoutCustomer().catch(()=>{});
+      }
+      $('#registerAuthError').textContent=message+' Entre com a conta já vinculada a este CPF.';
+      $('#registerAuthError').classList.remove('hidden');
+      return;
+    }
 
     if(auth.currentUser&&!code.startsWith('auth/')){
       showToast(message+' Sua conta foi criada, mas o cadastro precisa ser concluído em Minha Conta.','warning',{duration:7000});
@@ -2072,6 +2094,14 @@ $('#installAppBtn')?.addEventListener('click',async()=>{
 });
 
 updateInstallButton();
+const accountDeletedParam=new URLSearchParams(location.search).get('accountDeleted');
+if(accountDeletedParam==='1'){
+  showToast('Sua conta e os dados pessoais vinculados foram excluídos.','success',{duration:7000});
+  const url=new URL(location.href);
+  url.searchParams.delete('accountDeleted');
+  history.replaceState(null,'',url.pathname+url.search+url.hash);
+}
+
 
 function installDialogDismissal(){
   $$('dialog').forEach(dialog=>{

@@ -77,15 +77,23 @@ watchCustomer(async user=>{
     return;
   }
   try{
-    const [orderSnap,settingsSnap]=await Promise.all([
+    const [orderSnap,privateSnap,settingsSnap]=await Promise.all([
       getDoc(doc(db,'orders',id)),
+      getDoc(doc(db,'orderPrivate',id)),
       getDoc(doc(db,'settings','store'))
     ]);
     if(!orderSnap.exists()){
       $('#customerReceipt').innerHTML='<div class="alert alert-error">Pedido não encontrado.</div>';
       return;
     }
-    render({id:orderSnap.id,...orderSnap.data()},settingsSnap.exists()?settingsSnap.data():{});
+    const operational=orderSnap.data()||{};
+    const privateData=privateSnap.exists()?privateSnap.data():{};
+    render({
+      id:orderSnap.id,
+      ...operational,
+      customer:privateData.customer||operational.customer||null,
+      address:privateData.address||operational.address||null
+    },settingsSnap.exists()?settingsSnap.data():{});
   }catch(err){
     console.error(err);
     $('#customerReceipt').innerHTML='<div class="alert alert-error">Não foi possível carregar este comprovante.</div>';

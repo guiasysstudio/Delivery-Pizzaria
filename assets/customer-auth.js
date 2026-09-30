@@ -40,6 +40,7 @@ googleProvider.setCustomParameters({prompt:'select_account'});
 
 const CUSTOMER_IDENTITY_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/customerIdentity';
 const CUSTOMER_CANCEL_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/cancelCustomerOrder';
+const CUSTOMER_DELETE_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/deleteCustomerAccount';
 
 export function normalizeCpf(value){
   return String(value||'').replace(/\D/g,'').slice(0,11);
@@ -87,6 +88,14 @@ export function validFullName(value){
   return String(value||'').trim().split(/\s+/).filter(Boolean).length>=2;
 }
 
+export function validCustomerPassword(value){
+  const password=String(value||'');
+  return password.length>=8 &&
+    password.length<=128 &&
+    /[A-Za-z]/.test(password) &&
+    /\d/.test(password);
+}
+
 async function authenticatedJson(endpoint,options={}){
   await authPersistenceReady;
   const user=auth.currentUser;
@@ -121,6 +130,13 @@ export async function cancelCustomerOrder(orderId){
   return authenticatedJson(CUSTOMER_CANCEL_ENDPOINT,{
     method:'POST',
     body:JSON.stringify({orderId:String(orderId||'')})
+  });
+}
+
+export async function deleteCustomerAccount(){
+  return authenticatedJson(CUSTOMER_DELETE_ENDPOINT,{
+    method:'POST',
+    body:JSON.stringify({confirmation:'EXCLUIR'})
   });
 }
 
@@ -164,6 +180,11 @@ export async function loginWithEmail(email,password){
 
 export async function registerWithEmail({name,email,password,phone='' }){
   await authPersistenceReady;
+  if(!validCustomerPassword(password)){
+    const err=new Error('weak-password');
+    err.code='auth/weak-password';
+    throw err;
+  }
   const normalizedEmail=email.trim().toLowerCase();
   if(normalizedEmail.endsWith('@delivery-pizzaria.local')){
     const err=new Error('reserved-domain');
@@ -200,7 +221,6 @@ export async function ensureCustomerProfile(user,extra={}){
   if(!snap.exists()){
     await setDoc(ref,{
       name:extra.name||user.displayName||'',
-      email:user.email||'',
       phone:extra.phone||'',
       photoURL:user.photoURL||'',
       defaultAddressId:null,
@@ -367,7 +387,7 @@ export function friendlyAuthError(err){
   if(code.includes('unauthorized-domain')) return 'Este domínio ainda não foi autorizado no Firebase Authentication.';
   if(code.includes('invalid-credential')||code.includes('wrong-password')||code.includes('user-not-found')) return 'E-mail ou senha inválidos.';
   if(code.includes('email-already-in-use')) return 'Já existe uma conta com este e-mail.';
-  if(code.includes('weak-password')) return 'Use uma senha com pelo menos 6 caracteres.';
+  if(code.includes('weak-password')) return 'Use uma senha com pelo menos 8 caracteres, incluindo letra e número.';
   if(code.includes('invalid-email')) return 'Informe um e-mail válido.';
   if(code.includes('too-many-requests')) return 'Muitas tentativas. Aguarde alguns minutos e tente novamente.';
   return 'Não foi possível concluir a operação. Tente novamente.';

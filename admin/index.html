@@ -113,7 +113,7 @@
 
 
       <section id="view-customers" class="admin-view">
-        <div class="panel"><div class="panel-head"><div class="filters"><input id="customerSearch" type="search" placeholder="Buscar cliente, telefone ou e-mail"></div></div><div id="customersTable" class="data-list"></div></div>
+        <div class="panel"><div class="panel-head"><div class="filters"><input id="customerSearch" type="search" placeholder="Buscar referência do cliente"></div></div><div id="customersTable" class="data-list"></div></div>
       </section>
 
       <section id="view-printing" class="admin-view">
@@ -373,7 +373,7 @@
       <input id="userUid" type="hidden" />
       <label class="field"><span>Nome</span><input id="userDisplayName" maxlength="80" placeholder="Ex.: Caixa noite" /></label>
       <label class="field"><span>Usuário *</span><input id="userUsername" required maxlength="32" autocapitalize="none" spellcheck="false" placeholder="Ex.: caixa" /></label>
-      <label class="field" id="userPasswordField"><span>Senha *</span><input id="userPassword" type="password" minlength="6" autocomplete="new-password" /></label>
+      <label class="field" id="userPasswordField"><span>Senha *</span><input id="userPassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" /><small class="muted">Mínimo de 10 caracteres, com letra e número.</small></label>
       <label class="field"><span>Perfil</span><select id="userRole"><option value="cashier">Caixa</option><option value="kitchen">Cozinha</option><option value="delivery">Entrega</option><option value="operator">Operador</option><option value="manager">Gerente</option><option value="master">Master</option></select></label>
       <label class="check-row"><input id="userActive" type="checkbox" checked /><span>Usuário ativo</span></label>
       <p class="muted" id="userEditorHelp">O novo usuário será criado ativo. Depois, use a lista para ativar/desativar, trocar a senha ou excluir.</p>
@@ -389,8 +389,8 @@
       <h2>Trocar senha</h2>
       <p class="muted">Alterando a senha de <strong id="userPasswordTargetName">Usuário</strong>.</p>
       <input id="userPasswordTargetUid" type="hidden" />
-      <label class="field"><span>Nova senha *</span><input id="userNewPassword" type="password" minlength="6" maxlength="128" autocomplete="new-password" required /></label>
-      <label class="field"><span>Confirmar nova senha *</span><input id="userConfirmPassword" type="password" minlength="6" maxlength="128" autocomplete="new-password" required /></label>
+      <label class="field"><span>Nova senha *</span><input id="userNewPassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required /><small class="muted">Mínimo de 10 caracteres, com letra e número.</small></label>
+      <label class="field"><span>Confirmar nova senha *</span><input id="userConfirmPassword" type="password" minlength="10" maxlength="128" autocomplete="new-password" required /></label>
       <div id="userPasswordError" class="alert alert-error hidden"></div>
       <button id="saveUserPasswordBtn" class="btn btn-primary btn-block" type="submit">Alterar senha</button>
     </form>

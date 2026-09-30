@@ -1,7 +1,8 @@
-const CACHE_NAME='delivery-pizzaria-v16';
+const CACHE_NAME='delivery-pizzaria-v17';
 const SHELL=[
   './',
   './index.html',
+  './privacy.html',
   './manifest.webmanifest',
   './firebase-config.js',
   './assets/styles.css',
