@@ -36,6 +36,7 @@
         <button class="account-nav-item" data-section="orders" type="button"><span class="ui-icon icon-receipt-text" aria-hidden="true"></span><span>Meus pedidos</span></button>
         <button class="account-nav-item" data-section="coupons" type="button"><span class="ui-icon icon-ticket-percent" aria-hidden="true"></span><span>Cupons</span></button>
         <button class="account-nav-item" data-section="favorites" type="button"><span class="ui-icon icon-heart" aria-hidden="true"></span><span>Favoritos</span></button>
+        <button class="account-nav-item" data-section="privacy" type="button"><span class="ui-icon icon-shield-check" aria-hidden="true"></span><span>Privacidade e dados</span></button>
         <div class="account-nav-divider"></div>
         <button id="switchAccountBtn" class="account-nav-item account-nav-action" type="button"><span class="ui-icon icon-repeat-2" aria-hidden="true"></span><span>Trocar usuário</span></button>
         <button id="accountLogoutBtn" class="account-nav-item account-nav-action danger" type="button"><span class="ui-icon icon-log-out" aria-hidden="true"></span><span>Sair</span></button>
@@ -96,6 +97,24 @@
       <section id="account-section-favorites" class="account-section hidden">
         <div class="section-heading"><div><span class="eyebrow">SALVOS</span><h1>Favoritos</h1></div></div>
         <div id="accountFavoritesList" class="catalog-grid"></div>
+      </section>
+
+      <section id="account-section-privacy" class="account-section hidden">
+        <div class="section-heading"><div><span class="eyebrow">PRIVACIDADE</span><h1>Seus dados</h1></div></div>
+        <div class="panel settings-card">
+          <h2>Como seus dados são usados</h2>
+          <p class="muted">Nome, telefone e endereços são usados para atendimento e entrega. O CPF é validado para identificação única, mas o sistema não mantém o número bruto após a validação; ele fica representado por dados técnicos protegidos no servidor.</p>
+          <p class="muted">Dados pessoais do cadastro não ficam disponíveis na ficha administrativa. Quando um pedido exige contato ou entrega, somente perfis operacionais autorizados podem carregar esses dados.</p>
+          <p><a href="../privacy.html" target="_blank" rel="noopener">Ler Aviso de Privacidade</a></p>
+          <div class="section-actions">
+            <button id="exportMyDataBtn" class="btn btn-secondary" type="button">Baixar meus dados</button>
+          </div>
+        </div>
+        <div class="panel settings-card" style="margin-top:16px">
+          <h2>Excluir minha conta</h2>
+          <p class="muted">A exclusão remove perfil, endereços, favoritos, cupons pessoais e dados de identificação. Registros financeiros de pedidos já realizados podem ser preservados sem seus dados de contato, quando necessários para histórico operacional, contábil ou cumprimento de obrigação legal.</p>
+          <button id="deleteMyAccountBtn" class="btn btn-danger" type="button">Excluir minha conta</button>
+        </div>
       </section>
     </section>
   </main>
