@@ -10,6 +10,7 @@ const SHELL=[
   './assets/styles.css',
   './assets/app.js',
   './assets/customer-auth.js',
+  './assets/cep.js',
   './assets/ui.js',
   './assets/print-agent-version.json',
   './assets/app-icon.svg',
