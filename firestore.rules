@@ -193,7 +193,8 @@ service cloud.firestore {
     }
 
     match /roles/{roleId} {
-      allow read: if activeStaff();
+      allow get: if activeStaff() && (isMaster() || staff().role == roleId);
+      allow list: if isMaster();
       allow create, update, delete: if false;
     }
 
