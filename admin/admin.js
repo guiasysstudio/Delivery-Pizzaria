@@ -121,6 +121,7 @@ const defaultRoleTemplates={
 
 let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=[],promotions=[],coupons=[],cashSessions=[],cashMovements=[],currentCashSession=null,currentProfile=null;
 let unsubscribeOrders=null,unsubscribeCashState=null,unsubscribeCashSession=null,unsubscribeCashMovements=null,cashLiveSessionId='',soundEnabled=localStorage.getItem('deliverySoundEnabled')==='1',knownOrderIds=new Set();
+let cashOpenRequestId='',cashOpenFingerprint='',cashMovementRequestId='',cashMovementFingerprint='',cashCloseRevision=0;
 
 function renderSoundButton(){
   const button=$('#soundBtn');
@@ -2300,9 +2301,6 @@ function renderCash(){
   }).join(''):emptyStateHtml({icon:'wallet-cards',title:'Nenhum caixa registrado',description:'O histórico de aberturas e fechamentos aparecerá aqui.'});
 }
 
-let cashOpenRequestId='';
-let cashOpenFingerprint='';
-
 $('#openCashBtn')?.addEventListener('click',async()=>{
   if(!hasPermission('cashOperate')) return;
   const openingAmount=Number($('#cashOpeningAmount').value||0);
@@ -2351,9 +2349,6 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
     button.disabled=false;
   }
 });
-
-let cashMovementRequestId='';
-let cashMovementFingerprint='';
 
 function openCashMovement(type){
   if(!hasPermission('cashOperate')||!currentCashSession) return;
@@ -2417,8 +2412,6 @@ $('#cashMovementForm')?.addEventListener('submit',async e=>{
     if(submit) submit.disabled=false;
   }
 });
-
-let cashCloseRevision=0;
 
 function refreshCashClosePreview({resetDeclared=false}={}){
   if(!currentCashSession) return false;
