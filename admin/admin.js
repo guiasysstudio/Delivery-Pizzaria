@@ -152,7 +152,19 @@ let printConfig={
   model:localStorage.getItem('deliveryPrintModel')||'thermal80'
 };
 const PRINT_AGENT='http://127.0.0.1:17329';
-const MIN_PRINT_AGENT_VERSION='1.4.0';
+const PRINT_AGENT_VERSION_MANIFEST='../assets/print-agent-version.json';
+const FALLBACK_PRINT_AGENT_VERSION='1.4.0';
+const PRINT_AGENT_UPDATE_INTERVAL_MS=15*60*1000;
+let printAgentReleaseInfo={
+  latestVersion:FALLBACK_PRINT_AGENT_VERSION,
+  minimumVersion:FALLBACK_PRINT_AGENT_VERSION,
+  downloadUrl:'https://github.com/guiasysstudio/Delivery-Pizzaria/releases/download/print-agent-latest/DeliveryPizzaria-PrintAgent-win-x64.zip',
+  message:'Há uma nova versão do Print Agent disponível.'
+};
+let printAgentReleaseLoaded=false;
+let printAgentReleasePromise=null;
+let printAgentUpdateTimer=null;
+let promptedPrintAgentVersion='';
 const IMAGE_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadProductImage';
 const STORE_LOGO_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadStoreLogo';
 const STAFF_USER_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageStaffUser';
@@ -437,7 +449,10 @@ async function initializeAdmin(){
 
   if(hasPermission('printingManage')){
     loadPrintSettingsUI();
+    await loadPrintAgentReleaseInfo();
     checkPrintAgent();
+    detectPrintAgentUpdate({showPrompt:true});
+    startPrintAgentUpdateWatch();
   }
 
   if(hasPermission('cashView')) renderCash();
@@ -1232,9 +1247,119 @@ function versionAtLeast(current,minimum){
   return true;
 }
 
+function validAgentVersion(value){
+  return /^\d+\.\d+\.\d+$/.test(String(value||''));
+}
+
+async function loadPrintAgentReleaseInfo(force=false){
+  if(printAgentReleaseLoaded&&!force) return printAgentReleaseInfo;
+  if(printAgentReleasePromise&&!force) return printAgentReleasePromise;
+
+  printAgentReleasePromise=(async()=>{
+    try{
+      const response=await fetch(
+        PRINT_AGENT_VERSION_MANIFEST+(force?'?t='+Date.now():''),
+        {cache:'no-store'}
+      );
+      if(!response.ok) throw new Error('version-manifest');
+      const data=await response.json();
+
+      const latest=validAgentVersion(data.latestVersion)
+        ?String(data.latestVersion)
+        :FALLBACK_PRINT_AGENT_VERSION;
+      const minimum=validAgentVersion(data.minimumVersion)
+        ?String(data.minimumVersion)
+        :latest;
+
+      printAgentReleaseInfo={
+        latestVersion:latest,
+        minimumVersion:minimum,
+        downloadUrl:String(data.downloadUrl||printAgentReleaseInfo.downloadUrl),
+        publishedAt:String(data.publishedAt||''),
+        message:String(data.message||'Há uma nova versão do Print Agent disponível.')
+      };
+      printAgentReleaseLoaded=true;
+    }catch(err){
+      console.warn('Não foi possível consultar a versão publicada do Print Agent.',err);
+    }finally{
+      printAgentReleasePromise=null;
+    }
+
+    const latestHost=$('#printerAgentLatestVersion');
+    if(latestHost) latestHost.textContent=printAgentReleaseInfo.latestVersion;
+
+    const download=$('#downloadPrintAgentBtn');
+    if(download&&printAgentReleaseInfo.downloadUrl){
+      download.href=printAgentReleaseInfo.downloadUrl;
+    }
+
+    return printAgentReleaseInfo;
+  })();
+
+  return printAgentReleasePromise;
+}
+
+function closePrintAgentUpdateDialog(){
+  const dialog=$('#printAgentUpdateDialog');
+  if(dialog?.open) dialog.close();
+}
+
+function showPrintAgentUpdateDialog(agentVersion,releaseInfo,required){
+  const dialog=$('#printAgentUpdateDialog');
+  if(!dialog||dialog.open) return;
+
+  $('#printAgentUpdateCurrentVersion').textContent=agentVersion||'Versão antiga';
+  $('#printAgentUpdateLatestVersion').textContent=releaseInfo.latestVersion;
+  $('#printAgentUpdateMessage').textContent=releaseInfo.message||
+    'Existe uma versão mais recente do Print Agent disponível.';
+  $('#printAgentUpdateRequiredNote').classList.toggle('hidden',!required);
+
+  dialog.showModal();
+}
+
+async function detectPrintAgentUpdate({forceManifest=false,showPrompt=true}={}){
+  const releaseInfo=await loadPrintAgentReleaseInfo(forceManifest);
+
+  try{
+    const response=await fetch(PRINT_AGENT+'/printers',{cache:'no-store'});
+    if(!response.ok) throw new Error('agent');
+    const data=await response.json();
+    const agentVersion=String(data.version||data.agentVersion||'0.0.0');
+
+    if(!validAgentVersion(agentVersion)) return {connected:true,outdated:true,required:true,agentVersion};
+
+    const outdated=!versionAtLeast(agentVersion,releaseInfo.latestVersion);
+    const required=!versionAtLeast(agentVersion,releaseInfo.minimumVersion);
+
+    if(
+      outdated &&
+      showPrompt &&
+      promptedPrintAgentVersion!==releaseInfo.latestVersion
+    ){
+      promptedPrintAgentVersion=releaseInfo.latestVersion;
+      showPrintAgentUpdateDialog(agentVersion,releaseInfo,required);
+    }
+
+    return {connected:true,outdated,required,agentVersion};
+  }catch{
+    return {connected:false,outdated:false,required:false,agentVersion:''};
+  }
+}
+
+function startPrintAgentUpdateWatch(){
+  if(printAgentUpdateTimer) clearInterval(printAgentUpdateTimer);
+  printAgentUpdateTimer=setInterval(()=>{
+    if(document.visibilityState==='visible'){
+      detectPrintAgentUpdate({forceManifest:true,showPrompt:true});
+    }
+  },PRINT_AGENT_UPDATE_INTERVAL_MS);
+}
+
 async function checkPrintAgent(){
   const status=$('#printerAgentStatus');
   if(!status) return false;
+
+  const releaseInfo=await loadPrintAgentReleaseInfo();
 
   try{
     const response=await fetch(PRINT_AGENT+'/printers',{cache:'no-store'});
@@ -1246,26 +1371,35 @@ async function checkPrintAgent(){
     const selectedPrinter=String(data.selectedPrinter||'').trim();
     const agentVersion=String(data.version||data.agentVersion||'0.0.0');
 
-    if(!supportsAgentPrinter||!versionAtLeast(agentVersion,MIN_PRINT_AGENT_VERSION)){
+    const requiredVersion=releaseInfo.minimumVersion||FALLBACK_PRINT_AGENT_VERSION;
+    const latestVersion=releaseInfo.latestVersion||requiredVersion;
+    const outdated=!versionAtLeast(agentVersion,latestVersion);
+    const required=!versionAtLeast(agentVersion,requiredVersion);
+
+    if(!supportsAgentPrinter||required){
       status.textContent='● Print Agent desatualizado';
       status.classList.add('off');
       status.classList.remove('ok');
-      if($('#printerAgentInfoState')) $('#printerAgentInfoState').textContent='Atualize para a versão '+MIN_PRINT_AGENT_VERSION+' ou superior';
+      if($('#printerAgentInfoState')) $('#printerAgentInfoState').textContent='Atualização obrigatória • versão '+requiredVersion+' ou superior';
       if($('#printerAgentVersion')) $('#printerAgentVersion').textContent=agentVersion==='0.0.0'?'Versão antiga':agentVersion;
+      if($('#printerAgentLatestVersion')) $('#printerAgentLatestVersion').textContent=latestVersion;
       return false;
     }
 
-    status.textContent='● Print Agent conectado';
-    status.classList.add('ok');
-    status.classList.remove('off');
+    status.textContent=outdated?'● Print Agent com atualização disponível':'● Print Agent conectado';
+    status.classList.toggle('ok',!outdated);
+    status.classList.toggle('off',outdated);
     if($('#printerAgentInfoState')){
-      $('#printerAgentInfoState').textContent=selectedPrinter
-        ?'Pronto • '+selectedPrinter
-        :printers.length
-          ?'Escolha uma impressora no Print Agent'
-          :'Nenhuma impressora instalada';
+      $('#printerAgentInfoState').textContent=outdated
+        ?'Atualização recomendada • versão '+latestVersion
+        :selectedPrinter
+          ?'Pronto • '+selectedPrinter
+          :printers.length
+            ?'Escolha uma impressora no Print Agent'
+            :'Nenhuma impressora instalada';
     }
     if($('#printerAgentVersion')) $('#printerAgentVersion').textContent=data.version||data.agentVersion||'Conectado';
+    if($('#printerAgentLatestVersion')) $('#printerAgentLatestVersion').textContent=latestVersion;
     return true;
   }catch(err){
     status.textContent='● Print Agent desconectado';
@@ -1273,6 +1407,7 @@ async function checkPrintAgent(){
     status.classList.remove('ok');
     if($('#printerAgentInfoState')) $('#printerAgentInfoState').textContent='Sem conexão';
     if($('#printerAgentVersion')) $('#printerAgentVersion').textContent='—';
+    if($('#printerAgentLatestVersion')) $('#printerAgentLatestVersion').textContent=releaseInfo.latestVersion||'—';
     return false;
   }
 }
@@ -1448,6 +1583,20 @@ $('#saveAutoAcceptBtn')?.addEventListener('click',async()=>{
   }catch(err){
     console.error(err);
     showToast('Você não tem permissão para alterar o modo de confirmação.','error');
+  }
+});
+
+$('#printAgentUpdateClose')?.addEventListener('click',closePrintAgentUpdateDialog);
+$('#printAgentUpdateLater')?.addEventListener('click',closePrintAgentUpdateDialog);
+$('#printAgentUpdateGo')?.addEventListener('click',()=>{
+  closePrintAgentUpdateDialog();
+  if(hasPermission('printingManage')){
+    switchView('printing');
+    setTimeout(()=>{
+      $('#printerAgentStatus')?.scrollIntoView({behavior:'smooth',block:'center'});
+    },80);
+  }else{
+    showToast('Solicite a um usuário com permissão de impressão para atualizar o Print Agent.','warning');
   }
 });
 
