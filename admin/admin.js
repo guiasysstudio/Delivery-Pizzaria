@@ -1263,9 +1263,17 @@ function deliveryPricingText(order){
   return `Frete fixo • ${money(order.deliveryFee)}`;
 }
 
-function openOrder(id){
-  const o=orders.find(x=>x.id===id);
-  if(!o) return;
+async function openOrder(id){
+  const raw=orders.find(x=>x.id===id);
+  if(!raw) return;
+
+  let o;
+  try{
+    o=await hydrateOrderPrivate(raw);
+  }catch(err){
+    console.error('Falha ao carregar dados operacionais do pedido.',err);
+    o={...raw};
+  }
 
   const address=orderAddressText(o);
   const changeInfo=o.payment?.needsChange
