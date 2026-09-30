@@ -1,7 +1,7 @@
 import {
   auth, authPersistenceReady, db, watchCustomer, loginWithGoogle, loginWithEmail, registerWithEmail,
   resetCustomerPassword, friendlyAuthError, lookupBrazilianZip, getCustomerProfile, saveCustomerProfile, getAddresses,
-  saveAddress, setDefaultAddress, getFavorites, setFavorite, saveCustomerIdentity,
+  saveAddress, setDefaultAddress, getFavorites, setFavorite, saveCustomerIdentity, deleteCustomerAccount, logoutCustomer,
   formatCpf, validCpf, formatPhone, validPhone, validFullName, validCustomerPassword
 } from './customer-auth.js';
 import {
@@ -1491,6 +1491,18 @@ $('#registerCustomerForm').onsubmit=async e=>{
       :code.includes('invalid_cpf')
         ?'Informe um CPF válido.'
         :friendlyAuthError(err);
+
+    if(code.includes('cpf_already_registered')&&auth.currentUser){
+      try{
+        await deleteCustomerAccount();
+      }catch(cleanupError){
+        console.warn('Não foi possível remover automaticamente o cadastro incompleto.',cleanupError);
+        await logoutCustomer().catch(()=>{});
+      }
+      $('#registerAuthError').textContent=message+' Entre com a conta já vinculada a este CPF.';
+      $('#registerAuthError').classList.remove('hidden');
+      return;
+    }
 
     if(auth.currentUser&&!code.startsWith('auth/')){
       showToast(message+' Sua conta foi criada, mas o cadastro precisa ser concluído em Minha Conta.','warning',{duration:7000});
