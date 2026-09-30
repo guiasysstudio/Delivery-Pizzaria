@@ -948,8 +948,8 @@ $('#storeLogoFile')?.addEventListener('change',async e=>{
     const result=await response.json().catch(()=>({}));
     if(!response.ok) throw new Error(result?.message||result?.error||'upload');
 
-    $('#setStoreLogo').value=result.path;
-    $('#storeLogoStatus').textContent='Logo enviada com sucesso.';
+    $('#setStoreLogo').value=result.publicUrl||result.path;
+    $('#storeLogoStatus').textContent='Logo enviada com sucesso e disponível imediatamente.';
     renderStoreLogoPreview();
   }catch(err){
     console.error(err);
@@ -2841,8 +2841,8 @@ $('#uploadProductImageBtn')?.addEventListener('click',async()=>{
     const result=await response.json().catch(()=>({}));
     if(!response.ok) throw new Error(result?.message||result?.error||'upload');
 
-    $('#productImage').value=result.path;
-    status.innerHTML='Imagem enviada com sucesso para <strong>'+esc(result.path)+'</strong>.';
+    $('#productImage').value=result.publicUrl||result.path;
+    status.innerHTML='Imagem enviada com sucesso e disponível imediatamente.';
   }catch(err){
     console.error(err);
     status.textContent='O serviço seguro de imagens ainda não está ativado ou falhou. Você pode baixar a imagem recortada enquanto isso.';
