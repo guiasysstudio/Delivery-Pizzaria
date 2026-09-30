@@ -39,6 +39,9 @@ jobs:
       - name: Test Module 4 Firebase production
         run: node tests/module4-firebase-production.mjs
 
+      - name: Test Module 5 Print Agent, PWA and publication
+        run: node tests/module5-print-pwa-publication.mjs
+
       - name: Run Firebase production preflight
         run: node scripts/production-preflight.mjs
 
@@ -236,6 +239,9 @@ jobs:
         run: |
           test -f index.html
           test -f privacy.html
+          test -f offline.html
+          test -f robots.txt
+          test -f sitemap.xml
           test -f admin/index.html
           test -f account/index.html
           test -f account/receipt.html

@@ -150,12 +150,12 @@ let printConfig={
 };
 const PRINT_AGENT='http://127.0.0.1:17329';
 const PRINT_AGENT_VERSION_MANIFEST='../assets/print-agent-version.json';
-const FALLBACK_PRINT_AGENT_VERSION='1.4.0';
+const FALLBACK_PRINT_AGENT_VERSION='1.7.0';
 const PRINT_AGENT_UPDATE_INTERVAL_MS=15*60*1000;
 let printAgentReleaseInfo={
   latestVersion:FALLBACK_PRINT_AGENT_VERSION,
   minimumVersion:FALLBACK_PRINT_AGENT_VERSION,
-  downloadUrl:'https://github.com/guiasysstudio/Delivery-Pizzaria/releases/download/print-agent-latest/DeliveryPizzaria-PrintAgent-win-x64.zip',
+  downloadUrl:'https://github.com/guiasysstudio/Delivery-Pizzaria/releases/download/print-agent-v1.7.0/DeliveryPizzaria-PrintAgent-win-x64.zip',
   message:'Há uma nova versão do Print Agent disponível.'
 };
 let printAgentReleaseLoaded=false;

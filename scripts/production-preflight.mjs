@@ -47,6 +47,7 @@ for(const name of expectedExports){
 }
 
 for(const origin of [
+  'https://pizzaria.guiasys.online',
   'https://delivery-pizzaria-f5b08.web.app',
   'https://delivery-pizzaria-f5b08.firebaseapp.com'
 ]){
@@ -72,6 +73,9 @@ const bundle=join(root,'.firebase-hosting');
 for(const required of [
   'index.html',
   'privacy.html',
+  'offline.html',
+  'robots.txt',
+  'sitemap.xml',
   'manifest.webmanifest',
   'service-worker.js',
   'firebase-config.js',

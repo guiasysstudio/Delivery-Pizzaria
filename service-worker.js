@@ -1,8 +1,10 @@
-const CACHE_NAME='delivery-pizzaria-v17';
+const CACHE_NAME='delivery-pizzaria-v18';
+const OFFLINE_URL='./offline.html';
 const SHELL=[
   './',
   './index.html',
   './privacy.html',
+  OFFLINE_URL,
   './manifest.webmanifest',
   './firebase-config.js',
   './assets/styles.css',
@@ -88,11 +90,14 @@ async function networkFirst(req,fallback){
     const response=await fetch(req);
     if(response.ok){
       const cache=await caches.open(CACHE_NAME);
-      cache.put(req,response.clone());
+      await cache.put(req,response.clone());
+      return response;
     }
-    return response;
+    throw new Error('network-response-'+response.status);
   }catch{
-    return (await caches.match(req)) || (fallback?await caches.match(fallback):undefined) || Response.error();
+    return (await caches.match(req,{ignoreSearch:true})) ||
+      (fallback?await caches.match(fallback):undefined) ||
+      Response.error();
   }
 }
 
@@ -103,8 +108,17 @@ self.addEventListener('fetch',event=>{
   const url=new URL(req.url);
   if(url.origin!==self.location.origin) return;
 
+  // API e conteúdo operacional nunca devem ser atendidos por cache do PWA.
+  if(url.pathname.startsWith('/api/')) return;
+
+  // A versão do Print Agent precisa ficar fresca para bloquear versões incompatíveis.
+  if(url.pathname.endsWith('/assets/print-agent-version.json')){
+    event.respondWith(networkFirst(req));
+    return;
+  }
+
   if(req.mode==='navigate'){
-    event.respondWith(networkFirst(req,'./index.html'));
+    event.respondWith(networkFirst(req,OFFLINE_URL));
     return;
   }
 

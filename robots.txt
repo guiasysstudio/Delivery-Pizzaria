@@ -1,6 +1,6 @@
 User-agent: *
 Allow: /
-Disallow: /Delivery-Pizzaria/admin/
-Disallow: /Delivery-Pizzaria/account/
+Disallow: /admin/
+Disallow: /account/
 
-Sitemap: https://guiasysstudio.github.io/Delivery-Pizzaria/sitemap.xml
+Sitemap: https://pizzaria.guiasys.online/sitemap.xml
