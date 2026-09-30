@@ -46,6 +46,9 @@ jobs:
       - name: Test Module 6 scale and final adversarial audit
         run: node tests/module6-scale-final-audit.mjs
 
+      - name: Test public profile save fallback
+        run: node tests/profile-save-fallback.mjs
+
       - name: Run Firebase production preflight
         run: node scripts/production-preflight.mjs
 
