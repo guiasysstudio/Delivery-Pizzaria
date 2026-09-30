@@ -97,19 +97,19 @@ const defaultRoleTemplates={
   kitchen:{name:'Cozinha',permissions:{
     ordersView:true,ordersAccept:false,ordersPrepare:true,ordersDispatch:false,ordersComplete:false,ordersCancel:false,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
-    promotionsManage:false,couponsManage:false,customersView:false,customersEdit:false,printingManage:false,cashView:false,cashOperate:false,
+    promotionsManage:false,couponsManage:false,customersView:false,printingManage:false,cashView:false,cashOperate:false,
     settingsManage:false
   }},
   delivery:{name:'Entrega',permissions:{
     ordersView:true,ordersAccept:false,ordersPrepare:false,ordersDispatch:true,ordersComplete:true,ordersCancel:false,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
-    promotionsManage:false,couponsManage:false,customersView:false,customersEdit:false,printingManage:false,cashView:false,cashOperate:false,
+    promotionsManage:false,couponsManage:false,customersView:false,printingManage:false,cashView:false,cashOperate:false,
     settingsManage:false
   }},
   operator:{name:'Operador',permissions:{
     ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
-    promotionsManage:false,couponsManage:false,customersView:false,customersEdit:false,printingManage:false,cashView:false,cashOperate:false,
+    promotionsManage:false,couponsManage:false,customersView:false,printingManage:false,cashView:false,cashOperate:false,
     settingsManage:false
   }}
 };
@@ -493,26 +493,33 @@ async function initializeAdmin(){
   if(hasPermission('cashView')) renderCash();
   renderSoundButton();
 }
+async function staffRoleAdminAction(action,payload={}){
+  const user=auth.currentUser;
+  if(!user) throw Object.assign(new Error('auth-required'),{code:'auth-required'});
+  const token=await user.getIdToken();
+  const response=await fetch(STAFF_ROLE_ADMIN_ENDPOINT,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:JSON.stringify({action,...payload})
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok){
+    const err=new Error(data?.error||'staff-role-action-failed');
+    err.code=data?.error||'staff-role-action-failed';
+    throw err;
+  }
+  return data;
+}
+
 async function loadRoles(){
   try{
-    const snap=await getDocs(collection(db,'roles'));
+    let snap=await getDocs(collection(db,'roles'));
     roles=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
 
     if(!roles.length&&isMaster()){
-      const batch=writeBatch(db);
-      for(const [id,template] of Object.entries(defaultRoleTemplates)){
-        batch.set(doc(db,'roles',id),{
-          name:template.name,
-          permissions:template.permissions,
-          system:true,
-          active:true,
-          createdAt:serverTimestamp(),
-          updatedAt:serverTimestamp()
-        });
-      }
-      await batch.commit();
-      const seeded=await getDocs(collection(db,'roles'));
-      roles=seeded.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+      await staffRoleAdminAction('seedDefaults');
+      snap=await getDocs(collection(db,'roles'));
+      roles=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
     }
   }catch(err){
     console.warn('Perfis personalizados ainda não disponíveis. Usando perfis padrão.',err);
@@ -1705,7 +1712,7 @@ $('#testPrintBtn')?.addEventListener('click',async()=>{
 /* ===== Perfis de acesso ===== */
 function renderRoles(){
   const table=$('#rolesTable');
-  if(!table) return;
+  if(!table||!isMaster()) return;
   const list=roles.filter(r=>r.id!=='master');
   table.innerHTML=list.length?list.map(r=>{
     const enabled=Object.values(r.permissions||{}).filter(Boolean).length;
@@ -1757,7 +1764,7 @@ function renderPermissionEditor(selected={}){
 }
 
 function editRole(id=null){
-  if(!hasPermission('rolesManage')) return;
+  if(!isMaster()) return;
   const role=roles.find(r=>r.id===id);
   $('#roleEditorTitle').textContent=role?'Editar perfil':'Novo perfil';
   $('#roleId').value=role?.id||'';
@@ -1771,7 +1778,7 @@ $('#newRoleBtn')?.addEventListener('click',()=>editRole());
 
 $('#roleEditorForm')?.addEventListener('submit',async e=>{
   e.preventDefault();
-  if(!hasPermission('rolesManage')) return;
+  if(!isMaster()) return;
   const id=$('#roleId').value;
   const name=$('#roleName').value.trim();
   if(!name){
@@ -1783,14 +1790,11 @@ $('#roleEditorForm')?.addEventListener('submit',async e=>{
   $$('[data-permission]').forEach(input=>permissions[input.dataset.permission]=input.checked);
   permissions=withPermissionDependencies(permissions);
   try{
-    if(id){
-      await updateDoc(doc(db,'roles',id),{name,permissions,active:true,updatedAt:serverTimestamp()});
-    }else{
-      await addDoc(collection(db,'roles'),{name,permissions,active:true,system:false,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
-    }
+    const roleId=id||('role-'+crypto.randomUUID().replace(/-/g,'').slice(0,12));
+    await staffRoleAdminAction('save',{roleId,name,permissions,active:true});
     $('#roleEditor').close();
     await loadRoles();
-    if(hasPermission('usersManage')) await loadUsers();
+    await loadUsers();
   }catch(err){
     console.error(err);
     $('#roleEditorError').textContent='Não foi possível salvar o perfil.';
@@ -1799,13 +1803,21 @@ $('#roleEditorForm')?.addEventListener('submit',async e=>{
 });
 
 async function deleteRole(id){
-  if(!hasPermission('rolesManage')) return;
+  if(!isMaster()) return;
   if(users.some(u=>u.role===id)) return showToast('Este perfil está sendo usado por um ou mais usuários. Troque o perfil desses usuários antes de excluir.','warning');
   const role=roles.find(r=>r.id===id);
   if(!role||role.system) return;
   if(!await confirmAction(`Excluir o perfil “${role.name}”?`,{title:'Excluir perfil',confirmText:'Excluir',danger:true})) return;
-  await deleteDoc(doc(db,'roles',id));
-  await loadRoles();
+  try{
+    await staffRoleAdminAction('delete',{roleId:id});
+    await loadRoles();
+  }catch(err){
+    console.error(err);
+    const code=String(err?.code||'');
+    if(code.includes('role_in_use')) showToast('Este perfil ainda está associado a um usuário.','warning');
+    else if(code.includes('system_role')) showToast('Perfis padrão não podem ser excluídos.','warning');
+    else showToast('Não foi possível excluir o perfil.','error');
+  }
 }
 
 /* ===== Promoções ===== */
