@@ -696,7 +696,7 @@ function notifyNewOrder(o){
   if(soundEnabled) beep();
   if('Notification' in window&&Notification.permission==='granted'){
     new Notification(`Novo pedido #${String(o.orderNumber||'').padStart(4,'0')}`,{
-      body:`${o.customer?.name||'Cliente'} • ${money(o.total)}`
+      body:`${o.fulfillment==='pickup'?'Retirada':'Entrega'} • ${money(o.total)}`
     });
   }
 }
@@ -1335,7 +1335,7 @@ async function openOrder(id){
     </div>
 
     <div class="section-actions" style="margin-top:16px">
-      <button class="btn btn-secondary icon-button-label" id="printOrderBtn" type="button">${iconHtml('printer')}<span>Imprimir comanda</span></button>
+      ${staffCanViewOrderPrivate()?`<button class="btn btn-secondary icon-button-label" id="printOrderBtn" type="button">${iconHtml('printer')}<span>Imprimir comanda</span></button>`:''}
     </div>
   `;
 
@@ -1351,7 +1351,7 @@ async function openOrder(id){
 
   $$('.quick-status').forEach(b=>b.onclick=()=>changeStatus(b.dataset.status));
   $$('.status-change').forEach(b=>b.onclick=()=>changeStatus(b.dataset.status));
-  $('#printOrderBtn').onclick=()=>printOrder(o,false);
+  if($('#printOrderBtn')) $('#printOrderBtn').onclick=()=>printOrder(o,false);
   $('#orderDialog').showModal();
 }
 
@@ -1691,11 +1691,23 @@ async function sendToPrintAgent(text){
 async function printOrder(order,automatic=false){
   if(automatic&&order?.id&&printedOrderIds.has(order.id)) return true;
 
+  let printable=order;
+  if(order?.id){
+    try{
+      printable=await hydrateOrderPrivate(order,{required:true});
+    }catch(err){
+      console.error('Dados privados do pedido indisponíveis para impressão.',err);
+      if(automatic) showSystemAlert('Pedido recebido, mas os dados de contato não puderam ser carregados para a impressão.');
+      else showToast('Seu perfil não pode acessar os dados necessários para imprimir esta comanda.','error');
+      return false;
+    }
+  }
+
   const connected=await checkPrintAgent();
 
   if(connected){
     try{
-      await sendToPrintAgent(receiptText(order));
+      await sendToPrintAgent(receiptText(printable));
       if(order?.id){
         printedOrderIds.add(order.id);
         sessionStorage.setItem('deliveryPrintedOrders',JSON.stringify([...printedOrderIds]));
