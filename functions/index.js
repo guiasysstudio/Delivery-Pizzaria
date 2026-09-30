@@ -1103,6 +1103,17 @@ export const createOrder = onRequest(
         return;
       }
 
+      const requestFingerprint=createHash("sha256").update(JSON.stringify({
+        fulfillment:body.fulfillment||"",
+        addressId:body.addressId||"",
+        phone:body.phone||"",
+        note:body.note||"",
+        couponCode:body.couponCode||"",
+        payment:body.payment||{},
+        pricing:body.pricing||{},
+        items:Array.isArray(body.items)?body.items:[]
+      })).digest("hex");
+
       const db=getFirestore();
       const requestKey=createHash("sha256")
         .update(decoded.uid+":"+requestId)
@@ -1110,7 +1121,16 @@ export const createOrder = onRequest(
       const requestRef=db.doc(`orderRequests/${requestKey}`);
       const existingRequest=await requestRef.get();
       if (existingRequest.exists) {
-        res.json({ok:true,idempotent:true,...existingRequest.data()});
+        const stored=existingRequest.data()||{};
+        if (stored.requestFingerprint&&stored.requestFingerprint!==requestFingerprint) {
+          res.status(409).json({
+            error:"idempotency_conflict",
+            orderId:stored.orderId||"",
+            orderNumber:stored.orderNumber||0
+          });
+          return;
+        }
+        res.json({ok:true,idempotent:true,...stored});
         return;
       }
 
@@ -1416,10 +1436,17 @@ export const createOrder = onRequest(
       if (fulfillment==="delivery") {
         delivery=await calculateServerDelivery(db,settings,address);
         if (!delivery.supported) {
-          res.status(400).json({error:"delivery_not_supported",reason:delivery.reason||""});
+          const reason=delivery.reason||"delivery_not_supported";
+          const serverConfigError=reason==="invalid_delivery_config";
+          res.status(serverConfigError?500:400).json({
+            error:serverConfigError?"invalid_delivery_config":reason,
+            reason
+          });
           return;
         }
-        if (delivery.addressLocation && !address.location) {
+        if (delivery.addressLocation) {
+          // Mantém apenas uma cópia de conveniência no perfil. O cálculo do
+          // pedido nunca confia nesta coordenada persistida.
           address.location=delivery.addressLocation;
           await db.doc(`customers/${decoded.uid}/addresses/${address.id}`).set(
             {location:delivery.addressLocation,updatedAt:new Date()},
@@ -1507,7 +1534,11 @@ export const createOrder = onRequest(
         ]);
 
         if (requestSnap.exists) {
-          duplicateResult=requestSnap.data();
+          const stored=requestSnap.data()||{};
+          if (stored.requestFingerprint&&stored.requestFingerprint!==requestFingerprint) {
+            throw Object.assign(new Error("idempotency_conflict"),{code:"idempotency_conflict"});
+          }
+          duplicateResult=stored;
           return;
         }
 
@@ -1529,7 +1560,13 @@ export const createOrder = onRequest(
           throw Object.assign(new Error("rate_limited"),{code:"rate_limited"});
         }
 
-        orderNumber=(counter.exists?finiteNumber(counter.data().value||0,{min:0,max:999_999_999,integer:true})??0:0)+1;
+        const counterValue=counter.exists
+          ?finiteNumber(counter.data().value,{min:0,max:999_999_999,integer:true})
+          :0;
+        if (counterValue==null) {
+          throw Object.assign(new Error("invalid_order_counter"),{code:"invalid_order_counter"});
+        }
+        orderNumber=counterValue+1;
         tx.set(counterRef,{value:orderNumber,updatedAt:now},{merge:true});
         tx.set(orderRef,{
           orderNumber,
@@ -1598,7 +1635,8 @@ export const createOrder = onRequest(
         tx.set(requestRef,{
           ...resultData,
           customerId:decoded.uid,
-          requestId
+          requestId,
+          requestFingerprint
         });
         tx.set(rateRef,{
           lastCreatedAt:now,
@@ -1628,6 +1666,14 @@ export const createOrder = onRequest(
       const code=err?.code||err?.message||"order_failed";
       if (code==="rate_limited") {
         res.status(429).json({error:"rate_limited"});
+        return;
+      }
+      if (code==="idempotency_conflict") {
+        res.status(409).json({error:"idempotency_conflict"});
+        return;
+      }
+      if (code==="invalid_order_counter") {
+        res.status(500).json({error:"invalid_order_counter"});
         return;
       }
       res.status(500).json({error:"order_failed",message:err?.message||"Falha ao criar pedido."});
