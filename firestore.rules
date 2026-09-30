@@ -81,6 +81,50 @@ service cloud.firestore {
           resource.data.get('identityComplete', false);
     }
 
+    function validCustomerProfileShape() {
+      return request.resource.data.keys().hasOnly([
+        'name','phone','photoURL','customPhotoURL','defaultAddressId',
+        'identityComplete','createdAt','updatedAt'
+      ]) &&
+        request.resource.data.get('name', '') is string &&
+        request.resource.data.get('name', '').size() <= 100 &&
+        request.resource.data.get('phone', '') is string &&
+        request.resource.data.get('phone', '').size() <= 30 &&
+        request.resource.data.get('photoURL', '') is string &&
+        request.resource.data.get('photoURL', '').size() <= 2048 &&
+        request.resource.data.get('customPhotoURL', '') is string &&
+        request.resource.data.get('customPhotoURL', '').size() <= 500000;
+    }
+
+    function validCustomerAddressShape() {
+      return request.resource.data.keys().hasOnly([
+        'label','recipient','phone','zip','street','number','complement',
+        'neighborhood','city','state','reference','location','createdAt','updatedAt'
+      ]) &&
+        request.resource.data.get('label', '') is string &&
+        request.resource.data.get('label', '').size() <= 40 &&
+        request.resource.data.get('recipient', '') is string &&
+        request.resource.data.get('recipient', '').size() <= 100 &&
+        request.resource.data.get('phone', '') is string &&
+        request.resource.data.get('phone', '').size() <= 30 &&
+        request.resource.data.get('zip', '') is string &&
+        request.resource.data.get('zip', '').size() <= 10 &&
+        request.resource.data.get('street', '') is string &&
+        request.resource.data.get('street', '').size() <= 160 &&
+        request.resource.data.get('number', '') is string &&
+        request.resource.data.get('number', '').size() <= 20 &&
+        request.resource.data.get('complement', '') is string &&
+        request.resource.data.get('complement', '').size() <= 100 &&
+        request.resource.data.get('neighborhood', '') is string &&
+        request.resource.data.get('neighborhood', '').size() <= 80 &&
+        request.resource.data.get('city', '') is string &&
+        request.resource.data.get('city', '').size() <= 80 &&
+        request.resource.data.get('state', '') is string &&
+        request.resource.data.get('state', '').size() <= 2 &&
+        request.resource.data.get('reference', '') is string &&
+        request.resource.data.get('reference', '').size() <= 140;
+    }
+
     function orderStatusUpdateOnly() {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(['status','updatedAt','acceptedAt','completedAt','cancelledAt']);
@@ -157,17 +201,24 @@ service cloud.firestore {
       // Perfil pessoal é privado do próprio cliente. A operação administrativa
       // usa apenas snapshots mínimos do pedido, nunca lê a ficha cadastral.
       allow create: if isOwnCustomer(uid) &&
-        request.resource.data.get('identityComplete', false) == false;
+        request.resource.data.get('identityComplete', false) == false &&
+        validCustomerProfileShape();
       allow read: if isOwnCustomer(uid);
-      allow update: if ownCustomerPublicUpdate(uid);
+      allow update: if ownCustomerPublicUpdate(uid) &&
+        validCustomerProfileShape();
       allow delete: if false;
 
       match /addresses/{addressId} {
-        allow read, create, update, delete: if isOwnCustomer(uid);
+        allow read, delete: if isOwnCustomer(uid);
+        allow create, update: if isOwnCustomer(uid) &&
+          validCustomerAddressShape();
       }
 
       match /favorites/{productId} {
-        allow read, create, update, delete: if isOwnCustomer(uid);
+        allow read, delete: if isOwnCustomer(uid);
+        allow create, update: if isOwnCustomer(uid) &&
+          request.resource.data.keys().hasOnly(['productId','createdAt']) &&
+          request.resource.data.productId == productId;
       }
 
       match /coupons/{couponId} {
