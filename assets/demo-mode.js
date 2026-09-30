@@ -106,6 +106,11 @@ function readRawOrders(){
 function writeRawOrders(list){
   localStorage.setItem(DEMO_ORDER_KEY,JSON.stringify(list.map(compactOrder)));
   window.dispatchEvent(new CustomEvent(DEMO_EVENT));
+  try{
+    const channel=new BroadcastChannel('delivery-pizzaria-demo');
+    channel.postMessage({type:'orders'});
+    channel.close();
+  }catch{}
 }
 
 function nextOrderNumber(){
