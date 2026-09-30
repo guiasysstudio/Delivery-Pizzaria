@@ -8,6 +8,7 @@ import {
   collection, doc, getDoc, getDocs, query, where, orderBy, limit, startAfter, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { showToast, confirmAction, emptyStateHtml, iconHtml, applyBrandTheme } from '../assets/ui.js';
+import { listenDemoOrders, updateDemoOrder, isDemoOrderId, blazeRequiredMessage } from '../assets/demo-mode.js';
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -17,8 +18,8 @@ const placeholder='../assets/products/placeholder.svg';
 
 let user=null,profile=null,identity=null,addresses=[],orders=[],favorites=new Set(),products=[],couponRewards=[],settings={},pendingCustomPhotoURL=undefined;
 const CUSTOMER_ORDER_PAGE_SIZE=25;
-let recentOrders=[],olderOrders=[],customerOrderCursor=null,customerOrderDone=false,customerOrderLoading=false;
-let unsubscribeOrders=null;
+let recentOrders=[],olderOrders=[],demoOrders=[],customerOrderCursor=null,customerOrderDone=false,customerOrderLoading=false;
+let unsubscribeOrders=null,unsubscribeDemoOrders=null;
 
 const statusLabels={
   pending:'Aguardando confirmação',
@@ -35,6 +36,7 @@ watchCustomer(async current=>{
   $('#accountLoading').classList.add('hidden');
   if(!current){
     if(unsubscribeOrders){unsubscribeOrders();unsubscribeOrders=null;}
+    if(unsubscribeDemoOrders){unsubscribeDemoOrders();unsubscribeDemoOrders=null;}
     $('#accountGuest').classList.remove('hidden');
     $$('.account-section').forEach(s=>s.classList.add('hidden'));
     return;
@@ -586,6 +588,7 @@ function refreshCustomerOrderWindow(){
   const merged=new Map();
   for(const order of olderOrders) merged.set(order.id,order);
   for(const order of recentOrders) merged.set(order.id,order);
+  for(const order of demoOrders.filter(order=>order.customerId===user?.uid)) merged.set(order.id,order);
   orders=[...merged.values()].sort((a,b)=>customerOrderMillis(b)-customerOrderMillis(a));
   renderOrders();
 }
@@ -642,8 +645,15 @@ function listenCustomerOrders(){
 
   recentOrders=[];
   olderOrders=[];
+  demoOrders=[];
   customerOrderCursor=null;
   customerOrderDone=false;
+
+  if(unsubscribeDemoOrders) unsubscribeDemoOrders();
+  unsubscribeDemoOrders=listenDemoOrders(list=>{
+    demoOrders=list;
+    refreshCustomerOrderWindow();
+  });
 
   const q=query(
     collection(db,'orders'),
@@ -755,7 +765,12 @@ function renderOrders(){
     b.disabled=true;
     b.textContent='Cancelando...';
     try{
-      await cancelCustomerOrder(order.id);
+      if(isDemoOrderId(order.id)){
+        updateDemoOrder(order.id,{status:'cancelled'});
+        showToast('Pedido de demonstração cancelado localmente. '+blazeRequiredMessage('customerCancel'),'info',{duration:8000});
+      }else{
+        await cancelCustomerOrder(order.id);
+      }
     }catch(err){
       console.error(err);
       const code=String(err?.code||'');
