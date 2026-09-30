@@ -195,7 +195,6 @@ function cashOperationMessage(err){
   const code=String(err?.code||err?.message||'');
   const messages={
     cash_already_open:'Já existe um caixa aberto.',
-    cash_day_already_exists:'O caixa deste dia operacional já foi encerrado e não pode ser reaberto.',
     cash_session_changed:'O caixa atual mudou em outro computador. Atualize e confira os dados.',
     cash_not_open:'É necessário manter um caixa aberto para concluir esta operação.',
     cash_changed_recheck:'O caixa recebeu uma venda ou movimento enquanto você conferia. Revise os valores antes de fechar.',
@@ -1107,6 +1106,7 @@ async function updateOrderStatus(order,status){
     }catch(err){
       console.error('Falha ao concluir pedido com vínculo ao caixa:',err);
       showToast(cashOperationMessage(err),'error',{duration:7000});
+      err.handled=true;
       throw err;
     }
     return;
@@ -1157,7 +1157,7 @@ function renderOrders(){
       await updateOrderStatus(order,b.dataset.status);
     }catch(err){
       console.error(err);
-      showToast('Não foi possível atualizar o pedido.','error');
+      if(!err?.handled) showToast('Não foi possível atualizar o pedido.','error');
     }finally{
       b.disabled=false;
     }
@@ -1274,8 +1274,13 @@ function openOrder(id){
   `;
 
   async function changeStatus(status){
-    await updateOrderStatus(o,status);
-    $('#orderDialog').close();
+    try{
+      await updateOrderStatus(o,status);
+      $('#orderDialog').close();
+    }catch(err){
+      console.error(err);
+      if(!err?.handled) showToast('Não foi possível atualizar o pedido.','error');
+    }
   }
 
   $$('.quick-status').forEach(b=>b.onclick=()=>changeStatus(b.dataset.status));
@@ -2050,9 +2055,15 @@ async function deleteCoupon(id){
 /* ===== Caixa financeiro ===== */
 async function loadCashSessions(){
   try{
-    const snap=await getDocs(query(collection(db,'cashSessions'),orderBy('openedAt','desc')));
+    const [snap,stateSnap]=await Promise.all([
+      getDocs(query(collection(db,'cashSessions'),orderBy('openedAt','desc'))),
+      getDoc(doc(db,'cashState','current'))
+    ]);
     cashSessions=snap.docs.map(d=>({id:d.id,...d.data()}));
-    currentCashSession=cashSessions.find(s=>s.status==='open')||null;
+    const currentId=stateSnap.exists()?String(stateSnap.data()?.sessionId||''):'';
+    currentCashSession=currentId
+      ?cashSessions.find(s=>s.id===currentId&&s.status==='open')||null
+      :null;
     if(currentCashSession) await loadCashMovements(currentCashSession.id);
     else cashMovements=[];
   }catch(err){
@@ -2260,7 +2271,7 @@ function renderCash(){
     const overdue=currentCashSession.businessDate&&currentCashSession.businessDate!==today;
     $('#cashSessionMeta').innerHTML=`
       ${overdue?'<div class="alert alert-error"><strong>Caixa anterior pendente.</strong> Feche o caixa de '+esc(currentCashSession.businessDate)+' antes de iniciar o caixa de hoje.</div>':''}
-      <p><strong>Dia operacional:</strong> ${esc(currentCashSession.businessDate||'Sessão antiga')}</p>
+      <p><strong>Dia operacional:</strong> ${esc(currentCashSession.businessDate||'Sessão antiga')} ${currentCashSession.sessionNumber?`• Sessão ${Number(currentCashSession.sessionNumber)}`:''}</p>
       <p><strong>Aberto por:</strong> ${esc(currentCashSession.openedByName||'Usuário')}</p>
       <p><strong>Valor inicial:</strong> ${money(currentCashSession.openingAmount)}</p>
       <p><strong>Suprimentos:</strong> ${money(summary.supplies)} • <strong>Sangrias:</strong> ${money(summary.withdrawals)}</p>
@@ -2278,7 +2289,7 @@ function renderCash(){
 
   $('#cashHistory').innerHTML=cashSessions.length?cashSessions.slice(0,20).map(s=>{
     const sum=s.summary||cashSummary(s);
-    return `<div class="data-row"><div class="data-main"><strong>${s.status==='open'?'Caixa aberto':'Caixa fechado'}</strong><small>${esc(s.businessDate||'')} • ${formatDate(s.openedAt)} • ${esc(s.openedByName||'')}</small></div><span>${Number(sum.count||0)} pedido(s)</span><div><strong>${money(sum.gross||0)}</strong>${s.difference!=null?`<small class="muted" style="display:block">Diferença: ${money(s.difference)}</small>`:''}</div></div>`;
+    return `<div class="data-row"><div class="data-main"><strong>${s.status==='open'?'Caixa aberto':'Caixa fechado'}${s.sessionNumber?` • Sessão ${Number(s.sessionNumber)}`:''}</strong><small>${esc(s.businessDate||'')} • ${formatDate(s.openedAt)} • ${esc(s.openedByName||'')}</small></div><span>${Number(sum.count||0)} pedido(s)</span><div><strong>${money(sum.gross||0)}</strong>${s.difference!=null?`<small class="muted" style="display:block">Diferença: ${money(s.difference)}</small>`:''}</div></div>`;
   }).join(''):emptyStateHtml({icon:'wallet-cards',title:'Nenhum caixa registrado',description:'O histórico de aberturas e fechamentos aparecerá aqui.'});
 }
 
