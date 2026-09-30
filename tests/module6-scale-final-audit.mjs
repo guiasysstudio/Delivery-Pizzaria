@@ -29,6 +29,8 @@ assert.match(account,/CUSTOMER_ORDER_PAGE_SIZE=25/);
 assert.match(account,/startAfter\(customerOrderCursor\)/);
 assert.match(account,/limit\(CUSTOMER_ORDER_PAGE_SIZE\)/);
 assert.match(account,/loadMoreCustomerOrders/);
+assert.match(account,/failed-precondition/);
+assert.match(account,/Índice de histórico ainda não publicado/);
 assert.match(accountHtml,/id="loadMoreCustomerOrdersBtn"/);
 const loadAllBlock=account.slice(
   account.indexOf('async function loadAll()'),
@@ -51,6 +53,7 @@ assert.match(serviceWorker,/\.\/assets\/cep\.js/);
 
 // Consultas rotineiras de elegibilidade trazem só pedidos concluídos.
 assert.match(publicApp,/where\('customerId','==',uid\),\s*where\('status','==','completed'\)/);
+assert.match(publicApp,/Consulta compatível do histórico também falhou/);
 assert.match(backend,/where\("customerId", "==", customerId\)[\s\S]*?where\("status", "==", "completed"\)/);
 assert.match(backend,/where\("customerId","==",decoded\.uid\)[\s\S]*?where\("status","==","completed"\)/);
 
