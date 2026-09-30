@@ -30,7 +30,11 @@ assert.match(account,/startAfter\(customerOrderCursor\)/);
 assert.match(account,/limit\(CUSTOMER_ORDER_PAGE_SIZE\)/);
 assert.match(account,/loadMoreCustomerOrders/);
 assert.match(accountHtml,/id="loadMoreCustomerOrdersBtn"/);
-assert.doesNotMatch(account,/getDocs\(query\(collection\(db,'orders'\),where\('customerId','==',user\.uid\)\)\),/);
+const loadAllBlock=account.slice(
+  account.indexOf('async function loadAll()'),
+  account.indexOf('function effectiveProfilePhoto')
+);
+assert.doesNotMatch(loadAllBlock,/collection\(db,'orders'\)/,'loadAll não deve duplicar a leitura do listener paginado');
 
 // CEP: uma implementação compartilhada, cache TTL e deduplicação de requests.
 assert.match(customerAuth,/import \{ lookupBrazilianZip \} from '\.\/cep\.js';/);
