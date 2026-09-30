@@ -336,25 +336,37 @@ function downloadJsonFile(filename,data){
   setTimeout(()=>URL.revokeObjectURL(url),500);
 }
 
+async function loadCompleteCustomerExport(){
+  const [ordersSnap,privateSnap]=await Promise.all([
+    getDocs(query(collection(db,'orders'),where('customerId','==',user.uid))),
+    getDocs(query(collection(db,'orderPrivate'),where('customerId','==',user.uid)))
+  ]);
+
+  const privateByOrder=new Map(
+    privateSnap.docs.map(docSnap=>[docSnap.id,docSnap.data()])
+  );
+
+  const completeOrders=ordersSnap.docs
+    .map(docSnap=>({id:docSnap.id,...docSnap.data()}))
+    .sort((a,b)=>customerOrderMillis(b)-customerOrderMillis(a))
+    .map(order=>{
+      const privateData=privateByOrder.get(order.id)||{};
+      return {
+        ...order,
+        customer:privateData.customer||order.customer||null,
+        address:privateData.address||order.address||null
+      };
+    });
+
+  return completeOrders;
+}
+
 $('#exportMyDataBtn')?.addEventListener('click',async()=>{
   if(!user) return;
   const button=$('#exportMyDataBtn');
   button.disabled=true;
   try{
-    const privateOrders=await Promise.all(orders.map(async order=>{
-      try{
-        const snap=await getDoc(doc(db,'orderPrivate',order.id));
-        const privateData=snap.exists()?snap.data():{};
-        return {
-          ...order,
-          customer:privateData.customer||order.customer||null,
-          address:privateData.address||order.address||null
-        };
-      }catch(err){
-        console.warn('Dados privados de um pedido não puderam ser incluídos na exportação.',err);
-        return {...order};
-      }
-    }));
+    const completeOrders=await loadCompleteCustomerExport();
 
     const exportData={
       exportedAt:new Date().toISOString(),
@@ -363,9 +375,7 @@ $('#exportMyDataBtn')?.addEventListener('click',async()=>{
         email:user.email||'',
         emailVerified:user.emailVerified===true,
         profile:{
-          name:profile?.name||'',
-          phone:profile?.phone||'',
-          defaultAddressId:profile?.defaultAddressId||null,
+          ...(profile||{}),
           identityComplete:profile?.identityComplete===true
         },
         identity:{
@@ -374,12 +384,12 @@ $('#exportMyDataBtn')?.addEventListener('click',async()=>{
         }
       },
       addresses:addresses.map(a=>({...a})),
-      orders:privateOrders,
+      orders:completeOrders,
       favorites:[...favorites],
       coupons:couponRewards.map(coupon=>({...coupon}))
     };
     downloadJsonFile('meus-dados-delivery-pizzaria.json',exportData);
-    showToast('Arquivo com seus dados preparado.','success');
+    showToast('Arquivo completo com seus dados preparado.','success');
   }catch(err){
     console.error(err);
     showToast('Não foi possível preparar a cópia dos seus dados.','error');
