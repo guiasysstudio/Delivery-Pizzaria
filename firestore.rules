@@ -116,20 +116,6 @@ service cloud.firestore {
         request.resource.data.status == 'out_for_delivery';
     }
 
-    function completeTransition() {
-      return hasPermission('ordersComplete') && (
-        (
-          resource.data.status == 'out_for_delivery' &&
-          request.resource.data.status == 'completed'
-        ) ||
-        (
-          resource.data.status == 'ready' &&
-          resource.data.fulfillment == 'pickup' &&
-          request.resource.data.status == 'completed'
-        )
-      );
-    }
-
     function cancelTransition() {
       return hasPermission('ordersCancel') &&
         !(resource.data.status in ['completed','cancelled']) &&
@@ -290,7 +276,8 @@ service cloud.firestore {
     }
 
     match /cashDays/{businessDate} {
-      // Trava server-side que garante uma única sessão por dia operacional.
+      // Índice server-side das sessões do dia operacional. Permite várias
+      // sessões sequenciais no mesmo dia, mas nunca dois caixas simultâneos.
       allow read, write: if false;
     }
 
