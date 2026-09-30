@@ -46,5 +46,11 @@ for(const group of ['orderRequests','cashOperationRequests','orderRateLimits']){
 
 assert.match(backend,/publicUrl:\s*`https:\/\/raw\.githubusercontent\.com/);
 assert.match(admin,/result\.publicUrl\|\|result\.path/);
+assert.doesNotMatch(backend,/message\s*:\s*err\?\.message/);
+
+const gitignore=fs.readFileSync('.gitignore','utf8');
+for(const sensitive of ['functions/.secret.local','*firebase-adminsdk*.json','service-account*.json']){
+  assert.ok(gitignore.includes(sensitive),'Credencial local não está protegida no .gitignore: '+sensitive);
+}
 
 console.log('Module 4 Firebase production tests OK');
