@@ -397,6 +397,41 @@ async function ensureMasterCanBeChanged(db,targetUid,target) {
   }
 }
 
+export const resolveStaffLogin = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:staffAdminCors,
+    timeoutSeconds:15,
+    memory:"128MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    const username=normalizeStaffUsername(req.body?.username);
+    const decoy=()=>{
+      const token=createHash("sha256").update("invalid:"+username).digest("hex").slice(0,24);
+      return `invalid.${token}@delivery-pizzaria.local`;
+    };
+
+    if(!validStaffUsername(username)){
+      res.json({ok:true,email:decoy()});
+      return;
+    }
+
+    try{
+      const snap=await getFirestore().doc(`staffLogins/${username}`).get();
+      const email=snap.exists?normalizeText(snap.data()?.email,240):"";
+      res.json({ok:true,email:email||decoy()});
+    }catch(err){
+      console.error("resolveStaffLogin failed",err);
+      res.json({ok:true,email:decoy()});
+    }
+  }
+);
+
 export const manageStaffUser = onRequest(
   {
     region:"southamerica-east1",
