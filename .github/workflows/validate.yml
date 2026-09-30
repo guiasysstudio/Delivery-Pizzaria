@@ -19,6 +19,7 @@ jobs:
         run: |
           node --check assets/app.js
           node --check assets/customer-auth.js
+          node --check assets/cep.js
           node --check assets/ui.js
           node --check account/account.js
           node --check account/receipt.js
@@ -41,6 +42,9 @@ jobs:
 
       - name: Test Module 5 Print Agent, PWA and publication
         run: node tests/module5-print-pwa-publication.mjs
+
+      - name: Test Module 6 scale and final adversarial audit
+        run: node tests/module6-scale-final-audit.mjs
 
       - name: Run Firebase production preflight
         run: node scripts/production-preflight.mjs
@@ -248,6 +252,7 @@ jobs:
           test -f account/receipt.js
           test -f firebase-config.js
           test -f assets/ui.js
+          test -f assets/cep.js
           test -f assets/print-agent-version.json
           test -f assets/icons/LICENSE-LUCIDE.txt
           test -f firestore.rules
