@@ -357,6 +357,7 @@ onAuthStateChanged(auth,async user=>{
 
   if(!user){
     currentProfile=null;
+    stopCashLedgerListeners();
     $('#loginView').classList.remove('hidden');
     $('#adminApp').classList.add('hidden');
     if(unsubscribeOrders) unsubscribeOrders();
