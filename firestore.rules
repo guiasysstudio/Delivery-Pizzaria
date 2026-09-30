@@ -143,7 +143,6 @@ service cloud.firestore {
           acceptTransition() ||
           prepareTransition() ||
           dispatchTransition() ||
-          completeTransition() ||
           cancelTransition()
         );
     }
@@ -273,20 +272,26 @@ service cloud.firestore {
     }
 
     match /cashSessions/{sessionId} {
+      // O caixa é um livro financeiro: o navegador pode consultar, mas nunca
+      // escrever diretamente. A Cloud Function manageCash serializa abertura,
+      // movimentos, conclusão de pedidos e fechamento.
       allow read: if hasPermission('cashView');
-      allow create, update: if hasPermission('cashOperate');
-      allow delete: if isMaster();
+      allow create, update, delete: if false;
 
       match /movements/{movementId} {
         allow read: if hasPermission('cashView');
-        allow create: if hasPermission('cashOperate');
-        allow update, delete: if isMaster();
+        allow create, update, delete: if false;
       }
     }
 
     match /cashState/{stateId} {
       allow read: if hasPermission('cashView');
-      allow create, update, delete: if hasPermission('cashOperate');
+      allow create, update, delete: if false;
+    }
+
+    match /cashDays/{businessDate} {
+      // Trava server-side que garante uma única sessão por dia operacional.
+      allow read, write: if false;
     }
 
     match /counters/orders {
@@ -298,8 +303,9 @@ service cloud.firestore {
     }
 
     match /orders/{orderId} {
-      // Criação de pedido é exclusivamente server-side via Cloud Function createOrder,
-      // que recalcula preços, promoções, cupons, entrega e valida o cadastro.
+      // Criação de pedido é exclusivamente server-side via Cloud Function createOrder.
+      // A transição para "completed" também é exclusivamente server-side via
+      // manageCash, que vincula a venda a um caixa aberto antes de contabilizá-la.
       allow create: if false;
 
       allow read: if hasPermission('ordersView') ||
