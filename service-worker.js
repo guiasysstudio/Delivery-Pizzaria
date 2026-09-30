@@ -11,6 +11,7 @@ const SHELL=[
   './assets/app.js',
   './assets/customer-auth.js',
   './assets/cep.js',
+  './assets/demo-mode.js',
   './assets/ui.js',
   './assets/print-agent-version.json',
   './assets/app-icon.svg',
