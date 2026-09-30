@@ -176,6 +176,52 @@ jobs:
           print(f'icon checks OK ({len(used)} ícones usados)')
           PY
 
+      - name: Check Print Agent version manifest
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+
+          project = Path('print-agent/DeliveryPizzaria.PrintAgent.csproj').read_text(encoding='utf-8')
+          match = re.search(r'<Version>([^<]+)</Version>', project)
+          if not match:
+              raise SystemExit('Versão do Print Agent não encontrada no csproj.')
+
+          agent_version = match.group(1).strip()
+          manifest = json.loads(Path('assets/print-agent-version.json').read_text(encoding='utf-8'))
+          latest = str(manifest.get('latestVersion', '')).strip()
+          minimum = str(manifest.get('minimumVersion', '')).strip()
+
+          semver = re.compile(r'^\d+\.\d+\.\d+
+          test -f index.html
+          test -f admin/index.html
+          test -f account/index.html
+          test -f account/receipt.html
+          test -f account/receipt.js
+          test -f firebase-config.js
+          test -f assets/ui.js
+          test -f assets/print-agent-version.json
+          test -f assets/icons/LICENSE-LUCIDE.txt
+          test -f firestore.rules
+          test -f manifest.webmanifest
+          test -f service-worker.js
+          test -f print-agent/DeliveryPizzaria.PrintAgent.csproj
+          test -f functions/package.json
+          test -f functions/index.js
+)
+          if not semver.fullmatch(agent_version):
+              raise SystemExit(f'Versão inválida no csproj: {agent_version}')
+          if not semver.fullmatch(latest):
+              raise SystemExit(f'latestVersion inválida: {latest}')
+          if not semver.fullmatch(minimum):
+              raise SystemExit(f'minimumVersion inválida: {minimum}')
+          if agent_version != latest:
+              raise SystemExit(f'Print Agent {agent_version} != manifest latestVersion {latest}')
+
+          print(f'Print Agent version manifest OK: latest={latest}, minimum={minimum}')
+          PY
+
       - name: Check required files
         run: |
           test -f index.html
