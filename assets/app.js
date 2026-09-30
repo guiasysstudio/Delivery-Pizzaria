@@ -1041,7 +1041,7 @@ function cartItemFromCurrentCatalog(item){
 
   const best=bestPromotionForSelection(second?[first,second]:[first],raw);
   const promoted=best?best.price:raw;
-  const requestedExtras=(item.extras||[]).map(x=>String(x?.name||'')).filter(Boolean);
+  const requestedExtras=[...new Set((item.extras||[]).map(x=>String(x?.name||'')).filter(Boolean))];
   const extras=[];
   let extraTotal=0;
   for(const name of requestedExtras){
