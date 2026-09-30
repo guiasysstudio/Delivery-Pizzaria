@@ -29,14 +29,29 @@ internal static class Program
             return;
 
         ApplicationConfiguration.Initialize();
-        Application.Run(new TrayContext());
+
+        try
+        {
+            Application.Run(new TrayContext());
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Não foi possível iniciar o Delivery Pizzaria Print Agent.\n\n" +
+                ex.Message + "\n\n" +
+                "Feche qualquer programa que esteja usando a porta 17329 e tente novamente.",
+                "Print Agent",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+
         GC.KeepAlive(mutex);
     }
 }
 
 internal static class AgentInfo
 {
-    public const string Version = "1.6.0";
+    public const string Version = "1.7.0";
 }
 
 internal static class AttachmentSecurity
@@ -121,7 +136,17 @@ internal sealed class TrayContext : ApplicationContext
         EnsureSelectedPrinter();
 
         _server = new LocalPrintServer(GetSelectedPrinter, SetSelectedPrinter);
-        _server.Start();
+        try
+        {
+            _server.Start();
+        }
+        catch (Exception ex)
+        {
+            _server.Dispose();
+            throw new InvalidOperationException(
+                "O serviço local não conseguiu abrir http://127.0.0.1:17329. A porta pode estar ocupada por outro programa.",
+                ex);
+        }
 
         _startupItem = new ToolStripMenuItem("Iniciar com o Windows")
         {
@@ -713,7 +738,7 @@ internal sealed class AgentSettingsForm : Form
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "https://guiasysstudio.github.io/Delivery-Pizzaria/admin/",
+                FileName = "https://pizzaria.guiasys.online/admin/",
                 UseShellExecute = true
             });
         };
@@ -847,6 +872,10 @@ internal sealed class AgentSettingsForm : Form
 internal sealed class LocalPrintServer : IDisposable
 {
     private const string AgentVersion = AgentInfo.Version;
+    private const int MaxRequestBodyBytes = 128 * 1024;
+    private const int MaxPrintTextLength = 64_000;
+    private const int MaxLogoUrlLength = 2048;
+    private static readonly HashSet<int> AllowedLocalDevPorts = [80, 3000, 5000, 5500, 8000, 8080];
     private static readonly HttpClient LogoHttpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(5)
@@ -871,6 +900,10 @@ internal sealed class LocalPrintServer : IDisposable
         var builder = WebApplication.CreateSlimBuilder();
 
         builder.WebHost.UseUrls("http://127.0.0.1:17329");
+        builder.WebHost.ConfigureKestrel(options =>
+        {
+            options.Limits.MaxRequestBodySize = MaxRequestBodyBytes;
+        });
 
         _app = builder.Build();
 
@@ -882,6 +915,13 @@ internal sealed class LocalPrintServer : IDisposable
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
                 await context.Response.WriteAsJsonAsync(new { error = "origin_not_allowed" });
+                return;
+            }
+
+            if (HttpMethods.IsPost(context.Request.Method) && string.IsNullOrWhiteSpace(origin))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await context.Response.WriteAsJsonAsync(new { error = "origin_required" });
                 return;
             }
 
@@ -935,6 +975,13 @@ internal sealed class LocalPrintServer : IDisposable
 
         _app.MapPost("/print", async (HttpContext context) =>
         {
+            if (context.Request.ContentLength is long contentLength && contentLength > MaxRequestBodyBytes)
+            {
+                return Results.Json(
+                    new { error = "payload_too_large" },
+                    statusCode: StatusCodes.Status413PayloadTooLarge);
+            }
+
             PrintRequest? request;
 
             try
@@ -952,6 +999,22 @@ internal sealed class LocalPrintServer : IDisposable
             {
                 return Results.BadRequest(new { error = "invalid_request" });
             }
+
+            if (request.Text.Length > MaxPrintTextLength)
+            {
+                return Results.Json(
+                    new { error = "print_text_too_large" },
+                    statusCode: StatusCodes.Status413PayloadTooLarge);
+            }
+
+            if (request.Copies is < 1 or > 5)
+                return Results.BadRequest(new { error = "invalid_copies" });
+
+            if (!string.IsNullOrWhiteSpace(request.Model) && !IsSupportedModel(request.Model))
+                return Results.BadRequest(new { error = "invalid_model" });
+
+            if (!string.IsNullOrWhiteSpace(request.StoreLogo) && request.StoreLogo.Length > MaxLogoUrlLength)
+                return Results.BadRequest(new { error = "invalid_logo_url" });
 
             // A impressora física é sempre definida pelo próprio Agent.
             // Se a impressora salva sumiu/foi renomeada, o Agent recupera
@@ -971,7 +1034,7 @@ internal sealed class LocalPrintServer : IDisposable
                     PrintText(
                         printerName,
                         request.Text,
-                        Math.Clamp(request.Copies <= 0 ? 1 : request.Copies, 1, 5),
+                        request.Copies,
                         request.Model,
                         logo);
                 }
@@ -985,13 +1048,32 @@ internal sealed class LocalPrintServer : IDisposable
             }
             catch (Exception ex)
             {
+                Debug.WriteLine(ex);
                 return Results.Json(
-                    new { error = "print_failed", message = ex.Message },
+                    new { error = "print_failed" },
                     statusCode: StatusCodes.Status500InternalServerError);
             }
         });
 
-        _runTask = _app.RunAsync(_cts.Token);
+        try
+        {
+            _app.StartAsync(_cts.Token).GetAwaiter().GetResult();
+            _runTask = _app.WaitForShutdownAsync(_cts.Token);
+        }
+        catch
+        {
+            try
+            {
+                _app.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // A exceção original de inicialização é mais útil.
+            }
+
+            _app = null;
+            throw;
+        }
     }
 
     private string? ResolveSelectedPrinter()
@@ -1034,20 +1116,29 @@ internal sealed class LocalPrintServer : IDisposable
         var https = string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
         var http = string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase);
 
-        if (https && host.Equals("guiasysstudio.github.io", StringComparison.OrdinalIgnoreCase))
+        if (https && (uri.IsDefaultPort || uri.Port == 443) && (
+            host.Equals("pizzaria.guiasys.online", StringComparison.OrdinalIgnoreCase) ||
+            host.Equals("delivery-pizzaria-f5b08.web.app", StringComparison.OrdinalIgnoreCase) ||
+            host.Equals("delivery-pizzaria-f5b08.firebaseapp.com", StringComparison.OrdinalIgnoreCase)))
             return true;
 
-        if (https && (
-            host.Equals("guiasys.online", StringComparison.OrdinalIgnoreCase) ||
-            host.EndsWith(".guiasys.online", StringComparison.OrdinalIgnoreCase)))
-            return true;
-
-        if (http && (
-            host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-            host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)))
+        if (http &&
+            AllowedLocalDevPorts.Contains(uri.Port) &&
+            (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+             host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)))
             return true;
 
         return false;
+    }
+
+    private static bool IsSupportedModel(string? model)
+    {
+        return string.IsNullOrWhiteSpace(model) ||
+            StringComparer.OrdinalIgnoreCase.Equals(model, "thermal80") ||
+            StringComparer.OrdinalIgnoreCase.Equals(model, "thermal58") ||
+            StringComparer.OrdinalIgnoreCase.Equals(model, "a4") ||
+            StringComparer.OrdinalIgnoreCase.Equals(model, "compact") ||
+            StringComparer.OrdinalIgnoreCase.Equals(model, "label");
     }
 
     private sealed record PrintProfile(
@@ -1145,9 +1236,9 @@ internal sealed class LocalPrintServer : IDisposable
 
         var host = uri.Host;
         return host.Equals("raw.githubusercontent.com", StringComparison.OrdinalIgnoreCase) ||
-            host.Equals("guiasysstudio.github.io", StringComparison.OrdinalIgnoreCase) ||
-            host.Equals("guiasys.online", StringComparison.OrdinalIgnoreCase) ||
-            host.EndsWith(".guiasys.online", StringComparison.OrdinalIgnoreCase);
+            host.Equals("pizzaria.guiasys.online", StringComparison.OrdinalIgnoreCase) ||
+            host.Equals("delivery-pizzaria-f5b08.web.app", StringComparison.OrdinalIgnoreCase) ||
+            host.Equals("delivery-pizzaria-f5b08.firebaseapp.com", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void PrintText(
