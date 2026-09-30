@@ -33,6 +33,9 @@ jobs:
       - name: Test Module 2 cash ledger
         run: node tests/module2-cash-ledger.mjs
 
+      - name: Test Module 3 security and LGPD
+        run: node tests/module3-security-lgpd.mjs
+
       - name: Detect common selector mistakes
         run: |
           python - <<'PY'
@@ -92,7 +95,7 @@ jobs:
                       if key == 'id' and value:
                           self.ids.append(value)
 
-          for path in [Path('index.html'), Path('account/index.html'), Path('admin/index.html'), Path('admin/print.html')]:
+          for path in [Path('index.html'), Path('privacy.html'), Path('account/index.html'), Path('admin/index.html'), Path('admin/print.html')]:
               parser = IdParser()
               parser.feed(path.read_text(encoding='utf-8'))
               duplicates = sorted({x for x in parser.ids if parser.ids.count(x) > 1})
@@ -121,6 +124,7 @@ jobs:
               Path('admin/index.html'),
               Path('admin/print.html'),
               Path('404.html'),
+              Path('privacy.html'),
           ]
 
           for path in ui_js:
@@ -212,6 +216,7 @@ jobs:
       - name: Check required files
         run: |
           test -f index.html
+          test -f privacy.html
           test -f admin/index.html
           test -f account/index.html
           test -f account/receipt.html
