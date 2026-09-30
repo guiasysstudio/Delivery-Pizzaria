@@ -86,12 +86,13 @@ watchCustomer(async user=>{
       $('#customerReceipt').innerHTML='<div class="alert alert-error">Pedido não encontrado.</div>';
       return;
     }
+    const operational=orderSnap.data()||{};
     const privateData=privateSnap.exists()?privateSnap.data():{};
     render({
       id:orderSnap.id,
-      ...orderSnap.data(),
-      customer:privateData.customer||null,
-      address:privateData.address||null
+      ...operational,
+      customer:privateData.customer||operational.customer||null,
+      address:privateData.address||operational.address||null
     },settingsSnap.exists()?settingsSnap.data():{});
   }catch(err){
     console.error(err);
