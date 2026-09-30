@@ -1,4 +1,4 @@
-const CACHE_NAME='delivery-pizzaria-v18';
+const CACHE_NAME='delivery-pizzaria-v19';
 const OFFLINE_URL='./offline.html';
 const SHELL=[
   './',
