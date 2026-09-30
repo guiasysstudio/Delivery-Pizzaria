@@ -36,6 +36,18 @@ jobs:
       - name: Test Module 3 security and LGPD
         run: node tests/module3-security-lgpd.mjs
 
+      - name: Test Module 4 Firebase production
+        run: node tests/module4-firebase-production.mjs
+
+      - name: Run Firebase production preflight
+        run: node scripts/production-preflight.mjs
+
+      - name: Verify Functions dependency graph
+        run: |
+          npm install --prefix functions --ignore-scripts --no-audit --no-fund
+          cd functions
+          node -e "Promise.all([import('firebase-functions/v2/https'), import('firebase-admin/app')]).then(()=>console.log('Functions dependencies OK'))"
+
       - name: Detect common selector mistakes
         run: |
           python - <<'PY'
