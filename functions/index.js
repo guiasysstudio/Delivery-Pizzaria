@@ -804,7 +804,11 @@ export const manageCash = onRequest(
       const sessionId=normalizeText(req.body?.sessionId,120);
       const closingAmount=cleanCashMoney(req.body?.closingAmount,{min:0,max:10_000_000});
       const closingNote=normalizeText(req.body?.closingNote,300);
-      if(!sessionId||closingAmount==null){
+      const expectedRevision=finiteNumber(
+        req.body?.expectedRevision,
+        {min:0,max:1_000_000_000,integer:true}
+      );
+      if(!sessionId||closingAmount==null||expectedRevision==null){
         res.status(400).json({error:"invalid_closing_amount"});
         return;
       }
@@ -853,6 +857,9 @@ export const manageCash = onRequest(
         );
         if(openingAmount==null||!sales||!movements||revision==null){
           throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+        }
+        if(revision!==expectedRevision){
+          throw Object.assign(new Error("cash_changed_recheck"),{code:"cash_changed_recheck"});
         }
 
         const summary=cashSummarySnapshot(sales,movements);
@@ -910,6 +917,7 @@ export const manageCash = onRequest(
           "cash_day_already_exists",
           "cash_session_changed",
           "cash_not_open",
+          "cash_changed_recheck",
           "invalid_order_transition"
         ].includes(code)?409:
         [
