@@ -792,29 +792,45 @@ export const staffOrderPrivate = onRequest(
 
       if(!privateSnap.exists){
         const orderRef=db.doc(`orders/${orderId}`);
-        const orderSnap=await orderRef.get();
-        if(!orderSnap.exists){
-          res.status(404).json({error:"order_not_found"});
-          return;
-        }
-        const order=orderSnap.data()||{};
-        if(order.customer||order.address){
-          const migrated={
+        let foundOrder=false;
+        await db.runTransaction(async tx=>{
+          const [currentPrivate,currentOrder]=await Promise.all([
+            tx.get(privateRef),
+            tx.get(orderRef)
+          ]);
+          if(currentPrivate.exists){
+            foundOrder=true;
+            return;
+          }
+          if(!currentOrder.exists) return;
+          foundOrder=true;
+          const order=currentOrder.data()||{};
+          if(!order.customer&&!order.address) return;
+
+          tx.set(privateRef,{
             orderId,
             customerId:order.customerId||"",
             customer:order.customer||null,
             address:order.address||null,
             createdAt:order.createdAt||new Date(),
             updatedAt:new Date()
-          };
-          await privateRef.set(migrated,{merge:true});
-          await orderRef.update({
+          },{merge:true});
+
+          const patch={
             customer:FieldValue.delete(),
-            address:FieldValue.delete(),
-            "deliveryPricing.verifiedNeighborhood":FieldValue.delete()
-          });
-          privateSnap=await privateRef.get();
+            address:FieldValue.delete()
+          };
+          if(order.deliveryPricing?.verifiedNeighborhood!==undefined){
+            patch["deliveryPricing.verifiedNeighborhood"]=FieldValue.delete();
+          }
+          tx.update(orderRef,patch);
+        });
+
+        if(!foundOrder){
+          res.status(404).json({error:"order_not_found"});
+          return;
         }
+        privateSnap=await privateRef.get();
       }
 
       if(!privateSnap.exists){
@@ -883,11 +899,14 @@ export const migrateOrderPrivacy = onRequest(
           createdAt:order.createdAt||new Date(),
           updatedAt:new Date()
         },{merge:true});
-        batch.update(orderDoc.ref,{
+        const orderPatch={
           customer:FieldValue.delete(),
-          address:FieldValue.delete(),
-          "deliveryPricing.verifiedNeighborhood":FieldValue.delete()
-        });
+          address:FieldValue.delete()
+        };
+        if(order.deliveryPricing?.verifiedNeighborhood!==undefined){
+          orderPatch["deliveryPricing.verifiedNeighborhood"]=FieldValue.delete();
+        }
+        batch.update(orderDoc.ref,orderPatch);
         writes+=2;
         migrated++;
         if(writes>=400) await flush();
@@ -2207,6 +2226,9 @@ export const deleteCustomerAccount = onRequest(
       return;
     }
 
+    let disabledForDeletion=false;
+    let cleanupCompleted=false;
+    let deletionUid="";
     try{
       const decoded=await verifyCustomerToken(req);
       if(!decoded?.uid){
@@ -2222,6 +2244,7 @@ export const deleteCustomerAccount = onRequest(
 
       const db=getFirestore();
       const uid=decoded.uid;
+      deletionUid=uid;
       const customerRef=db.doc(`customers/${uid}`);
       const privateRef=db.doc(`customerPrivate/${uid}`);
       const privateSnap=await privateRef.get();
@@ -2239,7 +2262,8 @@ export const deleteCustomerAccount = onRequest(
         return;
       }
 
-      await getAuth().updateUser(uid,{disabled:true}).catch(()=>{});
+      await getAuth().updateUser(uid,{disabled:true});
+      disabledForDeletion=true;
       await getAuth().revokeRefreshTokens(uid).catch(()=>{});
 
       const [
@@ -2261,14 +2285,19 @@ export const deleteCustomerAccount = onRequest(
       for(const docSnap of requestSnap.docs) writer.delete(docSnap.ref);
 
       for(const orderDoc of ordersSnap.docs){
-        writer.set(orderDoc.ref,{
+        const order=orderDoc.data()||{};
+        const patch={
           customerId:FieldValue.delete(),
           customer:FieldValue.delete(),
           address:FieldValue.delete(),
           customerDeleted:true,
           customerDeletedAt:new Date(),
           updatedAt:new Date()
-        },{merge:true});
+        };
+        if(order.deliveryPricing?.verifiedNeighborhood!==undefined){
+          patch["deliveryPricing.verifiedNeighborhood"]=FieldValue.delete();
+        }
+        writer.update(orderDoc.ref,patch);
         writer.delete(db.doc(`orderPrivate/${orderDoc.id}`));
       }
 
@@ -2277,6 +2306,7 @@ export const deleteCustomerAccount = onRequest(
       writer.delete(db.doc(`orderRateLimits/${uid}`));
       if(cpfHashValue) writer.delete(db.doc(`cpfIndex/${cpfHashValue}`));
       await writer.close();
+      cleanupCompleted=true;
 
       try{
         await getAuth().deleteUser(uid);
@@ -2292,6 +2322,11 @@ export const deleteCustomerAccount = onRequest(
       });
     }catch(err){
       console.error("deleteCustomerAccount failed",err);
+      if(disabledForDeletion&&!cleanupCompleted&&deletionUid){
+        await getAuth().updateUser(deletionUid,{disabled:false}).catch(reenableErr=>{
+          console.error("Could not re-enable customer after failed deletion",reenableErr);
+        });
+      }
       res.status(Number(err?.status)||500).json({
         error:err?.code||err?.message||"account_delete_failed"
       });
