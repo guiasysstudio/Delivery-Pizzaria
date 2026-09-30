@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, deleteUser } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, writeBatch } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig } from '../firebase-config.js';
 import { showToast, confirmAction, emptyStateHtml, iconHtml, skeletonListHtml, applyBrandTheme } from '../assets/ui.js';
@@ -7,8 +7,6 @@ import { showToast, confirmAction, emptyStateHtml, iconHtml, skeletonListHtml, a
 const app=initializeApp(firebaseConfig);
 const auth=getAuth(app);
 const db=getFirestore(app);
-const userCreatorApp=initializeApp(firebaseConfig,'delivery-user-creator');
-const userCreatorAuth=getAuth(userCreatorApp);
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
@@ -76,46 +74,43 @@ const permissionDefinitions=[
   ['categoriesManage','Cardápio','Gerenciar categorias'],
   ['promotionsManage','Comercial','Gerenciar promoções'],
   ['couponsManage','Comercial','Gerenciar cupons'],
-  ['customersView','Clientes','Visualizar clientes'],
-  ['customersEdit','Clientes','Editar dados públicos de clientes'],
+  ['customersView','Clientes','Visualizar resumo operacional de clientes'],
   ['printingManage','Operação','Configurar impressão'],
   ['cashView','Financeiro','Visualizar caixa e financeiro'],
   ['cashOperate','Financeiro','Abrir e fechar caixa'],
-  ['settingsManage','Sistema','Alterar configurações da pizzaria'],
-  ['usersManage','Sistema','Criar e editar usuários'],
-  ['rolesManage','Sistema','Criar e editar perfis de acesso']
+  ['settingsManage','Sistema','Alterar configurações da pizzaria']
 ];
 
 const defaultRoleTemplates={
   manager:{name:'Gerente',permissions:{
     ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true,
     productsView:true,productsCreate:true,productsEdit:true,productsDelete:true,categoriesManage:true,
-    promotionsManage:true,couponsManage:true,customersView:true,customersEdit:true,printingManage:true,cashView:true,cashOperate:true,
-    settingsManage:true,usersManage:false,rolesManage:false
+    promotionsManage:true,couponsManage:true,customersView:true,printingManage:true,cashView:true,cashOperate:true,
+    settingsManage:true
   }},
   cashier:{name:'Caixa',permissions:{
     ordersView:true,ordersAccept:true,ordersPrepare:false,ordersDispatch:false,ordersComplete:false,ordersCancel:true,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
-    promotionsManage:false,couponsManage:false,customersView:true,customersEdit:false,printingManage:true,cashView:true,cashOperate:true,
-    settingsManage:false,usersManage:false,rolesManage:false
+    promotionsManage:false,couponsManage:false,customersView:true,printingManage:true,cashView:true,cashOperate:true,
+    settingsManage:false
   }},
   kitchen:{name:'Cozinha',permissions:{
     ordersView:true,ordersAccept:false,ordersPrepare:true,ordersDispatch:false,ordersComplete:false,ordersCancel:false,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
     promotionsManage:false,couponsManage:false,customersView:false,customersEdit:false,printingManage:false,cashView:false,cashOperate:false,
-    settingsManage:false,usersManage:false,rolesManage:false
+    settingsManage:false
   }},
   delivery:{name:'Entrega',permissions:{
     ordersView:true,ordersAccept:false,ordersPrepare:false,ordersDispatch:true,ordersComplete:true,ordersCancel:false,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
     promotionsManage:false,couponsManage:false,customersView:false,customersEdit:false,printingManage:false,cashView:false,cashOperate:false,
-    settingsManage:false,usersManage:false,rolesManage:false
+    settingsManage:false
   }},
   operator:{name:'Operador',permissions:{
     ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true,
     productsView:false,productsCreate:false,productsEdit:false,productsDelete:false,categoriesManage:false,
     promotionsManage:false,couponsManage:false,customersView:false,customersEdit:false,printingManage:false,cashView:false,cashOperate:false,
-    settingsManage:false,usersManage:false,rolesManage:false
+    settingsManage:false
   }}
 };
 
@@ -168,7 +163,10 @@ let printAgentUpdateTimer=null;
 let promptedPrintAgentVersion='';
 const IMAGE_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadProductImage';
 const STORE_LOGO_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadStoreLogo';
+const STAFF_LOGIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/resolveStaffLogin';
 const STAFF_USER_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageStaffUser';
+const STAFF_ROLE_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageStaffRole';
+const STAFF_ORDER_PRIVATE_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/staffOrderPrivate';
 const CASH_OPERATION_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageCash';
 async function cashOperation(action,payload={}){
   const user=auth.currentUser;
@@ -273,13 +271,14 @@ function randomStaffEmail(username){
 }
 async function resolveStaffEmail(username){
   const normalized=normalizeUsername(username);
-  try{
-    const snap=await getDoc(doc(db,'staffLogins',normalized));
-    if(snap.exists()&&snap.data()?.email) return String(snap.data().email);
-  }catch(err){
-    console.warn('Não foi possível consultar o mapa de login administrativo.',err);
-  }
-  return legacyUsernameEmail(normalized);
+  const response=await fetch(STAFF_LOGIN_ENDPOINT,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:normalized})
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok||!data?.email) throw new Error('staff-login-lookup-failed');
+  return String(data.email);
 }
 function roleLabel(role){
   if(role==='master') return 'Master';
@@ -299,8 +298,7 @@ const permissionDependencies={
   productsDelete:'productsView',
   categoriesManage:'productsView',
   promotionsManage:'productsView',
-  cashOperate:'cashView',
-  customersEdit:'customersView'
+  cashOperate:'cashView'
 };
 
 function withPermissionDependencies(source={}){
@@ -390,19 +388,6 @@ onAuthStateChanged(auth,async user=>{
       return;
     }
 
-    // Garante que logins antigos (inclusive o Master inicial) ganhem o novo
-    // mapeamento username -> e-mail sem expor isso na interface.
-    const normalized=currentProfile.username||username;
-    try{
-      await setDoc(doc(db,'staffLogins',normalizeUsername(normalized)),{
-        uid:user.uid,
-        email:user.email||'',
-        updatedAt:serverTimestamp()
-      },{merge:true});
-    }catch(mappingError){
-      console.warn('Não foi possível atualizar o mapa de login.',mappingError);
-    }
-
     // A autenticação terminou com sucesso. O painel não volta para a tela
     // de login por causa de uma falha posterior do Firestore.
     $('#loginView').classList.add('hidden');
@@ -481,8 +466,8 @@ async function initializeAdmin(){
     tasks.push(loadCategories(),loadProducts());
   }
 
-  if(hasPermission('customersView')||hasPermission('customersEdit')) tasks.push(loadCustomers());
-  if(hasPermission('usersManage')||hasPermission('rolesManage')) tasks.push(loadUsers());
+  if(hasPermission('customersView')) tasks.push(loadCustomers());
+  if(isMaster()) tasks.push(loadUsers());
   if(hasPermission('ordersView')||hasPermission('promotionsManage')) tasks.push(loadPromotions());
   if(hasPermission('ordersView')||hasPermission('couponsManage')) tasks.push(loadCoupons());
   if(hasPermission('cashView')) tasks.push(loadCashSessions());
@@ -670,10 +655,9 @@ function allowedViews(){
   if(hasPermission('categoriesManage')) views.push('categories');
   if(hasPermission('promotionsManage')) views.push('promotions');
   if(hasPermission('couponsManage')) views.push('coupons');
-  if(hasPermission('customersView')||hasPermission('customersEdit')) views.push('customers');
+  if(hasPermission('customersView')) views.push('customers');
   if(hasPermission('printingManage')) views.push('printing');
-  if(hasPermission('usersManage')) views.push('users');
-  if(hasPermission('rolesManage')) views.push('roles');
+  if(isMaster()) views.push('users','roles');
   if(hasPermission('settingsManage')) views.push('settings');
   return views.length?views:['orders'];
 }
