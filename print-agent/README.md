@@ -4,7 +4,7 @@ Aplicativo local para Windows que permite à Central Delivery imprimir comandas 
 
 ## Versão atual
 
-`1.6.0`
+`1.7.0`
 
 ## Como funciona
 
@@ -27,9 +27,9 @@ A instalação é feita em:
 
 O Print Agent usa o registro do usuário atual (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`) e não precisa executar como administrador para iniciar com o Windows.
 
-O instalador 1.6.0 remove o **Mark-of-the-Web / Zone.Identifier** primeiro do pacote extraído e depois do executável instalado. Antes de concluir, ele verifica se o stream realmente desapareceu. Se o Windows ainda mantiver o bloqueio, a instalação para e informa o erro em vez de cadastrar um Agent que pediria confirmação a cada login.
+O instalador 1.7.0 remove o **Mark-of-the-Web / Zone.Identifier** primeiro do pacote extraído e depois do executável instalado. Antes de concluir, ele verifica se o stream realmente desapareceu. Se o Windows ainda mantiver o bloqueio, a instalação para e informa o erro em vez de cadastrar um Agent que pediria confirmação a cada login.
 
-> O executável continua sem assinatura Authenticode. Por isso o Windows ainda pode exibir um aviso na primeira execução do arquivo recém-baixado. Eliminar também o primeiro aviso exige assinatura digital de código.
+> O executável continua sem assinatura Authenticode. O Windows pode exibir SmartScreen ou aviso de fornecedor desconhecido na primeira execução. A remoção do Mark-of-the-Web reduz repetições nas inicializações seguintes, mas não substitui uma assinatura digital de código.
 
 ## Controles do Agent
 
@@ -85,3 +85,8 @@ O Agent também aparece em **Configurações do Windows → Aplicativos instalad
 A impressão usa a fila e o driver instalados no Windows. Impressoras térmicas, impressoras A4 e modelos de etiqueta que aparecem normalmente em **Configurações → Impressoras e scanners** podem ser utilizados.
 
 Para impressoras térmicas com driver que não aceite papel customizado pelo aplicativo, configure também a largura correspondente nas preferências do driver do Windows.
+
+
+## Segurança local
+
+A versão 1.7.0 aceita requisições de impressão apenas do domínio de produção, dos domínios oficiais do Firebase Hosting e de portas locais de desenvolvimento conhecidas. O endpoint de impressão exige `Origin`, limita o corpo HTTP, o tamanho do texto, o número de cópias e os modelos aceitos. Se a porta `17329` não puder ser aberta, o Agent informa a falha e encerra em vez de aparentar estar ativo.
