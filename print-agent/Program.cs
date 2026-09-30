@@ -36,7 +36,7 @@ internal static class Program
 
 internal static class AgentInfo
 {
-    public const string Version = "1.5.0";
+    public const string Version = "1.6.0";
 }
 
 internal static class AttachmentSecurity
@@ -105,16 +105,19 @@ internal sealed class TrayContext : ApplicationContext
 {
     private const string StartupValueName = "DeliveryPizzariaPrintAgent";
     private const string AppRegistryPath = @"Software\DeliveryPizzaria\PrintAgent";
+    private const string UninstallRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\DeliveryPizzariaPrintAgent";
     private const string SelectedPrinterValueName = "SelectedPrinter";
     private readonly NotifyIcon _tray;
     private readonly LocalPrintServer _server;
     private readonly ToolStripMenuItem _startupItem;
     private AgentSettingsForm? _settingsForm;
+    private System.Threading.Timer? _forcedExitTimer;
     private bool _exiting;
 
     public TrayContext()
     {
         EnsureFirstRunStartup();
+        EnsureInstallationRegistration();
         EnsureSelectedPrinter();
 
         _server = new LocalPrintServer(GetSelectedPrinter, SetSelectedPrinter);
@@ -231,6 +234,16 @@ internal sealed class TrayContext : ApplicationContext
             return;
 
         _exiting = true;
+
+        // O servidor HTTP local normalmente encerra quase instantaneamente.
+        // Este fallback evita que um driver/host travado deixe o processo preso
+        // depois que o usuário escolheu explicitamente "Sair do Agent".
+        _forcedExitTimer = new System.Threading.Timer(
+            _ => Environment.Exit(0),
+            null,
+            TimeSpan.FromSeconds(4),
+            Timeout.InfiniteTimeSpan);
+
         _settingsForm?.CloseForApplicationExit();
         ExitThread();
     }
@@ -241,7 +254,9 @@ internal sealed class TrayContext : ApplicationContext
             return;
 
         var result = MessageBox.Show(
-            "Deseja desinstalar o Delivery Pizzaria Print Agent deste computador?\n\nIsso removerá a inicialização com o Windows, as preferências do Agent e os arquivos instalados em AppData.",
+            "Deseja desinstalar o Delivery Pizzaria Print Agent deste computador?\n\n" +
+            "Isso removerá a inicialização com o Windows, as preferências do Agent, " +
+            "o registro em Aplicativos instalados e os arquivos em AppData.",
             "Desinstalar Print Agent",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning,
@@ -253,8 +268,26 @@ internal sealed class TrayContext : ApplicationContext
         try
         {
             SetStartup(false);
-            Registry.CurrentUser.DeleteSubKeyTree(AppRegistryPath, false);
 
+            var installedUninstaller = Path.Combine(AppContext.BaseDirectory, "Desinstalar.cmd");
+            if (File.Exists(installedUninstaller))
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/d /c \"\"{installedUninstaller}\" /SILENT\"",
+                    WorkingDirectory = AppContext.BaseDirectory,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                });
+
+                BeginExit();
+                return;
+            }
+
+            // Fallback para instalações antigas que ainda não possuam o
+            // Desinstalar.cmd dentro da pasta instalada.
             var installDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "DeliveryPizzaria",
@@ -272,6 +305,7 @@ internal sealed class TrayContext : ApplicationContext
                 taskkill /PID {pid} /F >nul 2>nul
                 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "DeliveryPizzariaPrintAgent" /f >nul 2>nul
                 reg delete "HKCU\Software\DeliveryPizzaria\PrintAgent" /f >nul 2>nul
+                reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\DeliveryPizzariaPrintAgent" /f >nul 2>nul
                 rmdir /S /Q "{installDirectory}" >nul 2>nul
                 del "%~f0" >nul 2>nul
                 """;
@@ -287,9 +321,7 @@ internal sealed class TrayContext : ApplicationContext
                 WindowStyle = ProcessWindowStyle.Hidden
             });
 
-            _exiting = true;
-            _settingsForm?.CloseForApplicationExit();
-            ExitThread();
+            BeginExit();
         }
         catch (Exception ex)
         {
@@ -364,6 +396,11 @@ internal sealed class TrayContext : ApplicationContext
         _exiting = true;
         _settingsForm?.CloseForApplicationExit();
 
+        // Some da bandeja imediatamente; o restante da limpeza pode levar
+        // alguns instantes se o host local estiver finalizando uma requisição.
+        _tray.Visible = false;
+        _tray.Dispose();
+
         try
         {
             _server.Dispose();
@@ -371,12 +408,14 @@ internal sealed class TrayContext : ApplicationContext
         catch
         {
             // O encerramento do Agent deve continuar mesmo se o servidor local
-            // já estiver em processo de desligamento.
+            // ou um driver de impressão estiver em processo de desligamento.
         }
-
-        _tray.Visible = false;
-        _tray.Dispose();
-        base.ExitThreadCore();
+        finally
+        {
+            _forcedExitTimer?.Dispose();
+            _forcedExitTimer = null;
+            base.ExitThreadCore();
+        }
     }
 
     private static void EnsureFirstRunStartup()
@@ -393,6 +432,57 @@ internal sealed class TrayContext : ApplicationContext
         {
             // Regrava o caminho caso o executável tenha sido atualizado/movido.
             SetStartup(true);
+        }
+    }
+
+    private static void EnsureInstallationRegistration()
+    {
+        try
+        {
+            var expectedDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "DeliveryPizzaria",
+                "PrintAgent");
+
+            var currentDirectory = Path.GetFullPath(AppContext.BaseDirectory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var normalizedExpected = Path.GetFullPath(expectedDirectory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            // Não registra "Aplicativos instalados" se alguém executou o EXE
+            // diretamente de Downloads/ZIP sem passar pelo instalador.
+            if (!string.Equals(
+                    currentDirectory,
+                    normalizedExpected,
+                    StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var executable = Application.ExecutablePath;
+            var uninstaller = Path.Combine(currentDirectory, "Desinstalar.cmd");
+
+            using var key = Registry.CurrentUser.CreateSubKey(UninstallRegistryPath);
+            key.SetValue("DisplayName", "Delivery Pizzaria Print Agent");
+            key.SetValue("DisplayVersion", AgentInfo.Version);
+            key.SetValue("Publisher", "GuiaSys Studio");
+            key.SetValue("InstallLocation", currentDirectory);
+            key.SetValue("DisplayIcon", executable);
+            key.SetValue("NoModify", 1, RegistryValueKind.DWord);
+            key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
+
+            if (File.Exists(uninstaller))
+            {
+                key.SetValue(
+                    "UninstallString",
+                    $"cmd.exe /d /c \"\"{uninstaller}\"\"");
+                key.SetValue(
+                    "QuietUninstallString",
+                    $"cmd.exe /d /c \"\"{uninstaller}\" /SILENT\"");
+            }
+        }
+        catch
+        {
+            // O registro em "Aplicativos instalados" é conveniência. Uma falha
+            // aqui não deve impedir o Agent de iniciar/imprimir.
         }
     }
 
@@ -768,6 +858,7 @@ internal sealed class LocalPrintServer : IDisposable
     private readonly Action<string?> _setSelectedPrinter;
     private WebApplication? _app;
     private Task? _runTask;
+    private bool _disposed;
 
     public LocalPrintServer(Func<string?> getSelectedPrinter, Action<string?> setSelectedPrinter)
     {
@@ -1195,23 +1286,51 @@ internal sealed class LocalPrintServer : IDisposable
 
     public void Dispose()
     {
-        _cts.Cancel();
+        if (_disposed)
+            return;
+
+        _disposed = true;
+
+        try
+        {
+            _cts.Cancel();
+        }
+        catch
+        {
+            // ignored during shutdown
+        }
 
         if (_app is not null)
         {
             try
             {
-                _app.StopAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+                using var stopCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1200));
+                _app.StopAsync(stopCts.Token).GetAwaiter().GetResult();
             }
             catch
             {
-                // ignored during shutdown
+                // O processo ainda será encerrado pelo ApplicationContext.
             }
 
-            _app.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            try
+            {
+                var disposeTask = _app.DisposeAsync().AsTask();
+                disposeTask.Wait(TimeSpan.FromMilliseconds(1200));
+            }
+            catch
+            {
+                // Não bloqueia a saída por causa do host local.
+            }
         }
 
-        _cts.Dispose();
+        try
+        {
+            _cts.Dispose();
+        }
+        catch
+        {
+            // ignored during shutdown
+        }
     }
 
     private sealed record PrintRequest(
