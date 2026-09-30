@@ -2011,6 +2011,16 @@ function maskCpf(value) {
   return "***."+cpf.slice(3,6)+"."+cpf.slice(6,9)+"-**";
 }
 
+function privateIdentityVerified(data={}) {
+  return data.cpfVerified===true ||
+    (!!data.cpfHash && validCpf(data.cpf));
+}
+
+function privateIdentityMasked(data={}) {
+  if(typeof data.cpfMasked==="string"&&data.cpfMasked) return data.cpfMasked;
+  return validCpf(data.cpf)?maskCpf(data.cpf):"";
+}
+
 function validFullName(value) {
   return normalizeText(value,100).split(/\s+/).filter(Boolean).length>=2;
 }
@@ -2047,11 +2057,24 @@ export const customerIdentity = onRequest(
       if (req.method==="GET") {
         const snap=await privateRef.get();
         const data=snap.exists?snap.data():{};
+        const verified=snap.exists&&privateIdentityVerified(data);
+        const masked=verified?privateIdentityMasked(data):"";
+
+        // Migração transparente de registros antigos que ainda continham CPF bruto.
+        if(verified&&(data.cpf||data.email)){
+          await privateRef.set({
+            cpf:FieldValue.delete(),
+            email:FieldValue.delete(),
+            cpfVerified:true,
+            cpfMasked:masked,
+            updatedAt:new Date()
+          },{merge:true});
+        }
+
         res.json({
           ok:true,
-          identityComplete:snap.exists&&validCpf(data?.cpf),
-          cpf:snap.exists?normalizeCpf(data?.cpf):"",
-          cpfMasked:snap.exists?maskCpf(data?.cpf):"",
+          identityComplete:verified,
+          cpfMasked:masked,
           email:decoded.email||"",
           emailVerified:decoded.email_verified===true
         });
@@ -2066,7 +2089,10 @@ export const customerIdentity = onRequest(
       const body=req.body||{};
       const name=normalizeText(body.name,100);
       const phone=phoneDigits(body.phone);
-      const cpf=normalizeCpf(body.cpf);
+      const providedCpf=normalizeCpf(body.cpf);
+      const existingSnap=await privateRef.get();
+      const existing=existingSnap.exists?existingSnap.data()||{}:{};
+      const existingVerified=privateIdentityVerified(existing);
 
       if (!validFullName(name)) {
         res.status(400).json({error:"full_name_required"});
@@ -2076,12 +2102,21 @@ export const customerIdentity = onRequest(
         res.status(400).json({error:"invalid_phone"});
         return;
       }
-      if (!validCpf(cpf)) {
+
+      let hash=existing.cpfHash||"";
+      let masked=privateIdentityMasked(existing);
+      if(providedCpf){
+        if (!validCpf(providedCpf)) {
+          res.status(400).json({error:"invalid_cpf"});
+          return;
+        }
+        hash=cpfHash(providedCpf);
+        masked=maskCpf(providedCpf);
+      }else if(!existingVerified||!hash){
         res.status(400).json({error:"invalid_cpf"});
         return;
       }
 
-      const hash=cpfHash(cpf);
       const indexRef=db.doc(`cpfIndex/${hash}`);
 
       await db.runTransaction(async tx=>{
@@ -2094,7 +2129,9 @@ export const customerIdentity = onRequest(
           throw Object.assign(new Error("cpf_already_registered"),{code:"cpf_already_registered"});
         }
 
-        const previousHash=privateSnap.exists?privateSnap.data()?.cpfHash:"";
+        const privateData=privateSnap.exists?privateSnap.data()||{}:{};
+        const previousHash=privateData.cpfHash||
+          (validCpf(privateData.cpf)?cpfHash(privateData.cpf):"");
         if (previousHash&&previousHash!==hash) {
           throw Object.assign(new Error("cpf_change_not_allowed"),{code:"cpf_change_not_allowed"});
         }
@@ -2105,9 +2142,12 @@ export const customerIdentity = onRequest(
         },{merge:true});
 
         tx.set(privateRef,{
-          cpf,
+          cpf:FieldValue.delete(),
+          email:FieldValue.delete(),
           cpfHash:hash,
-          email:decoded.email||"",
+          cpfMasked:masked,
+          cpfVerified:true,
+          verifiedAt:privateData.verifiedAt||new Date(),
           updatedAt:new Date(),
           ...(privateSnap.exists?{}:{createdAt:new Date()})
         },{merge:true});
@@ -2115,7 +2155,7 @@ export const customerIdentity = onRequest(
         tx.set(customerRef,{
           name,
           phone,
-          email:decoded.email||"",
+          email:FieldValue.delete(),
           identityComplete:true,
           updatedAt:new Date()
         },{merge:true});
@@ -2124,8 +2164,7 @@ export const customerIdentity = onRequest(
       res.json({
         ok:true,
         identityComplete:true,
-        cpf,
-        cpfMasked:maskCpf(cpf),
+        cpfMasked:masked,
         email:decoded.email||"",
         emailVerified:decoded.email_verified===true
       });
@@ -2295,7 +2334,7 @@ export const createOrder = onRequest(
 
       const customer=customerSnap.exists?customerSnap.data():{};
       const privateCustomer=privateCustomerSnap.exists?privateCustomerSnap.data():{};
-      if (!customer.identityComplete || !validCpf(privateCustomer.cpf)) {
+      if (!customer.identityComplete || !privateIdentityVerified(privateCustomer)) {
         res.status(409).json({error:"profile_incomplete"});
         return;
       }
