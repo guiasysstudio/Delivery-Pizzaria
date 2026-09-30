@@ -2227,6 +2227,18 @@ export const deleteCustomerAccount = onRequest(
       const privateSnap=await privateRef.get();
       const cpfHashValue=privateSnap.exists?normalizeText(privateSnap.data()?.cpfHash,128):"";
 
+      const ordersSnap=await db.collection("orders").where("customerId","==",uid).get();
+      const activeOrders=ordersSnap.docs.filter(orderDoc=>
+        !["completed","cancelled"].includes(orderDoc.data()?.status)
+      );
+      if(activeOrders.length){
+        res.status(409).json({
+          error:"active_orders",
+          activeOrders:activeOrders.length
+        });
+        return;
+      }
+
       await getAuth().updateUser(uid,{disabled:true}).catch(()=>{});
       await getAuth().revokeRefreshTokens(uid).catch(()=>{});
 
@@ -2234,13 +2246,11 @@ export const deleteCustomerAccount = onRequest(
         addressesSnap,
         favoritesSnap,
         rewardsSnap,
-        ordersSnap,
         requestSnap
       ]=await Promise.all([
         customerRef.collection("addresses").get(),
         customerRef.collection("favorites").get(),
         customerRef.collection("coupons").get(),
-        db.collection("orders").where("customerId","==",uid).get(),
         db.collection("orderRequests").where("customerId","==",uid).get()
       ]);
 
