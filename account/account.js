@@ -1,7 +1,7 @@
 import {
   db, watchCustomer, logoutCustomer, getCustomerProfile, saveCustomerProfile,
   getAddresses, saveAddress, deleteAddress, setDefaultAddress, getFavorites, setFavorite, lookupBrazilianZip,
-  getCustomerIdentity, saveCustomerIdentity, cancelCustomerOrder, formatCpf, validCpf, formatPhone, validPhone, validFullName,
+  getCustomerIdentity, saveCustomerIdentity, cancelCustomerOrder, deleteCustomerAccount, formatCpf, validCpf, formatPhone, validPhone, validFullName,
   resendCustomerEmailVerification
 } from '../assets/customer-auth.js';
 import {
@@ -200,7 +200,7 @@ bindAccountMask('#accAddressZip',formatAccountCep);
 $$('.account-nav-item').forEach(b=>b.onclick=()=>openSection(b.dataset.section));
 
 function openSection(section){
-  const valid=['profile','addresses','orders','coupons','favorites'];
+  const valid=['profile','addresses','orders','coupons','favorites','privacy'];
   if(!valid.includes(section)) section='profile';
   $$('.account-nav-item').forEach(b=>b.classList.toggle('active',b.dataset.section===section));
   $$('.account-section').forEach(s=>s.classList.toggle('hidden',s.id!=='account-section-'+section));
@@ -213,7 +213,7 @@ function renderProfile(){
   $('#profileEmail').value=user.email||'';
   $('#profileEmailStatus').textContent=user.emailVerified?'✓ E-mail verificado':'E-mail ainda não verificado';
   $('#resendEmailVerificationBtn').classList.toggle('hidden',user.emailVerified);
-  $('#profileCpf').value=identity?.cpf?formatCpf(identity.cpf):'';
+  $('#profileCpf').value='';
   $('#profileCpf').placeholder=identity?.cpfMasked||'000.000.000-00';
   $('#profileCpf').disabled=identity?.identityComplete===true;
   $('#profileCpfHint').textContent=identity?.identityComplete
@@ -285,7 +285,7 @@ $('#profileForm').onsubmit=async e=>{
     $('#profilePhone').focus();
     return;
   }
-  if(!validCpf(cpf)){
+  if(identity?.identityComplete!==true&&!validCpf(cpf)){
     showToast('Informe um CPF válido.','warning');
     $('#profileCpf').focus();
     return;
@@ -326,6 +326,76 @@ $('#profileForm').onsubmit=async e=>{
     else showToast('Não foi possível salvar seus dados. Tente novamente.','error');
   }
 };
+
+function downloadJsonFile(filename,data){
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement('a');
+  link.href=url;
+  link.download=filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),500);
+}
+
+$('#exportMyDataBtn')?.addEventListener('click',()=>{
+  if(!user) return;
+  const exportData={
+    exportedAt:new Date().toISOString(),
+    account:{
+      uid:user.uid,
+      email:user.email||'',
+      emailVerified:user.emailVerified===true,
+      profile:{
+        name:profile?.name||'',
+        phone:profile?.phone||'',
+        defaultAddressId:profile?.defaultAddressId||null,
+        identityComplete:profile?.identityComplete===true
+      },
+      identity:{
+        cpfMasked:identity?.cpfMasked||'',
+        identityComplete:identity?.identityComplete===true
+      }
+    },
+    addresses:addresses.map(a=>({...a})),
+    orders:orders.map(o=>({...o})),
+    favorites:[...favorites],
+    coupons:couponRewards.map(coupon=>({...coupon}))
+  };
+  downloadJsonFile('meus-dados-delivery-pizzaria.json',exportData);
+  showToast('Arquivo com seus dados preparado.','success');
+});
+
+$('#deleteMyAccountBtn')?.addEventListener('click',async()=>{
+  if(!user) return;
+  const first=await confirmAction(
+    'Excluir sua conta remove seus dados pessoais e não pode ser desfeito. Registros financeiros já concluídos serão mantidos sem seus dados de contato quando necessário.',
+    {title:'Excluir minha conta',confirmText:'Continuar',danger:true}
+  );
+  if(!first) return;
+
+  const second=await confirmAction(
+    'Confirma a exclusão definitiva da sua conta, endereços, favoritos, cupons pessoais e identificação?',
+    {title:'Confirmação final',confirmText:'Excluir definitivamente',danger:true}
+  );
+  if(!second) return;
+
+  const button=$('#deleteMyAccountBtn');
+  button.disabled=true;
+  try{
+    await deleteCustomerAccount();
+    localStorage.removeItem('deliverySelectedAddress');
+    localStorage.removeItem('deliveryReturnAfterProfile');
+    localStorage.removeItem('deliveryReturnToCheckout');
+    sessionStorage.clear();
+    location.href='../?accountDeleted=1';
+  }catch(err){
+    console.error(err);
+    showToast('Não foi possível excluir sua conta agora. Tente novamente ou entre em contato com a pizzaria.','error',{duration:7000});
+    button.disabled=false;
+  }
+});
 
 function addressText(a){
   let out=(a.street||'')+', '+(a.number||'')+' • '+(a.neighborhood||'');
