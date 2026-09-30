@@ -607,10 +607,12 @@ export const manageCash = onRequest(
           if(stateSnap.exists&&stateSnap.data()?.sessionId){
             throw Object.assign(new Error("cash_already_open"),{code:"cash_already_open"});
           }
-          if(daySnap.exists){
-            throw Object.assign(new Error("cash_day_already_exists"),{code:"cash_day_already_exists"});
-          }
 
+          const day=daySnap.exists?daySnap.data()||{}:{};
+          const previousIds=Array.isArray(day.sessionIds)
+            ?day.sessionIds.filter(id=>typeof id==="string"&&id)
+            :[];
+          const sessionNumber=previousIds.length+1;
           const salesSummary=emptyCashSalesSummary();
           const movementSummary=emptyCashMovementSummary();
           tx.set(sessionRef,{
@@ -618,6 +620,7 @@ export const manageCash = onRequest(
             locked:false,
             summaryVersion:2,
             businessDate,
+            sessionNumber,
             timezone,
             openingAmount,
             openingNote,
@@ -638,12 +641,16 @@ export const manageCash = onRequest(
             updatedAt:now
           });
           tx.set(dayRef,{
-            sessionId:sessionRef.id,
             businessDate,
             status:"open",
-            openedAt:now,
+            activeSessionId:sessionRef.id,
+            lastSessionId:sessionRef.id,
+            sessionIds:[...previousIds,sessionRef.id],
+            sessionCount:sessionNumber,
+            openedAt:day.openedAt||now,
+            lastOpenedAt:now,
             updatedAt:now
-          });
+          },{merge:true});
         });
 
         res.json({
@@ -651,6 +658,7 @@ export const manageCash = onRequest(
           action,
           sessionId:sessionRef.id,
           businessDate,
+          sessionNumber,
           openingAmount
         });
         return;
@@ -918,10 +926,11 @@ export const manageCash = onRequest(
           updatedAt:now
         });
         tx.set(dayRef,{
-          sessionId,
           businessDate:session.businessDate,
           status:"closed",
-          closedAt:now,
+          activeSessionId:null,
+          lastSessionId:sessionId,
+          lastClosedAt:now,
           updatedAt:now
         },{merge:true});
         tx.delete(stateRef);
@@ -947,7 +956,6 @@ export const manageCash = onRequest(
         ["order_not_found","cash_session_not_found"].includes(code)?404:
         [
           "cash_already_open",
-          "cash_day_already_exists",
           "cash_session_changed",
           "cash_not_open",
           "cash_changed_recheck",
