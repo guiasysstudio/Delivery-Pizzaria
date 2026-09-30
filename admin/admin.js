@@ -18,7 +18,7 @@ const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).
 function renderDemoModeIndicators(){
   const enabled=demoEnvironmentAllowed();
   $('#adminDemoBanner')?.classList.toggle('hidden',!enabled);
-  $('[data-demo-blaze]').forEach(el=>el.classList.toggle('hidden',!enabled));
+  $$('[data-demo-blaze]').forEach(el=>el.classList.toggle('hidden',!enabled));
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',renderDemoModeIndicators,{once:true});
 else renderDemoModeIndicators();
