@@ -652,6 +652,25 @@ function listenCustomerOrders(){
     }
     refreshCustomerOrderWindow();
   },err=>{
+    const code=String(err?.code||'');
+    if(code.includes('failed-precondition')){
+      console.warn('Índice de histórico ainda não publicado; usando consulta compatível temporária.',err);
+      const fallbackQuery=query(collection(db,'orders'),where('customerId','==',user.uid));
+      unsubscribeOrders=onSnapshot(fallbackQuery,fallbackSnap=>{
+        recentOrders=fallbackSnap.docs
+          .map(d=>({id:d.id,...d.data()}))
+          .sort((a,b)=>customerOrderMillis(b)-customerOrderMillis(a));
+        olderOrders=[];
+        customerOrderCursor=null;
+        customerOrderDone=true;
+        refreshCustomerOrderWindow();
+      },fallbackErr=>{
+        console.error('Falha ao acompanhar pedidos no modo compatível:',fallbackErr);
+        showToast('Não foi possível atualizar seu histórico de pedidos.','error');
+      });
+      return;
+    }
+
     console.error('Falha ao acompanhar pedidos:',err);
     showToast('Não foi possível atualizar seu histórico de pedidos.','error');
   });
