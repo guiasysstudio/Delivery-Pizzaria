@@ -416,7 +416,11 @@ $('#deleteMyAccountBtn')?.addEventListener('click',async()=>{
     location.href='../?accountDeleted=1';
   }catch(err){
     console.error(err);
-    showToast('Não foi possível excluir sua conta agora. Tente novamente ou entre em contato com a pizzaria.','error',{duration:7000});
+    if(String(err?.code||'').includes('active_orders')){
+      showToast('Existe pedido em andamento. Aguarde a conclusão ou o cancelamento antes de excluir a conta.','warning',{duration:8000});
+    }else{
+      showToast('Não foi possível excluir sua conta agora. Tente novamente ou entre em contato com a pizzaria.','error',{duration:7000});
+    }
     button.disabled=false;
   }
 });
