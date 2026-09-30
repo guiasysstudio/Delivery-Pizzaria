@@ -2212,6 +2212,134 @@ export const customerIdentity = onRequest(
 );
 
 
+export const migrateCustomerPrivacy = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:customerCors,
+    timeoutSeconds:120,
+    memory:"512MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    try{
+      await verifyStaffAdminRequest(req);
+      const db=getFirestore();
+      const migrationRef=db.doc("systemMigrations/customerPrivacyV1");
+      const existingMigration=await migrationRef.get();
+      if(existingMigration.exists&&existingMigration.data()?.completed===true){
+        res.json({
+          ok:true,
+          alreadyCompleted:true,
+          migratedPrivate:Number(existingMigration.data()?.migratedPrivate||0),
+          migratedPublic:Number(existingMigration.data()?.migratedPublic||0)
+        });
+        return;
+      }
+
+      const [privateSnap,publicSnap]=await Promise.all([
+        db.collection("customerPrivate").get(),
+        db.collection("customers").get()
+      ]);
+      const writer=db.bulkWriter();
+      let migratedPrivate=0;
+      let migratedPublic=0;
+      const conflicts=[];
+
+      const legacyPrivate=privateSnap.docs.filter(docSnap=>{
+        const data=docSnap.data()||{};
+        return !!data.cpf || !!data.email || data.cpfVerified!==true;
+      });
+
+      for(let offset=0;offset<legacyPrivate.length;offset+=50){
+        const chunk=legacyPrivate.slice(offset,offset+50);
+        const resolved=await Promise.all(chunk.map(async docSnap=>{
+          const data=docSnap.data()||{};
+          const rawCpf=normalizeCpf(data.cpf);
+          const hash=data.cpfHash || (validCpf(rawCpf)?cpfHash(rawCpf):"");
+          const indexRef=hash?db.doc(`cpfIndex/${hash}`):null;
+          const indexSnap=indexRef?await indexRef.get():null;
+          return {docSnap,data,rawCpf,hash,indexRef,indexSnap};
+        }));
+
+        for(const item of resolved){
+          const {docSnap,data,rawCpf,hash,indexRef,indexSnap}=item;
+          const validLegacy=validCpf(rawCpf);
+          if(!hash || (!data.cpfVerified&&data.cpf&&!validLegacy)){
+            conflicts.push({uid:docSnap.id,reason:"invalid_cpf"});
+            continue;
+          }
+          if(indexSnap?.exists&&indexSnap.data()?.uid!==docSnap.id){
+            conflicts.push({uid:docSnap.id,reason:"cpf_index_conflict"});
+            continue;
+          }
+
+          const masked=data.cpfMasked || (validLegacy?maskCpf(rawCpf):"");
+          writer.set(docSnap.ref,{
+            cpf:FieldValue.delete(),
+            email:FieldValue.delete(),
+            cpfHash:hash,
+            cpfMasked:masked,
+            cpfVerified:true,
+            migratedAt:new Date(),
+            updatedAt:new Date()
+          },{merge:true});
+          if(indexRef){
+            writer.set(indexRef,{
+              uid:docSnap.id,
+              updatedAt:new Date()
+            },{merge:true});
+          }
+          migratedPrivate++;
+        }
+      }
+
+      for(const customerDoc of publicSnap.docs){
+        const data=customerDoc.data()||{};
+        if(data.email!==undefined){
+          writer.update(customerDoc.ref,{
+            email:FieldValue.delete(),
+            updatedAt:new Date()
+          });
+          migratedPublic++;
+        }
+      }
+
+      await writer.close();
+
+      await migrationRef.set({
+        completed:conflicts.length===0,
+        migratedPrivate,
+        migratedPublic,
+        conflicts:conflicts.slice(0,100),
+        conflictCount:conflicts.length,
+        updatedAt:new Date(),
+        ...(conflicts.length?{}:{completedAt:new Date()})
+      },{merge:true});
+
+      if(conflicts.length){
+        res.status(409).json({
+          error:"privacy_migration_conflict",
+          migratedPrivate,
+          migratedPublic,
+          conflictCount:conflicts.length
+        });
+        return;
+      }
+
+      res.json({ok:true,migratedPrivate,migratedPublic});
+    }catch(err){
+      console.error("migrateCustomerPrivacy failed",err);
+      res.status(Number(err?.status)||500).json({
+        error:err?.code||err?.message||"customer_privacy_migration_failed"
+      });
+    }
+  }
+);
+
 export const deleteCustomerAccount = onRequest(
   {
     region:"southamerica-east1",
