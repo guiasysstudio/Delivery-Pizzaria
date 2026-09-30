@@ -398,3 +398,16 @@ O domínio público é `https://pizzaria.guiasys.online/`. O deploy de produçã
 O Print Agent 1.7.0 limita origens e payloads de impressão, detecta falha ao abrir a porta local 17329 e valida o serviço após a instalação. O pacote continua sem assinatura Authenticode, portanto o Windows pode exibir SmartScreen ou aviso de fornecedor desconhecido na primeira execução.
 
 O PWA possui fallback offline dedicado, evita cache de rotas `/api/` e força consulta fresca do manifesto de versão do Print Agent. Canonical, OpenGraph, sitemap, robots e atalhos de operação usam o domínio `pizzaria.guiasys.online`.
+
+
+## Módulo 6 — escala e auditoria final
+
+A etapa final adiciona paginação de pedidos, deduplicação de CEP, otimizações de consulta, revisão LGPD e uma suíte adversarial cobrindo concorrência, idempotência, adulteração de dados, falhas de rede, caixa e Print Agent.
+
+Para executar o pente-fino completo localmente:
+
+```powershell
+node scripts/final-audit.mjs
+```
+
+O relatório detalhado está em `docs/FINAL_AUDIT.md`. O deploy definitivo do Firebase continua separado desta auditoria e só deve ser executado depois de habilitar o ambiente de produção.
