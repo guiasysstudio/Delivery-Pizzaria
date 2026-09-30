@@ -445,8 +445,12 @@ function renderCustomerHeader(){
 
 async function loadCustomerOrderStats(uid){
   try{
-    const snap=await getDocs(query(collection(db,'orders'),where('customerId','==',uid)));
-    const completed=snap.docs.map(d=>d.data()).filter(o=>o.status==='completed');
+    const snap=await getDocs(query(
+      collection(db,'orders'),
+      where('customerId','==',uid),
+      where('status','==','completed')
+    ));
+    const completed=snap.docs.map(d=>d.data());
     return {
       count:completed.length,
       spent:completed.reduce((sum,o)=>sum+Number(o.total||0),0)
