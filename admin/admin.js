@@ -3656,8 +3656,11 @@ function editUser(uid){
   $('#userPassword').value='';
   $('#userPassword').required=!u;
   $('#userPasswordField').classList.toggle('hidden',!!u);
-  $('#userRole').value=u?.role||'cashier';
-  $('#userRole').disabled=u?.uid===auth.currentUser?.uid;
+  const roleSelect=$('#userRole');
+  const masterOption=[...roleSelect.options].find(option=>option.value==='master');
+  if(masterOption) masterOption.hidden=!(u?.role==='master');
+  roleSelect.value=u?.role||'cashier';
+  roleSelect.disabled=u?.uid===auth.currentUser?.uid||u?.role==='master';
   $('#userActive').checked=true;
   $('#userActive').closest('.check-row')?.classList.add('hidden');
   $('#userEditorHelp').textContent=u
@@ -3750,7 +3753,11 @@ function staffUserActionMessage(err){
   if(code.includes('master_protected')) return 'Somente um Master pode administrar outra conta Master.';
   if(code.includes('self_status_change')) return 'Você não pode desativar a própria conta.';
   if(code.includes('self_delete')) return 'Você não pode excluir a própria conta.';
-  if(code.includes('invalid_password')) return 'A senha precisa ter entre 6 e 128 caracteres.';
+  if(code.includes('invalid_password')) return 'A senha precisa ter pelo menos 10 caracteres, com letra e número.';
+  if(code.includes('invalid_username')) return 'O usuário precisa ter de 3 a 32 caracteres e usar apenas letras minúsculas, números, ponto, hífen ou sublinhado.';
+  if(code.includes('username_in_use')) return 'Esse nome de usuário já existe.';
+  if(code.includes('invalid_role')) return 'Escolha um perfil operacional ativo.';
+  if(code.includes('self_role_change')) return 'A própria conta Master não pode ter o perfil alterado.';
   if(code.includes('user_not_found')) return 'Este usuário não existe mais.';
   if(code.includes('permission_denied')) return 'Seu perfil não possui permissão para administrar este usuário.';
   return 'Não foi possível concluir a ação. Verifique as Firebase Functions e tente novamente.';
@@ -3794,7 +3801,7 @@ $('#userPasswordForm')?.addEventListener('submit',async e=>{
   const confirmPassword=$('#userConfirmPassword').value;
   $('#userPasswordError').classList.add('hidden');
 
-  if(password.length<10||!/[A-Za-z]/.test(password)||!/d/.test(password)){
+  if(password.length<10||!/[A-Za-z]/.test(password)||!/\d/.test(password)){
     $('#userPasswordError').textContent='A senha precisa ter pelo menos 10 caracteres, com letra e número.';
     $('#userPasswordError').classList.remove('hidden');
     return;
