@@ -475,12 +475,18 @@ function promotionMatchesProduct(p,product){
 }
 
 function applyPromotionValue(base,promo){
-  const value=Number(base||0);
+  const value=Number(base);
+  if(!Number.isFinite(value)||value<0) return NaN;
   if(!promo) return value;
+
+  const discount=Number(promo.discountValue);
+  if(!Number.isFinite(discount)||discount<=0) return NaN;
   if(promo.discountType==='percentage'){
-    return Math.max(0,value-(value*Number(promo.discountValue||0)/100));
+    if(discount>100) return NaN;
+    return Math.max(0,value-(value*discount/100));
   }
-  return Math.max(0,value-Number(promo.discountValue||0));
+  if(promo.discountType!=='fixed') return NaN;
+  return Math.max(0,value-discount);
 }
 
 function bestPromotionForSelection(selection,basePrice){
@@ -528,12 +534,30 @@ function normalizeCouponCode(value){
 
 function couponValidation(coupon,subtotal){
   if(!coupon||coupon.active===false) return {valid:false,message:'Cupom inválido ou inativo.'};
+  const value=Number(coupon.value);
+  const minimum=Number(coupon.minimumOrder||0);
+  const maxDiscount=Number(coupon.maxDiscount||0);
+  const minOrders=Number(coupon.minOrders||0);
+  const minSpent=Number(coupon.minSpent||0);
+  const type=coupon.type||'percentage';
+  if(
+    !Number.isFinite(value)||value<=0||
+    !Number.isFinite(minimum)||minimum<0||
+    !Number.isFinite(maxDiscount)||maxDiscount<0||
+    !Number.isInteger(minOrders)||minOrders<0||
+    !Number.isFinite(minSpent)||minSpent<0||
+    !['percentage','fixed'].includes(type)||
+    (type==='percentage'&&value>100)
+  ){
+    return {valid:false,message:'Este cupom está com configuração inválida. Entre em contato com a pizzaria.'};
+  }
+
   const timezone=settings?.timezone||'America/Porto_Velho';
   if(!dateTimeWindowActive(coupon.startsAt,'',timezone)) return {valid:false,message:'Este cupom ainda não começou.'};
   if(!dateTimeWindowActive('',coupon.endsAt,timezone)) return {valid:false,message:'Este cupom expirou.'};
-  if(subtotal<Number(coupon.minimumOrder||0)) return {valid:false,message:`Pedido mínimo para este cupom: ${money(coupon.minimumOrder)}.`};
-  if(customerOrderStats.count<Number(coupon.minOrders||0)) return {valid:false,message:`Este cupom exige pelo menos ${coupon.minOrders} pedido(s) concluído(s).`};
-  if(customerOrderStats.spent<Number(coupon.minSpent||0)) return {valid:false,message:`Este cupom exige ${money(coupon.minSpent)} em compras anteriores.`};
+  if(subtotal<minimum) return {valid:false,message:`Pedido mínimo para este cupom: ${money(minimum)}.`};
+  if(customerOrderStats.count<minOrders) return {valid:false,message:`Este cupom exige pelo menos ${minOrders} pedido(s) concluído(s).`};
+  if(customerOrderStats.spent<minSpent) return {valid:false,message:`Este cupom exige ${money(minSpent)} em compras anteriores.`};
   return {valid:true,message:'Cupom aplicado com sucesso.'};
 }
 
@@ -541,9 +565,9 @@ function couponDiscount(subtotal){
   if(!activeCoupon) return 0;
   const validation=couponValidation(activeCoupon,subtotal);
   if(!validation.valid) return 0;
-  let discount=activeCoupon.type==='percentage'
-    ?subtotal*Number(activeCoupon.value||0)/100
-    :Number(activeCoupon.value||0);
+  let discount=(activeCoupon.type||'percentage')==='percentage'
+    ?subtotal*Number(activeCoupon.value)/100
+    :Number(activeCoupon.value);
   const max=Number(activeCoupon.maxDiscount||0);
   if(max>0) discount=Math.min(discount,max);
   return Math.max(0,Math.min(subtotal,discount));
@@ -1742,6 +1766,11 @@ function secureOrderErrorMessage(code,data={}){
     invalid_address:'Complete rua, número, cidade e UF do endereço.',
     invalid_pricing_confirmation:'Não foi possível confirmar os valores do carrinho. Atualize e tente novamente.',
     pricing_changed:'O cardápio ou a taxa de entrega mudou. Revise o carrinho antes de enviar novamente.',
+    idempotency_conflict:'Uma tentativa anterior já gerou um pedido. Confira Meus Pedidos antes de enviar outro.',
+    cep_validation_unavailable:'Não foi possível validar o CEP agora. Tente novamente em instantes.',
+    neighborhood_unavailable:'Não foi possível identificar o bairro pelo CEP informado.',
+    location_unavailable:'Não foi possível obter a localização aproximada desse CEP.',
+    invalid_delivery_config:'A configuração de entrega precisa ser revisada pela pizzaria.',
     invalid_payment:'Escolha uma forma de pagamento válida.',
     invalid_change:'O valor informado para troco é menor que o total.',
     phone_required:'Informe um telefone de contato.',
