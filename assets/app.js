@@ -1917,11 +1917,13 @@ function createLocalDemoOrder({type,address,profilePhone,changeFor}){
     }:null,
     items:cart.map(item=>({
       productId:item.productId||'',
+      flavorProductIds:Array.isArray(item.flavorProductIds)?[...item.flavorProductIds]:[item.productId||''],
       name:item.name||'Item',
       qty:Number(item.qty||1),
       unitPrice:Number(item.unitPrice||0),
       size:item.size?{...item.size}:null,
       extras:(item.extras||[]).map(extra=>({...extra})),
+      promotion:item.promotion?{...item.promotion}:null,
       note:item.note||''
     })),
     subtotal:totals.subtotal,
