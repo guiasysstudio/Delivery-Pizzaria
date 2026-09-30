@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Drawing.Printing;
 using System.Text.Json;
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -17,6 +18,12 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        // Se o executável veio de um ZIP baixado da Internet, remove a marca
+        // Zone.Identifier depois da primeira autorização do usuário. Assim as
+        // próximas inicializações automáticas não voltam a exibir o aviso
+        // "O fornecedor não pôde ser verificado".
+        AttachmentSecurity.TryUnblockCurrentExecutable();
+
         using var mutex = new Mutex(true, InstanceMutexName, out var createdNew);
         if (!createdNew)
             return;
@@ -24,6 +31,33 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         Application.Run(new TrayContext());
         GC.KeepAlive(mutex);
+    }
+}
+
+internal static class AgentInfo
+{
+    public const string Version = "1.5.0";
+}
+
+internal static class AttachmentSecurity
+{
+    public static void TryUnblockCurrentExecutable()
+    {
+        try
+        {
+            var executablePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executablePath))
+                return;
+
+            // O stream alternativo Zone.Identifier é o Mark-of-the-Web do NTFS.
+            // File.Delete não faz nada se o stream não existir.
+            File.Delete(executablePath + ":Zone.Identifier");
+        }
+        catch
+        {
+            // Segurança complementar: o instalador também executa Unblock-File.
+            // Uma falha aqui não deve impedir o Agent de iniciar.
+        }
     }
 }
 
@@ -76,6 +110,7 @@ internal sealed class TrayContext : ApplicationContext
     private readonly LocalPrintServer _server;
     private readonly ToolStripMenuItem _startupItem;
     private AgentSettingsForm? _settingsForm;
+    private bool _exiting;
 
     public TrayContext()
     {
@@ -99,9 +134,11 @@ internal sealed class TrayContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add("Abrir configurações", null, (_, _) => ShowSettings());
         menu.Items.Add("Status", null, (_, _) => ShowStatus());
+        menu.Items.Add("Imprimir teste", null, (_, _) => PrintTest());
         menu.Items.Add(_startupItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Sair", null, (_, _) => ExitThread());
+        menu.Items.Add("Sair do Print Agent", null, (_, _) => RequestExit());
+        menu.Items.Add("Desinstalar Print Agent", null, (_, _) => RequestUninstall());
 
         _tray = new NotifyIcon
         {
@@ -139,7 +176,10 @@ internal sealed class TrayContext : ApplicationContext
                     _startupItem.Checked = enabled;
                 },
                 GetSelectedPrinter,
-                SetSelectedPrinter);
+                SetSelectedPrinter,
+                PrintTest,
+                RequestExit,
+                RequestUninstall);
             _settingsForm.FormClosed += (_, _) => _settingsForm = null;
         }
 
@@ -158,6 +198,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         MessageBox.Show(
             "Delivery Pizzaria Print Agent está ativo.\n\n" +
+            "Versão: " + AgentInfo.Version + "\n" +
             "Endereço local: http://127.0.0.1:17329\n" +
             "Impressora selecionada: " + (GetSelectedPrinter() ?? "nenhuma") + "\n\n" +
             "A impressora física é escolhida e salva no próprio Print Agent.",
@@ -166,10 +207,173 @@ internal sealed class TrayContext : ApplicationContext
             MessageBoxIcon.Information);
     }
 
+    private void RequestExit()
+    {
+        if (_exiting)
+            return;
+
+        var result = MessageBox.Show(
+            "Deseja encerrar o Print Agent?\n\nEnquanto ele estiver fechado, a Central Delivery não conseguirá imprimir automaticamente neste computador.",
+            "Sair do Print Agent",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question,
+            MessageBoxDefaultButton.Button2);
+
+        if (result != DialogResult.Yes)
+            return;
+
+        BeginExit();
+    }
+
+    private void BeginExit()
+    {
+        if (_exiting)
+            return;
+
+        _exiting = true;
+        _settingsForm?.CloseForApplicationExit();
+        ExitThread();
+    }
+
+    private void RequestUninstall()
+    {
+        if (_exiting)
+            return;
+
+        var result = MessageBox.Show(
+            "Deseja desinstalar o Delivery Pizzaria Print Agent deste computador?\n\nIsso removerá a inicialização com o Windows, as preferências do Agent e os arquivos instalados em AppData.",
+            "Desinstalar Print Agent",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+
+        if (result != DialogResult.Yes)
+            return;
+
+        try
+        {
+            SetStartup(false);
+            Registry.CurrentUser.DeleteSubKeyTree(AppRegistryPath, false);
+
+            var installDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "DeliveryPizzaria",
+                "PrintAgent");
+
+            var scriptPath = Path.Combine(
+                Path.GetTempPath(),
+                $"DeliveryPizzaria-PrintAgent-Uninstall-{Guid.NewGuid():N}.cmd");
+
+            var pid = Environment.ProcessId;
+            var script = $"""
+                @echo off
+                setlocal
+                timeout /t 2 /nobreak >nul
+                taskkill /PID {pid} /F >nul 2>nul
+                reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "DeliveryPizzariaPrintAgent" /f >nul 2>nul
+                reg delete "HKCU\Software\DeliveryPizzaria\PrintAgent" /f >nul 2>nul
+                rmdir /S /Q "{installDirectory}" >nul 2>nul
+                del "%~f0" >nul 2>nul
+                """;
+
+            File.WriteAllText(scriptPath, script);
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/d /c \"\"{scriptPath}\"\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            });
+
+            _exiting = true;
+            _settingsForm?.CloseForApplicationExit();
+            ExitThread();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Não foi possível iniciar a desinstalação.\n\n" + ex.Message,
+                "Print Agent",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private static void PrintTest()
+    {
+        var printerName = GetSelectedPrinter();
+        if (string.IsNullOrWhiteSpace(printerName))
+        {
+            MessageBox.Show(
+                "Nenhuma impressora está selecionada. Escolha uma impressora nas configurações do Print Agent.",
+                "Imprimir teste",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        try
+        {
+            using var document = new PrintDocument();
+            document.PrinterSettings.PrinterName = printerName;
+            document.PrintController = new StandardPrintController();
+            document.DocumentName = "Teste Delivery Pizzaria Print Agent";
+            document.PrintPage += (_, e) =>
+            {
+                using var titleFont = new Font("Segoe UI", 14F, FontStyle.Bold);
+                using var bodyFont = new Font("Segoe UI", 9F, FontStyle.Regular);
+
+                var graphics = e.Graphics ?? throw new InvalidOperationException("Contexto de impressão indisponível.");
+                var x = e.MarginBounds.Left;
+                var y = e.MarginBounds.Top;
+
+                graphics.DrawString("Delivery Pizzaria Print Agent", titleFont, Brushes.Black, x, y);
+                y += titleFont.GetHeight(graphics) + 12;
+                graphics.DrawString("TESTE DE IMPRESSÃO", bodyFont, Brushes.Black, x, y);
+                y += bodyFont.GetHeight(graphics) + 6;
+                graphics.DrawString("Versão: " + AgentInfo.Version, bodyFont, Brushes.Black, x, y);
+                y += bodyFont.GetHeight(graphics) + 6;
+                graphics.DrawString("Impressora: " + printerName, bodyFont, Brushes.Black, x, y);
+                y += bodyFont.GetHeight(graphics) + 6;
+                graphics.DrawString("Data: " + DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss"), bodyFont, Brushes.Black, x, y);
+                e.HasMorePages = false;
+            };
+
+            document.Print();
+
+            MessageBox.Show(
+                "Página de teste enviada para:\n\n" + printerName,
+                "Imprimir teste",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Não foi possível imprimir o teste.\n\n" + ex.Message,
+                "Imprimir teste",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
     protected override void ExitThreadCore()
     {
-        _settingsForm?.Close();
-        _server.Dispose();
+        _exiting = true;
+        _settingsForm?.CloseForApplicationExit();
+
+        try
+        {
+            _server.Dispose();
+        }
+        catch
+        {
+            // O encerramento do Agent deve continuar mesmo se o servidor local
+            // já estiver em processo de desligamento.
+        }
+
         _tray.Visible = false;
         _tray.Dispose();
         base.ExitThreadCore();
@@ -255,18 +459,28 @@ internal sealed class AgentSettingsForm : Form
     private readonly CheckBox _startupCheck;
     private readonly ComboBox _printers;
     private readonly Label _statusLabel;
+    private readonly Action _printTest;
+    private readonly Action _requestExit;
+    private readonly Action _requestUninstall;
     private bool _refreshingPrinters;
+    private bool _allowClose;
 
     public AgentSettingsForm(
         Func<bool> getStartup,
         Action<bool> setStartup,
         Func<string?> getSelectedPrinter,
-        Action<string?> setSelectedPrinter)
+        Action<string?> setSelectedPrinter,
+        Action printTest,
+        Action requestExit,
+        Action requestUninstall)
     {
         _getStartup = getStartup;
         _setStartup = setStartup;
         _getSelectedPrinter = getSelectedPrinter;
         _setSelectedPrinter = setSelectedPrinter;
+        _printTest = printTest;
+        _requestExit = requestExit;
+        _requestUninstall = requestUninstall;
 
         Text = "Delivery Pizzaria • Print Agent";
         Icon = BrandIconFactory.Create();
@@ -274,8 +488,8 @@ internal sealed class AgentSettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = true;
-        Width = 520;
-        Height = 410;
+        Width = 575;
+        Height = 500;
         BackColor = Color.White;
         Font = new Font("Segoe UI", 9F);
 
@@ -306,20 +520,29 @@ internal sealed class AgentSettingsForm : Form
             Top = 96
         };
 
+        var versionLabel = new Label
+        {
+            Text = "Versão " + AgentInfo.Version,
+            ForeColor = Color.DimGray,
+            AutoSize = true,
+            Left = 24,
+            Top = 118
+        };
+
         var printerLabel = new Label
         {
             Text = "Impressoras detectadas",
             Font = new Font("Segoe UI", 9F, FontStyle.Bold),
             AutoSize = true,
             Left = 24,
-            Top = 137
+            Top = 150
         };
 
         _printers = new ComboBox
         {
             Left = 24,
-            Top = 160,
-            Width = 455,
+            Top = 174,
+            Width = 505,
             DropDownStyle = ComboBoxStyle.DropDownList
         };
         _printers.SelectedIndexChanged += (_, _) =>
@@ -333,11 +556,50 @@ internal sealed class AgentSettingsForm : Form
         {
             Text = "Atualizar impressoras",
             Left = 24,
-            Top = 202,
-            Width = 150,
+            Top = 218,
+            Width = 155,
             Height = 34
         };
         refresh.Click += (_, _) => RefreshPrinters();
+
+        var testButton = new Button
+        {
+            Text = "Imprimir teste",
+            Left = 189,
+            Top = 218,
+            Width = 125,
+            Height = 34
+        };
+        testButton.Click += (_, _) => _printTest();
+
+        var windowsPrintersButton = new Button
+        {
+            Text = "Impressoras do Windows",
+            Left = 324,
+            Top = 218,
+            Width = 205,
+            Height = 34
+        };
+        windowsPrintersButton.Click += (_, _) =>
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "ms-settings:printers",
+                    UseShellExecute = true
+                });
+            }
+            catch
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "control.exe",
+                    Arguments = "printers",
+                    UseShellExecute = true
+                });
+            }
+        };
 
         _startupCheck = new CheckBox
         {
@@ -345,7 +607,7 @@ internal sealed class AgentSettingsForm : Form
             Checked = _getStartup(),
             AutoSize = true,
             Left = 24,
-            Top = 258
+            Top = 272
         };
         _startupCheck.CheckedChanged += (_, _) => _setStartup(_startupCheck.Checked);
 
@@ -353,7 +615,7 @@ internal sealed class AgentSettingsForm : Form
         {
             Text = "Abrir painel da pizzaria",
             Left = 24,
-            Top = 302,
+            Top = 312,
             Width = 180,
             Height = 36
         };
@@ -368,22 +630,55 @@ internal sealed class AgentSettingsForm : Form
 
         var closeButton = new Button
         {
-            Text = "Fechar",
-            Left = 379,
-            Top = 302,
-            Width = 100,
+            Text = "Fechar janela",
+            Left = 24,
+            Top = 372,
+            Width = 130,
             Height = 36
         };
         closeButton.Click += (_, _) => Hide();
 
+        var exitButton = new Button
+        {
+            Text = "Sair do Agent",
+            Left = 164,
+            Top = 372,
+            Width = 135,
+            Height = 36
+        };
+        exitButton.Click += (_, _) => _requestExit();
+
+        var uninstallButton = new Button
+        {
+            Text = "Desinstalar Print Agent",
+            Left = 309,
+            Top = 372,
+            Width = 220,
+            Height = 36,
+            ForeColor = Color.DarkRed
+        };
+        uninstallButton.Click += (_, _) => _requestUninstall();
+
+        var closeHint = new Label
+        {
+            Text = "Fechar janela mantém o Agent ativo ao lado do relógio. “Sair do Agent” encerra o serviço de impressão.",
+            ForeColor = Color.DimGray,
+            AutoSize = false,
+            Left = 24,
+            Top = 421,
+            Width = 505,
+            Height = 38
+        };
+
         Controls.AddRange([
-            title, subtitle, _statusLabel, printerLabel, _printers,
-            refresh, _startupCheck, adminButton, closeButton
+            title, subtitle, _statusLabel, versionLabel, printerLabel, _printers,
+            refresh, testButton, windowsPrintersButton, _startupCheck,
+            adminButton, closeButton, exitButton, uninstallButton, closeHint
         ]);
 
         FormClosing += (_, e) =>
         {
-            if (e.CloseReason == CloseReason.UserClosing)
+            if (!_allowClose && e.CloseReason == CloseReason.UserClosing)
             {
                 e.Cancel = true;
                 Hide();
@@ -391,6 +686,15 @@ internal sealed class AgentSettingsForm : Form
         };
 
         RefreshPrinters();
+    }
+
+    public void CloseForApplicationExit()
+    {
+        if (IsDisposed)
+            return;
+
+        _allowClose = true;
+        Close();
     }
 
     public void SyncStartupState(bool enabled)
@@ -452,7 +756,7 @@ internal sealed class AgentSettingsForm : Form
 
 internal sealed class LocalPrintServer : IDisposable
 {
-    private const string AgentVersion = "1.4.0";
+    private const string AgentVersion = AgentInfo.Version;
     private static readonly HttpClient LogoHttpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(5)
