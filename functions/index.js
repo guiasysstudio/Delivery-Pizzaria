@@ -446,36 +446,118 @@ export const manageStaffUser = onRequest(
     }
 
     try{
-      const {decoded,isMaster}=await verifyStaffAdminRequest(req);
+      const {decoded}=await verifyStaffAdminRequest(req);
       const action=normalizeText(req.body?.action,40);
-      const targetUid=normalizeText(req.body?.uid,160);
+      const db=getFirestore();
 
+      if(action==="create"){
+        const username=normalizeStaffUsername(req.body?.username);
+        const displayName=normalizeText(req.body?.displayName,80)||username;
+        const password=String(req.body?.password||"");
+        if(!validStaffUsername(username)){
+          res.status(400).json({error:"invalid_username"});
+          return;
+        }
+        if(!validStaffPassword(password)){
+          res.status(400).json({error:"invalid_password"});
+          return;
+        }
+        const role=await validateNonMasterRole(db,req.body?.role);
+        const loginRef=db.doc(`staffLogins/${username}`);
+        const existing=await loginRef.get();
+        if(existing.exists){
+          res.status(409).json({error:"username_in_use"});
+          return;
+        }
+
+        const token=randomBytes(12).toString("hex");
+        const internalEmail=`staff.${username}.${token}@delivery-pizzaria.local`;
+        let created=null;
+        try{
+          created=await getAuth().createUser({
+            email:internalEmail,
+            password,
+            displayName,
+            disabled:false
+          });
+          const userRef=db.doc(`users/${created.uid}`);
+          await db.runTransaction(async tx=>{
+            const again=await tx.get(loginRef);
+            if(again.exists){
+              throw Object.assign(new Error("username_in_use"),{code:"username_in_use"});
+            }
+            tx.set(userRef,{
+              username,
+              displayName,
+              role,
+              active:true,
+              createdBy:decoded.uid,
+              createdAt:new Date(),
+              updatedAt:new Date()
+            });
+            tx.set(loginRef,{
+              uid:created.uid,
+              email:internalEmail,
+              createdAt:new Date(),
+              updatedAt:new Date()
+            });
+          });
+        }catch(err){
+          if(created?.uid){
+            try{await getAuth().deleteUser(created.uid);}catch{}
+          }
+          throw err;
+        }
+
+        res.json({ok:true,uid:created.uid,username,displayName,role,active:true});
+        return;
+      }
+
+      const targetUid=normalizeText(req.body?.uid,160);
       if(!targetUid){
         res.status(400).json({error:"user_required"});
         return;
       }
 
-      const db=getFirestore();
       const targetRef=db.doc(`users/${targetUid}`);
       const targetSnap=await targetRef.get();
       if(!targetSnap.exists){
         res.status(404).json({error:"user_not_found"});
         return;
       }
-
       const target=targetSnap.data()||{};
-      if(target.role==="master" && !isMaster){
-        res.status(403).json({error:"master_protected"});
+
+      if(action==="update"){
+        const displayName=normalizeText(req.body?.displayName,80)||normalizeText(target.username,32);
+        if(target.role==="master"){
+          if(targetUid!==decoded.uid || req.body?.role!=="master"){
+            res.status(403).json({error:"master_protected"});
+            return;
+          }
+          await targetRef.set({displayName,updatedAt:new Date()},{merge:true});
+          await getAuth().updateUser(targetUid,{displayName});
+          res.json({ok:true,uid:targetUid,displayName,role:"master"});
+          return;
+        }
+
+        if(targetUid===decoded.uid){
+          res.status(409).json({error:"self_role_change"});
+          return;
+        }
+        const role=await validateNonMasterRole(db,req.body?.role);
+        await targetRef.set({displayName,role,updatedAt:new Date()},{merge:true});
+        await getAuth().updateUser(targetUid,{displayName});
+        await getAuth().revokeRefreshTokens(targetUid);
+        res.json({ok:true,uid:targetUid,displayName,role});
         return;
       }
 
       if(action==="setPassword"){
         const password=String(req.body?.password||"");
-        if(password.length<6 || password.length>128){
+        if(!validStaffPassword(password)){
           res.status(400).json({error:"invalid_password"});
           return;
         }
-
         await getAuth().updateUser(targetUid,{password});
         await getAuth().revokeRefreshTokens(targetUid);
         await targetRef.set({
@@ -483,7 +565,6 @@ export const manageStaffUser = onRequest(
           passwordChangedBy:decoded.uid,
           updatedAt:new Date()
         },{merge:true});
-
         res.json({ok:true});
         return;
       }
@@ -493,21 +574,18 @@ export const manageStaffUser = onRequest(
           res.status(409).json({error:"self_status_change"});
           return;
         }
-
         const active=req.body?.active===true;
         if(!active && target.role==="master"){
           await ensureMasterCanBeChanged(db,targetUid,target);
         }
-
         await getAuth().updateUser(targetUid,{disabled:!active});
-        if(!active) await getAuth().revokeRefreshTokens(targetUid);
+        await getAuth().revokeRefreshTokens(targetUid);
         await targetRef.set({
           active,
           statusChangedAt:new Date(),
           statusChangedBy:decoded.uid,
           updatedAt:new Date()
         },{merge:true});
-
         res.json({ok:true,active});
         return;
       }
@@ -517,23 +595,18 @@ export const manageStaffUser = onRequest(
           res.status(409).json({error:"self_delete"});
           return;
         }
-
         if(target.role==="master"){
           await ensureMasterCanBeChanged(db,targetUid,target);
         }
 
-        const username=normalizeText(target.username,32);
+        const username=normalizeStaffUsername(target.username);
+        await getAuth().updateUser(targetUid,{disabled:true}).catch(()=>{});
+        await getAuth().revokeRefreshTokens(targetUid).catch(()=>{});
         const batch=db.batch();
         batch.delete(targetRef);
         if(username) batch.delete(db.doc(`staffLogins/${username}`));
         await batch.commit();
-
-        try{
-          await getAuth().deleteUser(targetUid);
-        }catch(err){
-          console.error("Authentication user deletion failed after profile removal",err);
-          throw Object.assign(new Error("auth_delete_failed"),{status:500,code:"auth_delete_failed"});
-        }
+        await getAuth().deleteUser(targetUid);
 
         res.json({ok:true,deleted:true});
         return;
@@ -542,13 +615,12 @@ export const manageStaffUser = onRequest(
       res.status(400).json({error:"invalid_action"});
     }catch(err){
       console.error("manageStaffUser failed",err);
-      res.status(Number(err?.status)||500).json({
-        error:err?.code||err?.message||"staff_user_action_failed"
-      });
+      const code=err?.code||err?.message||"staff_user_action_failed";
+      const status=Number(err?.status)||(code==="username_in_use"?409:500);
+      res.status(status).json({error:code});
     }
   }
 );
-
 
 const cashCors=[
   "https://guiasysstudio.github.io",
