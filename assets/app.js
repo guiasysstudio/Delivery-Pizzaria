@@ -1937,6 +1937,11 @@ function createLocalDemoOrder({type,address,profilePhone,changeFor}){
     subtotal:totals.subtotal,
     discount:totals.discount,
     deliveryFee:totals.fee,
+    deliveryPricing:{
+      mode:settings.deliveryPricingMode||'fixed',
+      fee:totals.fee,
+      demoSnapshot:true
+    },
     total:totals.total,
     coupon:activeCoupon?{
       id:activeCoupon.id||'',
