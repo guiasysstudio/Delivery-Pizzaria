@@ -612,17 +612,28 @@ async function staffRoleAdminAction(action,payload={}){
 
 async function loadRoles(){
   try{
-    let snap=await getDocs(collection(db,'roles'));
-    roles=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-
-    if(!roles.length&&isMaster()){
-      await staffRoleAdminAction('seedDefaults');
-      snap=await getDocs(collection(db,'roles'));
+    if(isMaster()){
+      let snap=await getDocs(collection(db,'roles'));
       roles=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+
+      if(!roles.length){
+        await staffRoleAdminAction('seedDefaults');
+        snap=await getDocs(collection(db,'roles'));
+        roles=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+      }
+    }else{
+      const roleId=currentProfile?.role;
+      if(roleId&&roleId!=='master'){
+        const snap=await getDoc(doc(db,'roles',roleId));
+        roles=snap.exists()?[{id:snap.id,...snap.data()}]:[];
+      }else{
+        roles=[];
+      }
     }
   }catch(err){
-    console.warn('Perfis personalizados ainda não disponíveis. Usando perfis padrão.',err);
-    roles=Object.entries(defaultRoleTemplates).map(([id,v])=>({id,name:v.name,permissions:v.permissions,system:true,active:true}));
+    console.warn('Perfil de acesso não disponível; usando configuração local mínima.',err);
+    const fallback=defaultRoleTemplates[currentProfile?.role];
+    roles=fallback?[{id:currentProfile.role,name:fallback.name,permissions:fallback.permissions,system:true,active:true}]:[];
   }
   refreshUserRoleSelect();
   renderRoles();
