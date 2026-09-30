@@ -1629,6 +1629,13 @@ async function openCheckout(){
   }
   if(!cart.length) return;
 
+  const passwordLogin=customer.providerData?.some(provider=>provider.providerId==='password');
+  if(passwordLogin&&!customer.emailVerified){
+    showToast('Confirme seu e-mail antes de fazer o pedido. Você pode reenviar a verificação em Minha Conta.','warning',{duration:8000});
+    location.href='./account/#profile';
+    return;
+  }
+
   try{
     const reconciliation=await refreshCommerceStateBeforeCheckout();
     if(reconciliation.changed){
