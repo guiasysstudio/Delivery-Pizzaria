@@ -199,6 +199,7 @@ function cashOperationMessage(err){
     cash_session_changed:'O caixa atual mudou em outro computador. Atualize e confira os dados.',
     cash_not_open:'É necessário manter um caixa aberto para concluir esta operação.',
     cash_changed_recheck:'O caixa recebeu uma venda ou movimento enquanto você conferia. Revise os valores antes de fechar.',
+    insufficient_cash:'A sangria é maior que o dinheiro disponível esperado no caixa.',
     invalid_opening_amount:'Informe um valor inicial válido.',
     invalid_cash_movement:'Informe um movimento e valor válidos.',
     invalid_closing_amount:'Informe um valor contado válido.',
