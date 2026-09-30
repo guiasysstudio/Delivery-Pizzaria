@@ -5,7 +5,7 @@ import {
   resendCustomerEmailVerification
 } from '../assets/customer-auth.js';
 import {
-  collection, doc, getDoc, getDocs, query, where, onSnapshot
+  collection, doc, getDoc, getDocs, query, where, orderBy, limit, startAfter, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { showToast, confirmAction, emptyStateHtml, iconHtml, applyBrandTheme } from '../assets/ui.js';
 
@@ -16,6 +16,8 @@ const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const placeholder='../assets/products/placeholder.svg';
 
 let user=null,profile=null,identity=null,addresses=[],orders=[],favorites=new Set(),products=[],couponRewards=[],settings={},pendingCustomPhotoURL=undefined;
+const CUSTOMER_ORDER_PAGE_SIZE=25;
+let recentOrders=[],olderOrders=[],customerOrderCursor=null,customerOrderDone=false,customerOrderLoading=false;
 let unsubscribeOrders=null;
 
 const statusLabels={
@@ -64,7 +66,6 @@ async function loadAll(){
     getFavorites(user.uid),
     getDocs(collection(db,'products')),
     getDoc(doc(db,'settings','store')),
-    getDocs(query(collection(db,'orders'),where('customerId','==',user.uid))),
     getDocs(collection(db,'customers',user.uid,'coupons')).catch(err=>{console.warn('Cupons ainda não disponíveis.',err);return null;}),
     getCustomerIdentity().catch(err=>{
       console.warn('Identidade privada ainda não disponível.',err);
@@ -78,13 +79,9 @@ async function loadAll(){
   products=results[3].docs.map(d=>({id:d.id,...d.data()}));
   settings=results[4].exists()?results[4].data():{};
   applyBrandTheme(settings.primaryColor||'#b91c1c');
-  orders=results[5].docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
-    const ad=a.createdAt?.toMillis?.()||0;
-    const bd=b.createdAt?.toMillis?.()||0;
-    return bd-ad;
-  });
-  couponRewards=results[6]?.docs?.map(d=>({id:d.id,...d.data()}))||[];
-  identity=results[7]||{identityComplete:!!profile?.identityComplete,cpfMasked:''};
+  orders=[];
+  couponRewards=results[5]?.docs?.map(d=>({id:d.id,...d.data()}))||[];
+  identity=results[6]||{identityComplete:!!profile?.identityComplete,cpfMasked:''};
 }
 
 function effectiveProfilePhoto(){
@@ -339,25 +336,37 @@ function downloadJsonFile(filename,data){
   setTimeout(()=>URL.revokeObjectURL(url),500);
 }
 
+async function loadCompleteCustomerExport(){
+  const [ordersSnap,privateSnap]=await Promise.all([
+    getDocs(query(collection(db,'orders'),where('customerId','==',user.uid))),
+    getDocs(query(collection(db,'orderPrivate'),where('customerId','==',user.uid)))
+  ]);
+
+  const privateByOrder=new Map(
+    privateSnap.docs.map(docSnap=>[docSnap.id,docSnap.data()])
+  );
+
+  const completeOrders=ordersSnap.docs
+    .map(docSnap=>({id:docSnap.id,...docSnap.data()}))
+    .sort((a,b)=>customerOrderMillis(b)-customerOrderMillis(a))
+    .map(order=>{
+      const privateData=privateByOrder.get(order.id)||{};
+      return {
+        ...order,
+        customer:privateData.customer||order.customer||null,
+        address:privateData.address||order.address||null
+      };
+    });
+
+  return completeOrders;
+}
+
 $('#exportMyDataBtn')?.addEventListener('click',async()=>{
   if(!user) return;
   const button=$('#exportMyDataBtn');
   button.disabled=true;
   try{
-    const privateOrders=await Promise.all(orders.map(async order=>{
-      try{
-        const snap=await getDoc(doc(db,'orderPrivate',order.id));
-        const privateData=snap.exists()?snap.data():{};
-        return {
-          ...order,
-          customer:privateData.customer||order.customer||null,
-          address:privateData.address||order.address||null
-        };
-      }catch(err){
-        console.warn('Dados privados de um pedido não puderam ser incluídos na exportação.',err);
-        return {...order};
-      }
-    }));
+    const completeOrders=await loadCompleteCustomerExport();
 
     const exportData={
       exportedAt:new Date().toISOString(),
@@ -366,9 +375,7 @@ $('#exportMyDataBtn')?.addEventListener('click',async()=>{
         email:user.email||'',
         emailVerified:user.emailVerified===true,
         profile:{
-          name:profile?.name||'',
-          phone:profile?.phone||'',
-          defaultAddressId:profile?.defaultAddressId||null,
+          ...(profile||{}),
           identityComplete:profile?.identityComplete===true
         },
         identity:{
@@ -377,12 +384,12 @@ $('#exportMyDataBtn')?.addEventListener('click',async()=>{
         }
       },
       addresses:addresses.map(a=>({...a})),
-      orders:privateOrders,
+      orders:completeOrders,
       favorites:[...favorites],
       coupons:couponRewards.map(coupon=>({...coupon}))
     };
     downloadJsonFile('meus-dados-delivery-pizzaria.json',exportData);
-    showToast('Arquivo com seus dados preparado.','success');
+    showToast('Arquivo completo com seus dados preparado.','success');
   }catch(err){
     console.error(err);
     showToast('Não foi possível preparar a cópia dos seus dados.','error');
@@ -564,19 +571,112 @@ $('#accountAddressForm').onsubmit=async e=>{
   }
 };
 
+function customerOrderMillis(order){
+  return order?.createdAt?.toMillis?.()||0;
+}
+
+function refreshCustomerOrderWindow(){
+  const merged=new Map();
+  for(const order of olderOrders) merged.set(order.id,order);
+  for(const order of recentOrders) merged.set(order.id,order);
+  orders=[...merged.values()].sort((a,b)=>customerOrderMillis(b)-customerOrderMillis(a));
+  renderOrders();
+}
+
+function updateCustomerOrderHistoryControls(){
+  const button=$('#loadMoreCustomerOrdersBtn');
+  const state=$('#customerOrderHistoryState');
+  if(button){
+    button.classList.toggle('hidden',customerOrderDone||orders.length===0);
+    button.disabled=customerOrderLoading;
+    button.textContent=customerOrderLoading?'Carregando...':'Carregar pedidos anteriores';
+  }
+  if(state){
+    state.textContent=orders.length
+      ?(customerOrderDone
+        ?`${orders.length} pedido(s) carregado(s) • início do histórico alcançado`
+        :`${orders.length} pedido(s) carregado(s) • histórico paginado`)
+      :'';
+  }
+}
+
+async function loadMoreCustomerOrders(){
+  if(customerOrderLoading||customerOrderDone||!customerOrderCursor||!user) return;
+  customerOrderLoading=true;
+  updateCustomerOrderHistoryControls();
+  try{
+    const q=query(
+      collection(db,'orders'),
+      where('customerId','==',user.uid),
+      orderBy('createdAt','desc'),
+      startAfter(customerOrderCursor),
+      limit(CUSTOMER_ORDER_PAGE_SIZE)
+    );
+    const snap=await getDocs(q);
+    const existing=new Map(olderOrders.map(order=>[order.id,order]));
+    for(const docSnap of snap.docs) existing.set(docSnap.id,{id:docSnap.id,...docSnap.data()});
+    olderOrders=[...existing.values()];
+    if(snap.docs.length){
+      customerOrderCursor=snap.docs[snap.docs.length-1];
+    }
+    customerOrderDone=snap.size<CUSTOMER_ORDER_PAGE_SIZE;
+    refreshCustomerOrderWindow();
+  }catch(err){
+    console.error('Falha ao carregar pedidos anteriores:',err);
+    showToast('Não foi possível carregar pedidos anteriores.','error');
+  }finally{
+    customerOrderLoading=false;
+    updateCustomerOrderHistoryControls();
+  }
+}
+
 function listenCustomerOrders(){
   if(unsubscribeOrders) unsubscribeOrders();
 
-  const q=query(collection(db,'orders'),where('customerId','==',user.uid));
+  recentOrders=[];
+  olderOrders=[];
+  customerOrderCursor=null;
+  customerOrderDone=false;
+
+  const q=query(
+    collection(db,'orders'),
+    where('customerId','==',user.uid),
+    orderBy('createdAt','desc'),
+    limit(CUSTOMER_ORDER_PAGE_SIZE)
+  );
   unsubscribeOrders=onSnapshot(q,snap=>{
-    orders=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
-      const ad=a.createdAt?.toMillis?.()||0;
-      const bd=b.createdAt?.toMillis?.()||0;
-      return bd-ad;
-    });
-    renderOrders();
-  },err=>console.error('Falha ao acompanhar pedidos:',err));
+    recentOrders=snap.docs.map(d=>({id:d.id,...d.data()}));
+    if(olderOrders.length===0){
+      customerOrderCursor=snap.docs.length?snap.docs[snap.docs.length-1]:null;
+      customerOrderDone=snap.size<CUSTOMER_ORDER_PAGE_SIZE;
+    }
+    refreshCustomerOrderWindow();
+  },err=>{
+    const code=String(err?.code||'');
+    if(code.includes('failed-precondition')){
+      console.warn('Índice de histórico ainda não publicado; usando consulta compatível temporária.',err);
+      const fallbackQuery=query(collection(db,'orders'),where('customerId','==',user.uid));
+      unsubscribeOrders=onSnapshot(fallbackQuery,fallbackSnap=>{
+        recentOrders=fallbackSnap.docs
+          .map(d=>({id:d.id,...d.data()}))
+          .sort((a,b)=>customerOrderMillis(b)-customerOrderMillis(a));
+        olderOrders=[];
+        customerOrderCursor=null;
+        customerOrderDone=true;
+        refreshCustomerOrderWindow();
+      },fallbackErr=>{
+        console.error('Falha ao acompanhar pedidos no modo compatível:',fallbackErr);
+        showToast('Não foi possível atualizar seu histórico de pedidos.','error');
+      });
+      return;
+    }
+
+    console.error('Falha ao acompanhar pedidos:',err);
+    showToast('Não foi possível atualizar seu histórico de pedidos.','error');
+  });
 }
+
+$('#loadMoreCustomerOrdersBtn')?.addEventListener('click',loadMoreCustomerOrders);
 
 function formatDate(ts){
   try{
@@ -613,6 +713,7 @@ function canCustomerCancel(order){
 }
 
 function renderOrders(){
+  updateCustomerOrderHistoryControls();
   if(!orders.length){
     $('#accountOrdersList').innerHTML=emptyStateHtml({icon:'receipt-text',title:'Você ainda não fez nenhum pedido',description:'Quando você fizer um pedido, o acompanhamento e o histórico aparecerão aqui.',actionHtml:'<a class="btn btn-primary" href="../">Ver cardápio</a>'});
     return;

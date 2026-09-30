@@ -1,8 +1,9 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, writeBatch } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, writeBatch } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig } from '../firebase-config.js';
 import { showToast, confirmAction, emptyStateHtml, iconHtml, skeletonListHtml, applyBrandTheme } from '../assets/ui.js';
+import { lookupBrazilianZip as lookupZipGeo } from '../assets/cep.js';
 
 const app=initializeApp(firebaseConfig);
 const auth=getAuth(app);
@@ -116,6 +117,9 @@ const defaultRoleTemplates={
 
 let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=[],promotions=[],coupons=[],cashSessions=[],cashMovements=[],currentCashSession=null,currentProfile=null;
 const orderPrivateCache=new Map();
+const ACTIVE_ORDER_STATUSES=['pending','accepted','preparing','ready','out_for_delivery'];
+const ORDER_HISTORY_PAGE_SIZE=200;
+let activeOrders=[],recentOrders=[],olderOrders=[],orderHistoryCursor=null,orderHistoryDone=false,orderHistoryLoading=false;
 let unsubscribeOrders=null,unsubscribeCashState=null,unsubscribeCashSession=null,unsubscribeCashMovements=null,cashLiveSessionId='',soundEnabled=localStorage.getItem('deliverySoundEnabled')==='1',knownOrderIds=new Set();
 let cashOpenRequestId='',cashOpenFingerprint='',cashMovementRequestId='',cashMovementFingerprint='',cashCloseRevision=0;
 
@@ -715,29 +719,109 @@ async function loadProducts(){
   renderProducts();
 }
 
+function orderSortMillis(order){
+  return order?.createdAt?.toMillis?.()||0;
+}
+
+function refreshOrderWindow(){
+  const merged=new Map();
+  for(const order of olderOrders) merged.set(order.id,order);
+  for(const order of recentOrders) merged.set(order.id,order);
+  for(const order of activeOrders) merged.set(order.id,order);
+
+  orders=[...merged.values()].sort((a,b)=>orderSortMillis(b)-orderSortMillis(a));
+  renderOrders();
+  renderStats();
+  if(hasPermission('customersView')) renderCustomers();
+  if(hasPermission('cashView')) renderCash();
+}
+
+function updateOrderHistoryControls(){
+  const button=$('#loadMoreOrdersBtn');
+  const state=$('#orderHistoryState');
+  if(!button&&!state) return;
+
+  const filter=$('#orderStatusFilter')?.value||'active';
+  const historyRelevant=['all','completed','cancelled'].includes(filter);
+  if(button){
+    button.classList.toggle('hidden',!historyRelevant||orderHistoryDone);
+    button.disabled=orderHistoryLoading;
+    button.textContent=orderHistoryLoading?'Carregando...':'Carregar pedidos anteriores';
+  }
+  if(state){
+    const historyCount=orders.filter(order=>['completed','cancelled'].includes(order.status)).length;
+    state.textContent=historyRelevant
+      ?(orderHistoryDone
+        ?`Histórico carregado até o fim • ${historyCount} encerrado(s) nesta sessão`
+        :`${historyCount} encerrado(s) carregado(s) • histórico paginado`)
+      :'Pedidos ativos são acompanhados em tempo real.';
+  }
+}
+
+async function loadMoreOrderHistory(){
+  if(orderHistoryLoading||orderHistoryDone||!orderHistoryCursor) return;
+  orderHistoryLoading=true;
+  updateOrderHistoryControls();
+  try{
+    const q=query(
+      collection(db,'orders'),
+      orderBy('createdAt','desc'),
+      startAfter(orderHistoryCursor),
+      limit(ORDER_HISTORY_PAGE_SIZE)
+    );
+    const snap=await getDocs(q);
+    const existing=new Map(olderOrders.map(order=>[order.id,order]));
+    for(const docSnap of snap.docs) existing.set(docSnap.id,{id:docSnap.id,...docSnap.data()});
+    olderOrders=[...existing.values()];
+    if(snap.docs.length){
+      orderHistoryCursor=snap.docs[snap.docs.length-1];
+    }
+    orderHistoryDone=snap.size<ORDER_HISTORY_PAGE_SIZE;
+    refreshOrderWindow();
+  }catch(err){
+    console.error('Falha ao carregar histórico anterior:',err);
+    showToast('Não foi possível carregar pedidos anteriores.','error');
+  }finally{
+    orderHistoryLoading=false;
+    updateOrderHistoryControls();
+  }
+}
+
 function listenOrders(){
   if(unsubscribeOrders) unsubscribeOrders();
-  const q=query(collection(db,'orders'),orderBy('createdAt','desc'));
-  let first=true;
 
-  unsubscribeOrders=onSnapshot(q,snap=>{
+  activeOrders=[];
+  recentOrders=[];
+  olderOrders=[];
+  orderHistoryCursor=null;
+  orderHistoryDone=false;
+  knownOrderIds=new Set();
+
+  const activeQuery=query(
+    collection(db,'orders'),
+    where('status','in',ACTIVE_ORDER_STATUSES)
+  );
+  const recentQuery=query(
+    collection(db,'orders'),
+    orderBy('createdAt','desc'),
+    limit(ORDER_HISTORY_PAGE_SIZE)
+  );
+  let firstActive=true;
+
+  const unsubscribeActive=onSnapshot(activeQuery,snap=>{
     const incoming=[];
 
     snap.docChanges().forEach(ch=>{
-      if(ch.type==='added'&&!first&&!knownOrderIds.has(ch.doc.id)){
+      if(ch.type==='added'&&!firstActive&&!knownOrderIds.has(ch.doc.id)){
         incoming.push({id:ch.doc.id,...ch.doc.data()});
       }
     });
 
-    orders=snap.docs.map(d=>({id:d.id,...d.data()}));
-    knownOrderIds=new Set(orders.map(o=>o.id));
+    activeOrders=snap.docs.map(d=>({id:d.id,...d.data()}));
+    knownOrderIds=new Set(activeOrders.map(o=>o.id));
+    refreshOrderWindow();
 
-    renderOrders();
-    renderStats();
-    if(hasPermission('customersView')) renderCustomers();
-    if(hasPermission('cashView')) renderCash();
-
-    if(!first&&incoming.length){
+    if(!firstActive&&incoming.length){
       for(const o of incoming){
         notifyNewOrder(o);
 
@@ -755,12 +839,31 @@ function listenOrders(){
       }
     }
 
-    first=false;
+    firstActive=false;
   },err=>{
-    console.error('Falha no acompanhamento de pedidos:',err);
-    showSystemAlert('Não foi possível acompanhar os pedidos em tempo real. Verifique as regras do Firestore.');
+    console.error('Falha no acompanhamento de pedidos ativos:',err);
+    showSystemAlert('Não foi possível acompanhar os pedidos ativos em tempo real. Verifique as regras do Firestore.');
   });
+
+  const unsubscribeRecent=onSnapshot(recentQuery,snap=>{
+    recentOrders=snap.docs.map(d=>({id:d.id,...d.data()}));
+    if(olderOrders.length===0){
+      orderHistoryCursor=snap.docs.length?snap.docs[snap.docs.length-1]:null;
+      orderHistoryDone=snap.size<ORDER_HISTORY_PAGE_SIZE;
+    }
+    refreshOrderWindow();
+  },err=>{
+    console.error('Falha ao carregar pedidos recentes:',err);
+    showSystemAlert('Não foi possível carregar o histórico recente de pedidos.');
+  });
+
+  unsubscribeOrders=()=>{
+    unsubscribeActive();
+    unsubscribeRecent();
+  };
 }
+
+$('#loadMoreOrdersBtn')?.addEventListener('click',loadMoreOrderHistory);
 
 function notifyNewOrder(o){
   if(soundEnabled) beep();
@@ -1276,6 +1379,8 @@ function renderOrders(){
 
   $$('[data-open-order]').forEach(b=>b.onclick=()=>openOrder(b.dataset.openOrder));
   $$('.order-details-action').forEach(b=>b.onclick=()=>openOrder(b.dataset.id));
+  updateOrderHistoryControls();
+
   $$('.quick-order-action').forEach(b=>b.onclick=async()=>{
     b.disabled=true;
     try{
@@ -3113,50 +3218,6 @@ function renderDeliveryPricingMode(){
 }
 
 $$('input[name="deliveryPricingMode"]').forEach(r=>r.addEventListener('change',renderDeliveryPricingMode));
-
-async function lookupZipGeo(zip){
-  const digits=String(zip||'').replace(/\D/g,'');
-  if(digits.length!==8) return null;
-
-  let primary=null;
-  try{
-    const response=await fetch(`https://brasilapi.com.br/api/cep/v2/${digits}`,{cache:'no-store'});
-    if(response.ok){
-      const data=await response.json();
-      const lat=Number(data?.location?.coordinates?.latitude);
-      const lng=Number(data?.location?.coordinates?.longitude);
-      primary={
-        zip:digits.replace(/^(\d{5})(\d{3})$/,'$1-$2'),
-        street:data.street||'',
-        neighborhood:data.neighborhood||'',
-        city:data.city||'',
-        state:data.state||'',
-        location:Number.isFinite(lat)&&Number.isFinite(lng)?{latitude:lat,longitude:lng,source:'brasilapi-cep-v2'}:null
-      };
-      if(primary.street&&primary.neighborhood&&primary.city&&primary.state) return primary;
-    }
-  }catch(err){
-    console.warn('BrasilAPI indisponível para CEP; tentando ViaCEP.',err);
-  }
-
-  try{
-    const response=await fetch(`https://viacep.com.br/ws/${digits}/json/`,{cache:'no-store'});
-    if(!response.ok) return primary;
-    const data=await response.json();
-    if(data?.erro) return primary;
-    return {
-      zip:digits.replace(/^(\d{5})(\d{3})$/,'$1-$2'),
-      street:primary?.street||data.logradouro||'',
-      neighborhood:primary?.neighborhood||data.bairro||'',
-      city:primary?.city||data.localidade||'',
-      state:primary?.state||data.uf||'',
-      location:primary?.location||null
-    };
-  }catch(err){
-    console.warn('ViaCEP indisponível.',err);
-    return primary;
-  }
-}
 
 async function refreshStoreLocationPreview(){
   const zip=$('#setStoreZip')?.value||'';
