@@ -1,7 +1,7 @@
 import {
   auth, authPersistenceReady, db, watchCustomer, loginWithGoogle, loginWithEmail, registerWithEmail,
   resetCustomerPassword, friendlyAuthError, lookupBrazilianZip, getCustomerProfile, saveCustomerProfile, getAddresses,
-  saveAddress, setDefaultAddress, getFavorites, setFavorite, saveCustomerIdentity, deleteCustomerAccount, logoutCustomer,
+  saveAddress, setDefaultAddress, getFavorites, setFavorite, getCustomerIdentity, saveCustomerIdentity, deleteCustomerAccount, logoutCustomer,
   formatCpf, validCpf, formatPhone, validPhone, validFullName, validCustomerPassword
 } from './customer-auth.js';
 import {
@@ -1408,8 +1408,15 @@ $('#showLoginBtn').onclick=()=>setAuthMode('login');
 async function redirectIncompleteCustomerProfile(user){
   if(!user) return false;
   try{
-    const profile=await getCustomerProfile(user.uid);
-    if(profile?.identityComplete===true&&validFullName(profile?.name||user.displayName||'')) return false;
+    const [profile,identity]=await Promise.all([
+      getCustomerProfile(user.uid),
+      getCustomerIdentity().catch(err=>{
+        console.warn('Validação privada do cadastro indisponível durante o redirecionamento.',err);
+        return null;
+      })
+    ]);
+    const identityComplete=profile?.identityComplete===true||identity?.identityComplete===true;
+    if(identityComplete&&validFullName(profile?.name||user.displayName||'')) return false;
   }catch(err){
     console.warn('Não foi possível conferir se o cadastro está completo.',err);
   }
