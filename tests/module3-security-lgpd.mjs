@@ -149,4 +149,27 @@ assert.equal(validCustomerPassword('abcdefgh'),false);
 assert.equal(validCustomerPassword('abc12345'),true);
 assert.equal(validCustomerPassword('Abcdefg1'),true);
 
+
+/* Additional fail-closed privacy invariants. */
+assert.match(rules,/match \/counters\/orders \{[\s\S]*?allow read, write: if false;/);
+assert.match(rules,/match \/settings\/\{document=\*\*\} \{[\s\S]*?allow read, write: if false;/);
+assert.match(rules,/match \/orders\/\{orderId\} \{[\s\S]*?allow delete: if false;/);
+assert.match(rules,/match \/coupons\/\{couponId\} \{[\s\S]*?allow list: if hasPermission\('couponsManage'\);/);
+
+assert.match(backend,/function minimalOrderCustomer/);
+assert.match(backend,/function minimalOrderAddress/);
+const privateCreateStart=backend.lastIndexOf('tx.set(orderPrivateRef,{');
+const privateCreateEnd=backend.indexOf('const resultData=',privateCreateStart);
+assert.ok(privateCreateStart>0&&privateCreateEnd>privateCreateStart,'Bloco orderPrivate não localizado.');
+const privateCreate=backend.slice(privateCreateStart,privateCreateEnd);
+assert.doesNotMatch(privateCreate,/email:decoded\.email/);
+assert.doesNotMatch(privateCreate,/location:delivery\.addressLocation/);
+assert.doesNotMatch(privateCreate,/deliveryPrivate:/);
+
+assert.match(backend,/recent_login_required/);
+assert.match(backend,/Date\.now\(\)-authTimeMs>15\*60\*1000/);
+assert.doesNotMatch(admin,/defaultRoleTemplates\[role\]\?\.permissions/);
+assert.doesNotMatch(admin,/o\.customer\?\.email/);
+assert.match(account,/recent_login_required/);
+
 console.log('Module 3 security and LGPD tests OK');
