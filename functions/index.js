@@ -624,6 +624,8 @@ async function lookupCepData(zip) {
   const digits=String(zip||"").replace(/\D/g,"");
   if (digits.length !== 8) return null;
 
+  let primary=null;
+
   try {
     const response = await fetch(`https://brasilapi.com.br/api/cep/v2/${digits}`, {
       signal: AbortSignal.timeout(6000)
@@ -632,7 +634,7 @@ async function lookupCepData(zip) {
       const data = await response.json();
       const latitude = Number(data?.location?.coordinates?.latitude);
       const longitude = Number(data?.location?.coordinates?.longitude);
-      return {
+      primary={
         zip:digits,
         street:normalizeText(data?.street,160),
         neighborhood:normalizeText(data?.neighborhood,80),
@@ -642,28 +644,31 @@ async function lookupCepData(zip) {
           ? {latitude,longitude,source:"brasilapi-cep-v2"}
           : null
       };
+
+      // Se os dados textuais vieram completos, não precisamos de outra API.
+      if (primary.neighborhood&&primary.city&&primary.state) return primary;
     }
   } catch {
-    // Fallback abaixo.
+    // O ViaCEP abaixo funciona como fallback e complemento.
   }
 
   try {
     const response = await fetch(`https://viacep.com.br/ws/${digits}/json/`, {
       signal: AbortSignal.timeout(6000)
     });
-    if (!response.ok) return null;
+    if (!response.ok) return primary;
     const data = await response.json();
-    if (data?.erro) return null;
+    if (data?.erro) return primary;
     return {
       zip:digits,
-      street:normalizeText(data?.logradouro,160),
-      neighborhood:normalizeText(data?.bairro,80),
-      city:normalizeText(data?.localidade,80),
-      state:normalizeText(data?.uf,2).toUpperCase(),
-      location:null
+      street:primary?.street||normalizeText(data?.logradouro,160),
+      neighborhood:primary?.neighborhood||normalizeText(data?.bairro,80),
+      city:primary?.city||normalizeText(data?.localidade,80),
+      state:primary?.state||normalizeText(data?.uf,2).toUpperCase(),
+      location:primary?.location||null
     };
   } catch {
-    return null;
+    return primary;
   }
 }
 
