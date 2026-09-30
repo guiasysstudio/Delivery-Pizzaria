@@ -456,6 +456,19 @@ async function loadCustomerOrderStats(uid){
       spent:completed.reduce((sum,o)=>sum+Number(o.total||0),0)
     };
   }catch(err){
+    const code=String(err?.code||'');
+    if(code.includes('failed-precondition')){
+      try{
+        const fallback=await getDocs(query(collection(db,'orders'),where('customerId','==',uid)));
+        const completed=fallback.docs.map(d=>d.data()).filter(o=>o.status==='completed');
+        return {
+          count:completed.length,
+          spent:completed.reduce((sum,o)=>sum+Number(o.total||0),0)
+        };
+      }catch(fallbackErr){
+        console.warn('Consulta compatível do histórico também falhou.',fallbackErr);
+      }
+    }
     console.warn('Não foi possível carregar o histórico para regras de cupom.',err);
     return {count:0,spent:0};
   }
