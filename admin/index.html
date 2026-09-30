@@ -42,6 +42,9 @@
     </aside>
 
     <main class="admin-main">
+      <div id="adminDemoBanner" class="demo-mode-banner hidden">
+        <div><strong>Modo demonstração (Spark)</strong><span>Pedidos locais de demonstração podem ser recebidos e movimentados neste navegador. Recursos marcados abaixo usam Cloud Functions e exigem Blaze no ambiente real.</span></div>
+      </div>
       <div id="adminSystemAlert" class="alert alert-error hidden" style="margin-top:0"></div>
       <header class="admin-topbar"><div><span id="viewEyebrow" class="eyebrow">OPERAÇÃO</span><h1 id="viewTitle">Pedidos</h1></div><div class="topbar-actions"><button id="soundBtn" class="btn btn-secondary" type="button"><span class="ui-icon icon-bell-ring" aria-hidden="true"></span><span>Ativar som</span></button><span id="liveIndicator" class="live-indicator">Tempo real</span></div></header>
 
@@ -53,6 +56,7 @@
       </section>
 
       <section id="view-cash" class="admin-view">
+        <div class="demo-blaze-note hidden" data-demo-blaze><strong>Requer Blaze em produção:</strong> abertura, suprimento, sangria, vínculo de venda e fechamento do caixa são operações server-side.</div>
         <div class="cash-grid">
           <div class="panel settings-card">
             <span class="eyebrow">CONTROLE FINANCEIRO</span><h2>Caixa atual</h2>
@@ -97,6 +101,7 @@
       </section>
 
       <section id="view-coupons" class="admin-view">
+        <div class="demo-blaze-note hidden" data-demo-blaze><strong>Parcial:</strong> cadastrar e editar cupons funciona no Firestore/Spark. A entrega automática de cupons ao concluir pedidos usa Cloud Functions/Blaze.</div>
         <div class="section-actions"><button id="newCouponBtn" class="btn btn-primary" type="button">+ Novo cupom</button></div>
         <div class="panel"><div id="couponsTable" class="data-list"></div></div>
       </section>
@@ -113,10 +118,12 @@
 
 
       <section id="view-customers" class="admin-view">
+        <div class="demo-blaze-note hidden" data-demo-blaze><strong>Parcial:</strong> o resumo anonimizado funciona no Spark. Dados privados de pedidos reais são liberados ao funcionário por Cloud Function/Blaze.</div>
         <div class="panel"><div class="panel-head"><div><strong>Resumo operacional anonimizado</strong><small class="muted" style="display:block">Calculado a partir dos pedidos carregados nesta sessão. Para ampliar o período, use “Carregar pedidos anteriores” em Pedidos.</small></div><div class="filters"><input id="customerSearch" type="search" placeholder="Buscar referência do cliente"></div></div><div id="customersTable" class="data-list"></div></div>
       </section>
 
       <section id="view-printing" class="admin-view">
+        <div class="demo-blaze-note hidden" data-demo-blaze><strong>Print Agent:</strong> o agente local e a impressão de teste funcionam sem Blaze. Para pedidos reais, o acesso seguro aos dados privados do pedido usa Cloud Functions/Blaze.</div>
         <div class="settings-grid">
           <div class="panel settings-card print-agent-card settings-wide">
             <span class="eyebrow">TERMINAL DE IMPRESSÃO</span><h2>Print Agent do Windows</h2>
@@ -165,11 +172,13 @@
       </section>
 
       <section id="view-users" class="admin-view">
+        <div class="demo-blaze-note hidden" data-demo-blaze><strong>Requer Blaze:</strong> criar usuário, desativar/ativar, trocar senha e excluir funcionário usam Firebase Admin no servidor.</div>
         <div class="section-actions"><button id="newUserBtn" class="btn btn-primary icon-button-label" type="button"><span class="ui-icon icon-plus" aria-hidden="true"></span><span>Novo usuário</span></button></div>
         <div class="panel"><div id="usersTable" class="data-list"></div></div>
       </section>
 
       <section id="view-roles" class="admin-view">
+        <div class="demo-blaze-note hidden" data-demo-blaze><strong>Requer Blaze para alterações:</strong> a gravação segura de perfis administrativos é feita por Cloud Function. A visualização continua disponível.</div>
         <div class="section-actions"><button id="newRoleBtn" class="btn btn-primary" type="button">+ Novo perfil</button></div>
         <div class="panel"><div class="panel-head"><p class="muted" style="margin:0">Crie perfis como Caixa, Cozinha ou Supervisor e escolha exatamente o que cada um pode visualizar e alterar.</p></div><div id="rolesTable" class="data-list"></div></div>
       </section>
@@ -178,6 +187,7 @@
         <form id="settingsForm" class="settings-grid">
           <div class="panel settings-card settings-wide">
             <div class="editor-section-head"><div><h2>Identidade da pizzaria</h2><p class="muted">Esses dados aparecem no site público, comprovantes e impressão.</p></div></div>
+            <div class="demo-blaze-note hidden" data-demo-blaze><strong>Upload de logo:</strong> enviar a imagem automaticamente ao GitHub exige Cloud Function/Blaze porque o token não pode ficar no navegador. Os demais dados da pizzaria funcionam no Spark.</div>
             <div class="store-brand-editor">
               <div id="storeLogoPreview" class="store-logo-preview"><span class="ui-icon icon-pizza" aria-hidden="true"></span></div>
               <div>
