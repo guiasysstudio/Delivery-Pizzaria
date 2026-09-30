@@ -1838,10 +1838,13 @@ $('#promotionEditorForm')?.addEventListener('submit',async e=>{
   const targetRequired=data.targetType!=='all'&&!data.targetId;
   const percentageInvalid=data.discountType==='percentage'&&(discount==null||discount>100);
   const fixedInvalid=data.discountType==='fixed'&&discount==null;
-  if(!data.name||targetRequired||percentageInvalid||fixedInvalid){
+  const invalidWindow=!!(data.startsAt&&data.endsAt&&data.startsAt>data.endsAt);
+  if(!data.name||targetRequired||percentageInvalid||fixedInvalid||invalidWindow){
     $('#promotionEditorError').textContent=targetRequired
       ?'Escolha a categoria ou produto da promoção.'
-      :'Informe um desconto válido. Porcentagens devem ficar entre 0,01% e 100%.';
+      :invalidWindow
+        ?'A data final da promoção não pode ser anterior à data inicial.'
+        :'Informe um desconto válido. Porcentagens devem ficar entre 0,01% e 100%.';
     $('#promotionEditorError').classList.remove('hidden');
     return;
   }
@@ -1945,11 +1948,14 @@ $('#couponEditorForm')?.addEventListener('submit',async e=>{
   const minSpent=validMoneyValue(data.minSpent,10_000_000);
   const percentageInvalid=data.type==='percentage'&&(couponValue==null||couponValue>100);
   const fixedInvalid=data.type==='fixed'&&couponValue==null;
+  const invalidWindow=!!(data.startsAt&&data.endsAt&&data.startsAt>data.endsAt);
   if(
-    !code || percentageInvalid || fixedInvalid ||
+    !code || percentageInvalid || fixedInvalid || invalidWindow ||
     minimumOrder==null || maxDiscount==null || minOrders==null || minSpent==null
   ){
-    $('#couponEditorError').textContent='Revise os valores do cupom. Porcentagens devem ficar entre 0,01% e 100% e os demais valores não podem ser negativos.';
+    $('#couponEditorError').textContent=invalidWindow
+      ?'A data final do cupom não pode ser anterior à data inicial.'
+      :'Revise os valores do cupom. Porcentagens devem ficar entre 0,01% e 100% e os demais valores não podem ser negativos.';
     $('#couponEditorError').classList.remove('hidden');
     return;
   }
