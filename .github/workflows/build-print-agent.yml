@@ -6,11 +6,13 @@ on:
     branches: [main]
     paths:
       - "print-agent/**"
+      - "assets/print-agent-version.json"
       - ".github/workflows/build-print-agent.yml"
   pull_request:
     branches: [main]
     paths:
       - "print-agent/**"
+      - "assets/print-agent-version.json"
       - ".github/workflows/build-print-agent.yml"
 
 permissions:
@@ -32,7 +34,28 @@ jobs:
         run: |
           [xml]$project = Get-Content "print-agent/DeliveryPizzaria.PrintAgent.csproj"
           $version = @($project.Project.PropertyGroup.Version | Where-Object { $_ })[0]
-          if (-not $version -or $version -notmatch '^\d+\.\d+\.\d+
+          if (-not $version -or $version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Versao SemVer invalida no csproj: $version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Validate version synchronization
+        shell: pwsh
+        run: |
+          $version = "${{ steps.agent_version.outputs.version }}"
+          $manifest = Get-Content "assets/print-agent-version.json" -Raw | ConvertFrom-Json
+          $program = Get-Content "print-agent/Program.cs" -Raw
+          $installer = Get-Content "print-agent/Instalar.cmd" -Raw
+          $uninstaller = Get-Content "print-agent/Desinstalar.cmd" -Raw
+          if ($manifest.latestVersion -ne $version) { throw "Manifest latestVersion fora de sincronia." }
+          if ($manifest.minimumVersion -ne $version) { throw "Manifest minimumVersion fora de sincronia." }
+          if ($manifest.downloadUrl -notmatch "/print-agent-v$([regex]::Escape($version))/") { throw "Manifest downloadUrl nao usa tag versionada." }
+          if ($program -notmatch "Version = `"$([regex]::Escape($version))`"") { throw "AgentInfo fora de sincronia." }
+          if ($installer -notmatch "Print Agent $([regex]::Escape($version))") { throw "Instalador fora de sincronia." }
+          if ($uninstaller -notmatch "Print Agent $([regex]::Escape($version))") { throw "Desinstalador fora de sincronia." }
+
+      - name: Publish Windows x64
+        run: dotnet publish print-agent/DeliveryPizzaria.PrintAgent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o print-agent/publish
 
       - name: Add installer scripts
         shell: pwsh
