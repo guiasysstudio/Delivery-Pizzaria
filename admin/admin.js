@@ -603,7 +603,7 @@ function listenOrders(){
 
     renderOrders();
     renderStats();
-    if(customers.length) renderCustomers();
+    if(hasPermission('customersView')) renderCustomers();
     if(hasPermission('cashView')) renderCash();
 
     if(!first&&incoming.length){
@@ -3437,40 +3437,59 @@ function esc(v){
 
 
 async function loadCustomers(){
-  try{
-    const s=await getDocs(collection(db,'customers'));
-    customers=s.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-    renderCustomers();
-  }catch(err){
-    console.warn('Não foi possível carregar clientes.',err);
-    customers=[];
-    renderCustomers();
+  customers=[];
+  renderCustomers();
+}
+
+function customerOperationalRows(){
+  const grouped=new Map();
+  for(const order of orders){
+    const customerId=String(order.customerId||'');
+    if(!customerId) continue;
+    const current=grouped.get(customerId)||{
+      uid:customerId,
+      orders:0,
+      completed:0,
+      spent:0,
+      lastAt:null
+    };
+    current.orders++;
+    if(order.status==='completed'){
+      current.completed++;
+      const total=Number(order.total||0);
+      if(Number.isFinite(total)&&total>=0) current.spent+=total;
+    }
+    const stamp=order.createdAt?.toMillis?.()||0;
+    const previous=current.lastAt?.toMillis?.()||0;
+    if(stamp>previous) current.lastAt=order.createdAt;
+    grouped.set(customerId,current);
   }
+  return [...grouped.values()].sort((a,b)=>
+    (b.lastAt?.toMillis?.()||0)-(a.lastAt?.toMillis?.()||0)
+  );
 }
 
 function renderCustomers(){
   if(!$('#customersTable')) return;
 
   const term=($('#customerSearch')?.value||'').trim().toLowerCase();
-  const list=customers.filter(customer=>{
-    const text=`${customer.name||''} ${customer.email||''} ${customer.phone||''}`.toLowerCase();
-    return !term||text.includes(term);
+  const rows=customerOperationalRows();
+  const list=rows.filter(customer=>{
+    const reference='cliente '+customer.uid.slice(-6);
+    return !term||reference.toLowerCase().includes(term);
   });
 
   $('#customersTable').innerHTML=list.length?list.map(customer=>{
-    const customerOrders=orders.filter(o=>o.customerId===customer.uid);
-    const completed=customerOrders.filter(o=>o.status==='completed');
-    const spent=completed.reduce((sum,o)=>sum+Number(o.total||0),0);
-
+    const reference='Cliente • '+customer.uid.slice(-6).toUpperCase();
     return `<div class="data-row">
       <div class="data-main">
-        <strong>${esc(customer.name||'Cliente')}</strong>
-        <small>${esc(customer.phone||'Sem telefone')} • ${esc(customer.email||'Sem e-mail')}</small>
+        <strong>${esc(reference)}</strong>
+        <small>Resumo operacional anonimizado • último pedido: ${formatDate(customer.lastAt)}</small>
       </div>
-      <span>${customerOrders.length} pedido(s)</span>
-      <div><strong>${money(spent)}</strong><small class="muted" style="display:block">concluídos</small></div>
+      <span>${customer.orders} pedido(s)</span>
+      <div><strong>${money(customer.spent)}</strong><small class="muted" style="display:block">${customer.completed} concluído(s)</small></div>
     </div>`;
-  }).join(''):emptyStateHtml({icon:'users',title:'Nenhum cliente encontrado',description:'Tente outro termo de busca ou aguarde novos cadastros.'});
+  }).join(''):emptyStateHtml({icon:'users',title:'Nenhum cliente encontrado',description:'O resumo aparece a partir dos pedidos, sem expor ficha cadastral, telefone ou e-mail.'});
 }
 
 $('#customerSearch')?.addEventListener('input',renderCustomers);
