@@ -242,8 +242,11 @@ async function hydrateOrderPrivate(order,{required=false}={}){
       base.address=data.address;
     }
   }catch(err){
-    if(required) throw err;
-    console.warn('Dados privados do pedido indisponíveis.',err);
+    // Compatibilidade transitória: pedidos legados ainda podem carregar seus
+    // próprios snapshots até a migração do Módulo 4. Depois dela, o endpoint
+    // seguro passa a ser a única fonte.
+    if(required&&!base.customer) throw err;
+    console.warn('Endpoint privado indisponível; usando snapshot legado quando existente.',err);
   }
 
   if(required&&!base.customer){
@@ -350,14 +353,28 @@ async function migrateLegacyOrderPrivacyIfAvailable(){
 
 async function resolveStaffEmail(username){
   const normalized=normalizeUsername(username);
-  const response=await fetch(STAFF_LOGIN_ENDPOINT,{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({username:normalized})
-  });
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok||!data?.email) throw new Error('staff-login-lookup-failed');
-  return String(data.email);
+  try{
+    const response=await fetch(STAFF_LOGIN_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:normalized})
+    });
+    const data=await response.json().catch(()=>({}));
+    if(response.ok&&data?.email) return String(data.email);
+  }catch(err){
+    console.warn('Resolvedor seguro de login ainda indisponível.',err);
+  }
+
+  // Ponte temporária para a demonstração antes do deploy do Módulo 4.
+  // Assim que as novas regras forem publicadas, staffLogins deixa de ser
+  // legível no navegador e somente o endpoint acima continuará funcionando.
+  try{
+    const snap=await getDoc(doc(db,'staffLogins',normalized));
+    if(snap.exists()&&snap.data()?.email) return String(snap.data().email);
+  }catch(err){
+    console.warn('Fallback de login legado indisponível.',err);
+  }
+  return `${normalized}@delivery-pizzaria.local`;
 }
 function roleLabel(role){
   if(role==='master') return 'Master';
