@@ -2,6 +2,9 @@
 setlocal EnableExtensions EnableDelayedExpansion
 title Instalar Delivery Pizzaria Print Agent
 
+set "SILENT=0"
+if /I "%~1"=="/SILENT" set "SILENT=1"
+
 set "PACKAGE_DIR=%~dp0"
 set "TARGET=%LOCALAPPDATA%\DeliveryPizzaria\PrintAgent"
 set "SOURCE=%~dp0DeliveryPizzaria.PrintAgent.exe"
@@ -20,14 +23,14 @@ echo.
 if not exist "%SOURCE%" (
   echo ERRO: DeliveryPizzaria.PrintAgent.exe nao foi encontrado ao lado deste instalador.
   echo.
-  pause
+  if "%SILENT%"=="0" pause
   exit /b 1
 )
 
 if not exist "%UNINSTALL_SOURCE%" (
   echo ERRO: Desinstalar.cmd nao foi encontrado ao lado deste instalador.
   echo.
-  pause
+  if "%SILENT%"=="0" pause
   exit /b 1
 )
 
@@ -43,7 +46,7 @@ if errorlevel 1 (
   echo.
   echo ERRO: Nao foi possivel criar a pasta de instalacao.
   echo.
-  pause
+  if "%SILENT%"=="0" pause
   exit /b 1
 )
 
@@ -68,7 +71,7 @@ if errorlevel 1 (
   echo.
   echo Tente extrair o ZIP novamente e executar Instalar.cmd.
   echo.
-  pause
+  if "%SILENT%"=="0" pause
   exit /b 9
 )
 
@@ -80,7 +83,7 @@ if errorlevel 1 (
   echo.
   echo ERRO: nao foi possivel registrar a inicializacao/desinstalacao no Windows.
   echo.
-  pause
+  if "%SILENT%"=="0" pause
   exit /b 10
 )
 
@@ -101,7 +104,7 @@ echo sem o aviso "O fornecedor nao pode ser verificado".
 echo.
 echo Pelo icone ao lado do relogio voce pode imprimir teste, sair ou desinstalar.
 echo.
-pause
+if "%SILENT%"=="0" pause
 exit /b 0
 
 :copy_error
@@ -109,5 +112,5 @@ echo.
 echo ERRO: Nao foi possivel copiar os arquivos do Print Agent.
 echo Verifique se o arquivo esta em uso e tente novamente.
 echo.
-pause
+if "%SILENT%"=="0" pause
 exit /b 2
