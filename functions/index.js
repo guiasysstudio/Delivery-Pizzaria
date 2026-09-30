@@ -1310,7 +1310,8 @@ export const manageCash = onRequest(
             businessDate,
             sessionNumber,
             openingAmount,
-            createdAt:now
+            createdAt:now,
+            expiresAt:new Date(now.getTime()+7*24*60*60*1000)
           });
         });
 
@@ -1434,7 +1435,8 @@ export const manageCash = onRequest(
             sessionId,
             type,
             amount,
-            createdAt:now
+            createdAt:now,
+            expiresAt:new Date(now.getTime()+7*24*60*60*1000)
           });
         });
 
@@ -3184,13 +3186,15 @@ export const createOrder = onRequest(
           ...resultData,
           customerId:decoded.uid,
           requestId,
-          requestFingerprint
+          requestFingerprint,
+          expiresAt:new Date(now.getTime()+7*24*60*60*1000)
         });
         tx.set(rateRef,{
           lastCreatedAt:now,
           windowStart:new Date(windowStartMs),
           windowCount:windowCount+1,
-          updatedAt:now
+          updatedAt:now,
+          expiresAt:new Date(now.getTime()+24*60*60*1000)
         },{merge:true});
       });
 
