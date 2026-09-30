@@ -313,15 +313,17 @@ export const grantLoyaltyCoupons = onDocumentUpdated(
     const db = getFirestore();
 
     const [ordersSnap, couponsSnap, settingsSnap] = await Promise.all([
-      db.collection("orders").where("customerId", "==", customerId).get(),
+      db.collection("orders")
+        .where("customerId", "==", customerId)
+        .where("status", "==", "completed")
+        .get(),
       db.collection("coupons").get(),
       db.doc("settings/store").get()
     ]);
     const timezone = settingsSnap.data()?.timezone || "America/Porto_Velho";
 
     const completedOrders = ordersSnap.docs
-      .map(docSnap => docSnap.data())
-      .filter(order => order.status === "completed");
+      .map(docSnap => docSnap.data());
 
     const completedCount = completedOrders.length;
     const spent = completedOrders.reduce(
@@ -2951,8 +2953,11 @@ export const createOrder = onRequest(
         }
 
         if (minOrders>0 || minSpent>0) {
-          const ordersSnap=await db.collection("orders").where("customerId","==",decoded.uid).get();
-          const completed=ordersSnap.docs.map(d=>d.data()).filter(o=>o.status==="completed");
+          const ordersSnap=await db.collection("orders")
+            .where("customerId","==",decoded.uid)
+            .where("status","==","completed")
+            .get();
+          const completed=ordersSnap.docs.map(d=>d.data());
           const spent=completed.reduce((sum,o)=>{
             const value=finiteMoney(o.total||0,{min:0,max:1_000_000});
             return sum+(value??0);
