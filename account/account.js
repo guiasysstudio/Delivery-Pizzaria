@@ -68,7 +68,7 @@ async function loadAll(){
     getDocs(collection(db,'customers',user.uid,'coupons')).catch(err=>{console.warn('Cupons ainda não disponíveis.',err);return null;}),
     getCustomerIdentity().catch(err=>{
       console.warn('Identidade privada ainda não disponível.',err);
-      return {identityComplete:!!profile?.identityComplete,cpf:'',cpfMasked:''};
+      return {identityComplete:!!profile?.identityComplete,cpfMasked:''};
     })
   ]);
 
@@ -84,7 +84,7 @@ async function loadAll(){
     return bd-ad;
   });
   couponRewards=results[6]?.docs?.map(d=>({id:d.id,...d.data()}))||[];
-  identity=results[7]||{identityComplete:!!profile?.identityComplete,cpf:'',cpfMasked:''};
+  identity=results[7]||{identityComplete:!!profile?.identityComplete,cpfMasked:''};
 }
 
 function effectiveProfilePhoto(){
@@ -339,32 +339,56 @@ function downloadJsonFile(filename,data){
   setTimeout(()=>URL.revokeObjectURL(url),500);
 }
 
-$('#exportMyDataBtn')?.addEventListener('click',()=>{
+$('#exportMyDataBtn')?.addEventListener('click',async()=>{
   if(!user) return;
-  const exportData={
-    exportedAt:new Date().toISOString(),
-    account:{
-      uid:user.uid,
-      email:user.email||'',
-      emailVerified:user.emailVerified===true,
-      profile:{
-        name:profile?.name||'',
-        phone:profile?.phone||'',
-        defaultAddressId:profile?.defaultAddressId||null,
-        identityComplete:profile?.identityComplete===true
-      },
-      identity:{
-        cpfMasked:identity?.cpfMasked||'',
-        identityComplete:identity?.identityComplete===true
+  const button=$('#exportMyDataBtn');
+  button.disabled=true;
+  try{
+    const privateOrders=await Promise.all(orders.map(async order=>{
+      try{
+        const snap=await getDoc(doc(db,'orderPrivate',order.id));
+        const privateData=snap.exists()?snap.data():{};
+        return {
+          ...order,
+          customer:privateData.customer||order.customer||null,
+          address:privateData.address||order.address||null
+        };
+      }catch(err){
+        console.warn('Dados privados de um pedido não puderam ser incluídos na exportação.',err);
+        return {...order};
       }
-    },
-    addresses:addresses.map(a=>({...a})),
-    orders:orders.map(o=>({...o})),
-    favorites:[...favorites],
-    coupons:couponRewards.map(coupon=>({...coupon}))
-  };
-  downloadJsonFile('meus-dados-delivery-pizzaria.json',exportData);
-  showToast('Arquivo com seus dados preparado.','success');
+    }));
+
+    const exportData={
+      exportedAt:new Date().toISOString(),
+      account:{
+        uid:user.uid,
+        email:user.email||'',
+        emailVerified:user.emailVerified===true,
+        profile:{
+          name:profile?.name||'',
+          phone:profile?.phone||'',
+          defaultAddressId:profile?.defaultAddressId||null,
+          identityComplete:profile?.identityComplete===true
+        },
+        identity:{
+          cpfMasked:identity?.cpfMasked||'',
+          identityComplete:identity?.identityComplete===true
+        }
+      },
+      addresses:addresses.map(a=>({...a})),
+      orders:privateOrders,
+      favorites:[...favorites],
+      coupons:couponRewards.map(coupon=>({...coupon}))
+    };
+    downloadJsonFile('meus-dados-delivery-pizzaria.json',exportData);
+    showToast('Arquivo com seus dados preparado.','success');
+  }catch(err){
+    console.error(err);
+    showToast('Não foi possível preparar a cópia dos seus dados.','error');
+  }finally{
+    button.disabled=false;
+  }
 });
 
 $('#deleteMyAccountBtn')?.addEventListener('click',async()=>{
