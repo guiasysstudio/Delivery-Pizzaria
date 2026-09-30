@@ -785,12 +785,16 @@ function renderOrders(){
     }catch(err){
       console.error(err);
       const code=String(err?.code||'');
-      showToast(code.includes('cancel_window_expired')
-        ?'O prazo para cancelamento deste pedido terminou.'
-        :code.includes('cancel_not_allowed')
-          ?'Este pedido já avançou e não pode mais ser cancelado pelo site.'
-          :'Não foi possível cancelar o pedido.',
-        code.includes('cancel_window_expired')||code.includes('cancel_not_allowed')?'warning':'error');
+      if(demoEnvironmentAllowed()&&backendUnavailable(err)){
+        showToast(blazeRequiredMessage('customerCancel'),'info',{duration:9000});
+      }else{
+        showToast(code.includes('cancel_window_expired')
+          ?'O prazo para cancelamento deste pedido terminou.'
+          :code.includes('cancel_not_allowed')
+            ?'Este pedido já avançou e não pode mais ser cancelado pelo site.'
+            :'Não foi possível cancelar o pedido.',
+          code.includes('cancel_window_expired')||code.includes('cancel_not_allowed')?'warning':'error');
+      }
       b.disabled=false;
       b.textContent='Cancelar pedido';
     }
