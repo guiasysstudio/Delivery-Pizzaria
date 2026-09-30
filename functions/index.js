@@ -17,9 +17,7 @@ setGlobalOptions({
 });
 
 const webCors=[
-  "https://guiasysstudio.github.io",
-  "https://guiasys.online",
-  /https:\/\/.*\.guiasys\.online$/,
+  "https://pizzaria.guiasys.online",
   "https://delivery-pizzaria-f5b08.web.app",
   "https://delivery-pizzaria-f5b08.firebaseapp.com"
 ];
