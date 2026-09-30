@@ -4,6 +4,9 @@ import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateD
 import { firebaseConfig } from '../firebase-config.js';
 import { showToast, confirmAction, emptyStateHtml, iconHtml, skeletonListHtml, applyBrandTheme } from '../assets/ui.js';
 import { lookupBrazilianZip as lookupZipGeo } from '../assets/cep.js';
+import {
+  demoEnvironmentAllowed, listenDemoOrders, updateDemoOrder, isDemoOrderId, blazeRequiredMessage
+} from '../assets/demo-mode.js';
 
 const app=initializeApp(firebaseConfig);
 const auth=getAuth(app);
@@ -119,8 +122,8 @@ let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=
 const orderPrivateCache=new Map();
 const ACTIVE_ORDER_STATUSES=['pending','accepted','preparing','ready','out_for_delivery'];
 const ORDER_HISTORY_PAGE_SIZE=200;
-let activeOrders=[],recentOrders=[],olderOrders=[],orderHistoryCursor=null,orderHistoryDone=false,orderHistoryLoading=false;
-let unsubscribeOrders=null,unsubscribeCashState=null,unsubscribeCashSession=null,unsubscribeCashMovements=null,cashLiveSessionId='',soundEnabled=localStorage.getItem('deliverySoundEnabled')==='1',knownOrderIds=new Set();
+let activeOrders=[],recentOrders=[],olderOrders=[],localDemoOrders=[],orderHistoryCursor=null,orderHistoryDone=false,orderHistoryLoading=false;
+let unsubscribeOrders=null,unsubscribeDemoOrders=null,unsubscribeCashState=null,unsubscribeCashSession=null,unsubscribeCashMovements=null,cashLiveSessionId='',soundEnabled=localStorage.getItem('deliverySoundEnabled')==='1',knownOrderIds=new Set(),knownDemoOrderIds=new Set();
 let cashOpenRequestId='',cashOpenFingerprint='',cashMovementRequestId='',cashMovementFingerprint='',cashCloseRevision=0;
 
 function renderSoundButton(){
@@ -483,6 +486,7 @@ onAuthStateChanged(auth,async user=>{
     $('#loginView').classList.remove('hidden');
     $('#adminApp').classList.add('hidden');
     if(unsubscribeOrders) unsubscribeOrders();
+    if(unsubscribeDemoOrders){unsubscribeDemoOrders();unsubscribeDemoOrders=null;}
     return;
   }
 
@@ -728,6 +732,7 @@ function refreshOrderWindow(){
   for(const order of olderOrders) merged.set(order.id,order);
   for(const order of recentOrders) merged.set(order.id,order);
   for(const order of activeOrders) merged.set(order.id,order);
+  for(const order of localDemoOrders) merged.set(order.id,order);
 
   orders=[...merged.values()].sort((a,b)=>orderSortMillis(b)-orderSortMillis(a));
   renderOrders();
@@ -793,9 +798,34 @@ function listenOrders(){
   activeOrders=[];
   recentOrders=[];
   olderOrders=[];
+  localDemoOrders=[];
   orderHistoryCursor=null;
   orderHistoryDone=false;
   knownOrderIds=new Set();
+  knownDemoOrderIds=new Set();
+
+  if(unsubscribeDemoOrders) unsubscribeDemoOrders();
+  let firstDemoSnapshot=true;
+  unsubscribeDemoOrders=listenDemoOrders(list=>{
+    const incoming=list.filter(order=>
+      ACTIVE_ORDER_STATUSES.includes(order.status)&&!knownDemoOrderIds.has(order.id)
+    );
+    localDemoOrders=list;
+    refreshOrderWindow();
+
+    if(!firstDemoSnapshot&&incoming.length){
+      for(const order of incoming){
+        notifyNewOrder(order);
+        if(printConfig.autoPrint){
+          const shouldPrint=order.status==='accepted'||(order.status==='pending'&&printConfig.printPending);
+          if(shouldPrint) printOrder(order,true);
+        }
+      }
+    }
+
+    knownDemoOrderIds=new Set(list.map(order=>order.id));
+    firstDemoSnapshot=false;
+  });
 
   const activeQuery=query(
     collection(db,'orders'),
@@ -1319,6 +1349,20 @@ function quickTransition(order){
 }
 
 async function updateOrderStatus(order,status){
+  if(isDemoOrderId(order?.id)){
+    const updated=updateDemoOrder(order.id,{status});
+    if(!updated) throw Object.assign(new Error('demo_order_not_found'),{code:'demo_order_not_found'});
+    if(status==='accepted'&&printConfig.autoPrint){
+      await printOrder(updated,true);
+    }
+    showToast(
+      'Status alterado no pedido de demonstração. '+blazeRequiredMessage('checkout'),
+      'info',
+      {duration:6500}
+    );
+    return;
+  }
+
   if(!order||status===order.status) return;
   if(status==='accepted'){
     const pricing=verifyOrderPricing(order);
