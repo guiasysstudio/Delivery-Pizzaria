@@ -748,6 +748,167 @@ export const manageStaffRole = onRequest(
 );
 
 
+async function verifyStaffOrderPrivateRequest(req) {
+  const authHeader=req.headers.authorization||"";
+  const match=authHeader.match(/^Bearer\s+(.+)$/i);
+  if(!match) throw Object.assign(new Error("missing_auth"),{status:401,code:"missing_auth"});
+  const decoded=await getAuth().verifyIdToken(match[1]);
+  const permissions=await staffPermissions(decoded.uid);
+  if(!permissions) throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
+  const allowed=permissions.master===true ||
+    permissions.ordersAccept===true ||
+    permissions.ordersDispatch===true ||
+    permissions.ordersComplete===true ||
+    permissions.ordersCancel===true ||
+    permissions.printingManage===true ||
+    permissions.cashOperate===true;
+  if(!allowed) throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
+  return decoded;
+}
+
+export const staffOrderPrivate = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:staffAdminCors,
+    timeoutSeconds:20,
+    memory:"256MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+    try{
+      await verifyStaffOrderPrivateRequest(req);
+      const orderId=normalizeText(req.body?.orderId,120);
+      if(!orderId){
+        res.status(400).json({error:"order_required"});
+        return;
+      }
+      const db=getFirestore();
+      const privateRef=db.doc(`orderPrivate/${orderId}`);
+      let privateSnap=await privateRef.get();
+
+      if(!privateSnap.exists){
+        const orderRef=db.doc(`orders/${orderId}`);
+        const orderSnap=await orderRef.get();
+        if(!orderSnap.exists){
+          res.status(404).json({error:"order_not_found"});
+          return;
+        }
+        const order=orderSnap.data()||{};
+        if(order.customer||order.address){
+          const migrated={
+            orderId,
+            customerId:order.customerId||"",
+            customer:order.customer||null,
+            address:order.address||null,
+            createdAt:order.createdAt||new Date(),
+            updatedAt:new Date()
+          };
+          await privateRef.set(migrated,{merge:true});
+          await orderRef.update({
+            customer:FieldValue.delete(),
+            address:FieldValue.delete(),
+            "deliveryPricing.verifiedNeighborhood":FieldValue.delete()
+          });
+          privateSnap=await privateRef.get();
+        }
+      }
+
+      if(!privateSnap.exists){
+        res.json({ok:true,orderId,customer:null,address:null});
+        return;
+      }
+
+      const data=privateSnap.data()||{};
+      res.json({
+        ok:true,
+        orderId,
+        customer:data.customer||null,
+        address:data.address||null
+      });
+    }catch(err){
+      console.error("staffOrderPrivate failed",err);
+      res.status(Number(err?.status)||500).json({
+        error:err?.code||err?.message||"order_private_failed"
+      });
+    }
+  }
+);
+
+export const migrateOrderPrivacy = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:staffAdminCors,
+    timeoutSeconds:120,
+    memory:"512MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+    try{
+      await verifyStaffAdminRequest(req);
+      const db=getFirestore();
+      const migrationRef=db.doc("systemMigrations/orderPrivacyV1");
+      const migrationSnap=await migrationRef.get();
+      if(migrationSnap.exists&&migrationSnap.data()?.completed===true){
+        res.json({ok:true,alreadyCompleted:true,migrated:Number(migrationSnap.data()?.migrated||0)});
+        return;
+      }
+
+      const ordersSnap=await db.collection("orders").get();
+      let migrated=0;
+      let batch=db.batch();
+      let writes=0;
+      const flush=async()=>{
+        if(!writes) return;
+        await batch.commit();
+        batch=db.batch();
+        writes=0;
+      };
+
+      for(const orderDoc of ordersSnap.docs){
+        const order=orderDoc.data()||{};
+        if(!order.customer&&!order.address) continue;
+        const privateRef=db.doc(`orderPrivate/${orderDoc.id}`);
+        batch.set(privateRef,{
+          orderId:orderDoc.id,
+          customerId:order.customerId||"",
+          customer:order.customer||null,
+          address:order.address||null,
+          createdAt:order.createdAt||new Date(),
+          updatedAt:new Date()
+        },{merge:true});
+        batch.update(orderDoc.ref,{
+          customer:FieldValue.delete(),
+          address:FieldValue.delete(),
+          "deliveryPricing.verifiedNeighborhood":FieldValue.delete()
+        });
+        writes+=2;
+        migrated++;
+        if(writes>=400) await flush();
+      }
+      await flush();
+
+      await migrationRef.set({
+        completed:true,
+        migrated,
+        completedAt:new Date()
+      },{merge:true});
+      res.json({ok:true,migrated});
+    }catch(err){
+      console.error("migrateOrderPrivacy failed",err);
+      res.status(Number(err?.status)||500).json({
+        error:err?.code||err?.message||"privacy_migration_failed"
+      });
+    }
+  }
+);
+
+
 const cashCors=[
   "https://guiasysstudio.github.io",
   "https://guiasys.online",
