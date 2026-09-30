@@ -326,8 +326,8 @@ internal sealed class TrayContext : ApplicationContext
                 using var bodyFont = new Font("Segoe UI", 9F, FontStyle.Regular);
 
                 var graphics = e.Graphics ?? throw new InvalidOperationException("Contexto de impressão indisponível.");
-                var x = e.MarginBounds.Left;
-                var y = e.MarginBounds.Top;
+                float x = e.MarginBounds.Left;
+                float y = e.MarginBounds.Top;
 
                 graphics.DrawString("Delivery Pizzaria Print Agent", titleFont, Brushes.Black, x, y);
                 y += titleFont.GetHeight(graphics) + 12;
