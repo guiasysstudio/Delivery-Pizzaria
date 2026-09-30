@@ -2183,6 +2183,102 @@ export const customerIdentity = onRequest(
   }
 );
 
+
+export const deleteCustomerAccount = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:customerCors,
+    timeoutSeconds:120,
+    memory:"512MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    try{
+      const decoded=await verifyCustomerToken(req);
+      if(!decoded?.uid){
+        res.status(401).json({error:"unauthorized"});
+        return;
+      }
+
+      const confirmation=normalizeText(req.body?.confirmation,40).toUpperCase();
+      if(confirmation!=="EXCLUIR"){
+        res.status(400).json({error:"confirmation_required"});
+        return;
+      }
+
+      const db=getFirestore();
+      const uid=decoded.uid;
+      const customerRef=db.doc(`customers/${uid}`);
+      const privateRef=db.doc(`customerPrivate/${uid}`);
+      const privateSnap=await privateRef.get();
+      const cpfHashValue=privateSnap.exists?normalizeText(privateSnap.data()?.cpfHash,128):"";
+
+      await getAuth().updateUser(uid,{disabled:true}).catch(()=>{});
+      await getAuth().revokeRefreshTokens(uid).catch(()=>{});
+
+      const [
+        addressesSnap,
+        favoritesSnap,
+        rewardsSnap,
+        ordersSnap,
+        requestSnap
+      ]=await Promise.all([
+        customerRef.collection("addresses").get(),
+        customerRef.collection("favorites").get(),
+        customerRef.collection("coupons").get(),
+        db.collection("orders").where("customerId","==",uid).get(),
+        db.collection("orderRequests").where("customerId","==",uid).get()
+      ]);
+
+      const writer=db.bulkWriter();
+      for(const docSnap of addressesSnap.docs) writer.delete(docSnap.ref);
+      for(const docSnap of favoritesSnap.docs) writer.delete(docSnap.ref);
+      for(const docSnap of rewardsSnap.docs) writer.delete(docSnap.ref);
+      for(const docSnap of requestSnap.docs) writer.delete(docSnap.ref);
+
+      for(const orderDoc of ordersSnap.docs){
+        writer.set(orderDoc.ref,{
+          customerId:FieldValue.delete(),
+          customer:FieldValue.delete(),
+          address:FieldValue.delete(),
+          customerDeleted:true,
+          customerDeletedAt:new Date(),
+          updatedAt:new Date()
+        },{merge:true});
+        writer.delete(db.doc(`orderPrivate/${orderDoc.id}`));
+      }
+
+      writer.delete(customerRef);
+      writer.delete(privateRef);
+      writer.delete(db.doc(`orderRateLimits/${uid}`));
+      if(cpfHashValue) writer.delete(db.doc(`cpfIndex/${cpfHashValue}`));
+      await writer.close();
+
+      try{
+        await getAuth().deleteUser(uid);
+      }catch(err){
+        console.error("Auth deletion failed after privacy cleanup",err);
+        throw Object.assign(new Error("auth_delete_failed"),{status:500,code:"auth_delete_failed"});
+      }
+
+      res.json({
+        ok:true,
+        deleted:true,
+        retainedOrderRecords:ordersSnap.size
+      });
+    }catch(err){
+      console.error("deleteCustomerAccount failed",err);
+      res.status(Number(err?.status)||500).json({
+        error:err?.code||err?.message||"account_delete_failed"
+      });
+    }
+  }
+);
+
 export const cancelCustomerOrder = onRequest(
   {
     region:"southamerica-east1",
