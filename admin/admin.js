@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, deleteUser } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, writeBatch, runTransaction } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, writeBatch } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { firebaseConfig } from '../firebase-config.js';
 import { showToast, confirmAction, emptyStateHtml, iconHtml, skeletonListHtml, applyBrandTheme } from '../assets/ui.js';
 
@@ -120,7 +120,7 @@ const defaultRoleTemplates={
 };
 
 let categories=[],products=[],orders=[],settings={},users=[],customers=[],roles=[],promotions=[],coupons=[],cashSessions=[],cashMovements=[],currentCashSession=null,currentProfile=null;
-let unsubscribeOrders=null,soundEnabled=localStorage.getItem('deliverySoundEnabled')==='1',knownOrderIds=new Set();
+let unsubscribeOrders=null,unsubscribeCashState=null,unsubscribeCashSession=null,unsubscribeCashMovements=null,cashLiveSessionId='',soundEnabled=localStorage.getItem('deliverySoundEnabled')==='1',knownOrderIds=new Set();
 
 function renderSoundButton(){
   const button=$('#soundBtn');
@@ -168,6 +168,49 @@ let promptedPrintAgentVersion='';
 const IMAGE_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadProductImage';
 const STORE_LOGO_UPLOAD_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/uploadStoreLogo';
 const STAFF_USER_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageStaffUser';
+const CASH_OPERATION_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageCash';
+async function cashOperation(action,payload={}){
+  const user=auth.currentUser;
+  if(!user) throw Object.assign(new Error('auth-required'),{code:'auth-required'});
+  const token=await user.getIdToken();
+  const response=await fetch(CASH_OPERATION_ENDPOINT,{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization':'Bearer '+token
+    },
+    body:JSON.stringify({action,...payload})
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok){
+    const err=new Error(data?.error||'cash-operation-failed');
+    err.code=data?.error||'cash-operation-failed';
+    err.data=data;
+    throw err;
+  }
+  return data;
+}
+
+function cashOperationMessage(err){
+  const code=String(err?.code||err?.message||'');
+  const messages={
+    cash_already_open:'Já existe um caixa aberto.',
+    cash_day_already_exists:'O caixa deste dia operacional já foi encerrado e não pode ser reaberto.',
+    cash_session_changed:'O caixa atual mudou em outro computador. Atualize e confira os dados.',
+    cash_not_open:'É necessário manter um caixa aberto para concluir esta operação.',
+    cash_changed_recheck:'O caixa recebeu uma venda ou movimento enquanto você conferia. Revise os valores antes de fechar.',
+    invalid_opening_amount:'Informe um valor inicial válido.',
+    invalid_cash_movement:'Informe um movimento e valor válidos.',
+    invalid_closing_amount:'Informe um valor contado válido.',
+    invalid_order_transition:'O pedido mudou de status e não pode mais ser concluído desta forma.',
+    invalid_cash_ledger:'O livro financeiro está inconsistente e o fechamento foi bloqueado para evitar perda de dados.',
+    permission_denied:'Seu perfil não possui permissão para esta operação financeira.',
+    user_disabled:'Seu usuário está desativado.',
+    order_not_found:'O pedido não existe mais.'
+  };
+  return messages[code]||'Não foi possível concluir a operação financeira. Verifique as Firebase Functions e tente novamente.';
+}
+
 const storedPrintedOrderIds=readStoredJson(sessionStorage,'deliveryPrintedOrders',[]);
 const printedOrderIds=new Set(Array.isArray(storedPrintedOrderIds)?storedPrintedOrderIds:[]);
 
@@ -302,7 +345,10 @@ $('#loginForm').onsubmit=async e=>{
   }
 };
 
-$('#logoutBtn').onclick=()=>signOut(auth);
+$('#logoutBtn').onclick=async()=>{
+  stopCashLedgerListeners();
+  await signOut(auth);
+};
 
 onAuthStateChanged(auth,async user=>{
   $('#loginError').classList.add('hidden');
@@ -441,6 +487,7 @@ async function initializeAdmin(){
   await Promise.all(tasks);
 
   if(hasPermission('ordersView')||hasPermission('cashView')) listenOrders();
+  if(hasPermission('cashView')) listenCashLedger();
 
   if(hasPermission('settingsManage')){
     renderSchedules();
@@ -664,7 +711,10 @@ function switchView(v){
   $('#viewTitle').textContent=titles[v][1];
 
   if(v==='printing') checkPrintAgent();
-  if(v==='cash') renderCash();
+  if(v==='cash'){
+    loadCashSessions().catch(err=>console.warn('Não foi possível atualizar o caixa.',err));
+    renderCash();
+  }
   if(v==='roles') renderRoles();
 }
 
@@ -1049,9 +1099,20 @@ async function updateOrderStatus(order,status){
       if(!proceed) return;
     }
   }
+  if(status==='completed'){
+    try{
+      await cashOperation('completeOrder',{orderId:order.id});
+      if(hasPermission('cashView')) await loadCashSessions();
+    }catch(err){
+      console.error('Falha ao concluir pedido com vínculo ao caixa:',err);
+      showToast(cashOperationMessage(err),'error',{duration:7000});
+      throw err;
+    }
+    return;
+  }
+
   const patch={status,updatedAt:serverTimestamp()};
   if(status==='accepted') patch.acceptedAt=serverTimestamp();
-  if(status==='completed') patch.completedAt=serverTimestamp();
   if(status==='cancelled') patch.cancelledAt=serverTimestamp();
   await updateDoc(doc(db,'orders',order.id),patch);
   if(status==='accepted'&&printConfig.autoPrint){
@@ -1991,7 +2052,8 @@ async function loadCashSessions(){
     const snap=await getDocs(query(collection(db,'cashSessions'),orderBy('openedAt','desc')));
     cashSessions=snap.docs.map(d=>({id:d.id,...d.data()}));
     currentCashSession=cashSessions.find(s=>s.status==='open')||null;
-    await loadCashMovements(currentCashSession?.id||null);
+    if(currentCashSession) await loadCashMovements(currentCashSession.id);
+    else cashMovements=[];
   }catch(err){
     console.warn('Caixas indisponíveis.',err);
     cashSessions=[];
@@ -2016,6 +2078,88 @@ async function loadCashMovements(sessionId){
   }
 }
 
+function stopCashSessionListeners(){
+  if(unsubscribeCashSession){
+    unsubscribeCashSession();
+    unsubscribeCashSession=null;
+  }
+  if(unsubscribeCashMovements){
+    unsubscribeCashMovements();
+    unsubscribeCashMovements=null;
+  }
+  cashLiveSessionId='';
+}
+
+function stopCashLedgerListeners(){
+  if(unsubscribeCashState){
+    unsubscribeCashState();
+    unsubscribeCashState=null;
+  }
+  stopCashSessionListeners();
+}
+
+function attachCashSessionListeners(sessionId){
+  if(!sessionId){
+    stopCashSessionListeners();
+    currentCashSession=null;
+    cashMovements=[];
+    renderCash();
+    return;
+  }
+  if(cashLiveSessionId===sessionId&&unsubscribeCashSession&&unsubscribeCashMovements) return;
+
+  stopCashSessionListeners();
+  cashLiveSessionId=sessionId;
+
+  unsubscribeCashSession=onSnapshot(doc(db,'cashSessions',sessionId),snap=>{
+    if(!snap.exists()){
+      currentCashSession=null;
+      cashMovements=[];
+      renderCash();
+      return;
+    }
+
+    const session={id:snap.id,...snap.data()};
+    const index=cashSessions.findIndex(x=>x.id===session.id);
+    if(index>=0) cashSessions[index]=session;
+    else cashSessions.unshift(session);
+
+    if(session.status==='open'){
+      currentCashSession=session;
+    }else{
+      currentCashSession=null;
+      cashMovements=[];
+    }
+    renderCash();
+  },err=>{
+    console.warn('Falha ao acompanhar o caixa atual.',err);
+  });
+
+  unsubscribeCashMovements=onSnapshot(
+    query(collection(db,'cashSessions',sessionId,'movements'),orderBy('createdAt','desc')),
+    snap=>{
+      cashMovements=snap.docs.map(d=>({id:d.id,...d.data()}));
+      renderCash();
+    },
+    err=>console.warn('Falha ao acompanhar movimentos do caixa.',err)
+  );
+}
+
+function listenCashLedger(){
+  stopCashLedgerListeners();
+  unsubscribeCashState=onSnapshot(doc(db,'cashState','current'),async snap=>{
+    const sessionId=snap.exists()?String(snap.data()?.sessionId||''):'';
+    try{
+      await loadCashSessions();
+    }catch(err){
+      console.warn('Falha ao atualizar histórico do caixa.',err);
+    }
+    attachCashSessionListeners(sessionId);
+  },err=>{
+    console.warn('Falha ao acompanhar estado do caixa.',err);
+  });
+}
+
 function businessDateFor(value=new Date()){
   let date=value;
   if(value?.toDate) date=value.toDate();
@@ -2023,33 +2167,61 @@ function businessDateFor(value=new Date()){
   return new Intl.DateTimeFormat('en-CA',{timeZone:settings.timezone||'America/Porto_Velho'}).format(date);
 }
 
+function cashMoney(value){
+  const parsed=Number(value);
+  return Number.isFinite(parsed)&&parsed>=0?parsed:0;
+}
+
 function orderWithinCash(order,session){
   if(!session||order.status!=='completed') return false;
-
-  // O caixa é agrupado pelo dia em que a venda foi efetivamente concluída.
-  // Isso evita jogar no dia anterior um pedido criado antes da meia-noite,
-  // mas pago/concluído depois dela.
-  if(session.businessDate){
-    const financialDate=
-      order.completedAt?.toDate?.() ||
-      order.createdAt?.toDate?.() ||
-      new Date(order.completedAt?.toMillis?.()||order.createdAt?.toMillis?.()||0);
-    const orderDay=businessDateFor(financialDate);
-    return orderDay===session.businessDate;
-  }
-
-  // Compatibilidade com sessões antigas, anteriores ao conceito de dia operacional.
-  const ts=order.completedAt?.toMillis?.()||order.createdAt?.toMillis?.()||0;
+  const ts=order.completedAt?.toMillis?.()||0;
   const start=session.openedAt?.toMillis?.()||0;
   const end=session.closedAt?.toMillis?.()||Date.now();
-  return ts>=start&&ts<=end;
+  return !!ts&&!!start&&ts>=start&&ts<=end;
 }
 
 function cashSummary(session=currentCashSession){
-  const list=session?orders.filter(o=>orderWithinCash(o,session)):[];
+  if(!session){
+    return {count:0,gross:0,money:0,pix:0,debit:0,credit:0,other:0,supplies:0,withdrawals:0};
+  }
+
+  if(session.status==='closed'&&session.summary){
+    return {
+      count:Number(session.summary.count||0),
+      gross:cashMoney(session.summary.gross),
+      money:cashMoney(session.summary.money),
+      pix:cashMoney(session.summary.pix),
+      debit:cashMoney(session.summary.debit),
+      credit:cashMoney(session.summary.credit),
+      other:cashMoney(session.summary.other),
+      supplies:cashMoney(session.summary.supplies),
+      withdrawals:cashMoney(session.summary.withdrawals)
+    };
+  }
+
+  if(Number(session.summaryVersion||0)>=2&&session.salesSummary){
+    const sales=session.salesSummary||{};
+    const movements=session.movementSummary||{};
+    return {
+      count:Number.isInteger(Number(sales.count))&&Number(sales.count)>=0?Number(sales.count):0,
+      gross:cashMoney(sales.gross),
+      money:cashMoney(sales.money),
+      pix:cashMoney(sales.pix),
+      debit:cashMoney(sales.debit),
+      credit:cashMoney(sales.credit),
+      other:cashMoney(sales.other),
+      supplies:cashMoney(movements.supplies),
+      withdrawals:cashMoney(movements.withdrawals)
+    };
+  }
+
+  // Compatibilidade somente com sessões antigas criadas antes do livro
+  // financeiro server-side. Usa intervalo de abertura/fechamento, nunca o dia
+  // inteiro, para não alterar um caixa fechado com pedidos posteriores.
+  const list=orders.filter(o=>orderWithinCash(o,session));
   const summary={count:list.length,gross:0,money:0,pix:0,debit:0,credit:0,other:0,supplies:0,withdrawals:0};
   for(const o of list){
-    const value=Number(o.total||0);
+    const value=cashMoney(o.total);
     summary.gross+=value;
     const method=String(o.payment?.method||'').toLowerCase();
     if(method.includes('dinheiro')) summary.money+=value;
@@ -2058,18 +2230,13 @@ function cashSummary(session=currentCashSession){
     else if(method.includes('crédito')||method.includes('credito')) summary.credit+=value;
     else summary.other+=value;
   }
-
-  if(session?.id===currentCashSession?.id){
+  if(session.id===currentCashSession?.id){
     for(const movement of cashMovements){
-      const value=Number(movement.amount||0);
+      const value=cashMoney(movement.amount);
       if(movement.type==='supply') summary.supplies+=value;
       if(movement.type==='withdrawal') summary.withdrawals+=value;
     }
-  }else if(session?.summary){
-    summary.supplies=Number(session.summary.supplies||0);
-    summary.withdrawals=Number(session.summary.withdrawals||0);
   }
-
   return summary;
 }
 
@@ -2087,7 +2254,7 @@ function renderCash(){
   $('#cashCreditTotal').textContent=money(summary.credit);
 
   if(currentCashSession){
-    const expected=Number(currentCashSession.openingAmount||0)+summary.money+summary.supplies-summary.withdrawals;
+    const expected=cashMoney(currentCashSession.openingAmount)+summary.money+summary.supplies-summary.withdrawals;
     const today=businessDateFor();
     const overdue=currentCashSession.businessDate&&currentCashSession.businessDate!==today;
     $('#cashSessionMeta').innerHTML=`
@@ -2097,6 +2264,7 @@ function renderCash(){
       <p><strong>Valor inicial:</strong> ${money(currentCashSession.openingAmount)}</p>
       <p><strong>Suprimentos:</strong> ${money(summary.supplies)} • <strong>Sangrias:</strong> ${money(summary.withdrawals)}</p>
       <p><strong>Dinheiro esperado agora:</strong> ${money(expected)}</p>
+      <p><strong>Vendas vinculadas:</strong> ${summary.count}</p>
       <p><strong>Abertura:</strong> ${formatDate(currentCashSession.openedAt)}</p>`;
   }
 
@@ -2115,64 +2283,30 @@ function renderCash(){
 
 $('#openCashBtn')?.addEventListener('click',async()=>{
   if(!hasPermission('cashOperate')) return;
-
-  // Atualiza antes de abrir para não trabalhar com estado antigo de outra estação.
-  await loadCashSessions();
-  if(currentCashSession){
-    showToast('Já existe um caixa aberto. A tela foi atualizada com a sessão atual.','warning');
-    return;
-  }
-
-  const businessDate=businessDateFor();
-  if(cashSessions.some(session=>session.businessDate===businessDate&&session.status==='closed')){
-    showToast('O caixa deste dia operacional já foi encerrado. Para evitar duplicidade financeira, não é possível abrir uma segunda sessão no mesmo dia.','warning');
-    return;
-  }
-
   const openingAmount=Number($('#cashOpeningAmount').value||0);
-  if(!Number.isFinite(openingAmount)||openingAmount<0){
-    showToast('Informe um valor inicial válido, igual ou maior que zero.','warning');
+  if(!Number.isFinite(openingAmount)||openingAmount<0||openingAmount>1_000_000){
+    showToast('Informe um valor inicial válido entre R$ 0,00 e R$ 1.000.000,00.','warning');
     $('#cashOpeningAmount').focus();
     return;
   }
 
-  const openingNote=$('#cashOpeningNote').value.trim();
-  const stateRef=doc(db,'cashState','current');
-  const sessionRef=doc(collection(db,'cashSessions'));
-
+  const button=$('#openCashBtn');
+  button.disabled=true;
   try{
-    await runTransaction(db,async tx=>{
-      const state=await tx.get(stateRef);
-      if(state.exists()&&state.data()?.sessionId) throw new Error('cash-already-open');
-
-      tx.set(sessionRef,{
-        status:'open',
-        businessDate,
-        openingAmount,
-        openingNote,
-        openedBy:auth.currentUser.uid,
-        openedByName:currentProfile.displayName||currentProfile.username||'Usuário',
-        openedAt:serverTimestamp(),
-        updatedAt:serverTimestamp()
-      });
-      tx.set(stateRef,{
-        sessionId:sessionRef.id,
-        openedBy:auth.currentUser.uid,
-        openedAt:serverTimestamp()
-      });
+    await cashOperation('open',{
+      openingAmount,
+      openingNote:$('#cashOpeningNote').value.trim()
     });
+    $('#cashOpeningAmount').value='0';
+    $('#cashOpeningNote').value='';
     await loadCashSessions();
-    cashMovements=[];
-    if(currentCashSession) await loadCashMovements(currentCashSession.id);
-    renderCash();
+    showToast('Caixa aberto com sucesso.','success');
   }catch(err){
     console.error(err);
-    if(err?.message==='cash-already-open'){
-      showToast('Já existe um caixa aberto. Atualize a tela para visualizar a sessão atual.','warning');
-      await loadCashSessions();
-      return;
-    }
-    showToast('Não foi possível abrir o caixa.','error');
+    showToast(cashOperationMessage(err),'error',{duration:7000});
+    await loadCashSessions();
+  }finally{
+    button.disabled=false;
   }
 });
 
@@ -2193,91 +2327,86 @@ $('#cashWithdrawalBtn')?.addEventListener('click',()=>openCashMovement('withdraw
 $('#cashMovementForm')?.addEventListener('submit',async e=>{
   e.preventDefault();
   if(!hasPermission('cashOperate')||!currentCashSession) return;
+  const sessionId=currentCashSession.id;
   const type=$('#cashMovementType').value==='withdrawal'?'withdrawal':'supply';
   const amount=Number($('#cashMovementAmount').value||0);
   const note=$('#cashMovementNote').value.trim();
-  if(!(amount>0)){
-    $('#cashMovementError').textContent='Informe um valor maior que zero.';
+  if(!Number.isFinite(amount)||amount<=0||amount>1_000_000){
+    $('#cashMovementError').textContent='Informe um valor maior que zero e de até R$ 1.000.000,00.';
     $('#cashMovementError').classList.remove('hidden');
     return;
   }
 
+  const submit=$('#cashMovementForm button[type=submit]');
+  if(submit) submit.disabled=true;
   try{
-    await addDoc(collection(db,'cashSessions',currentCashSession.id,'movements'),{
-      type,
-      amount,
-      note,
-      createdBy:auth.currentUser.uid,
-      createdByName:currentProfile.displayName||currentProfile.username||'Usuário',
-      createdAt:serverTimestamp()
-    });
+    await cashOperation('movement',{sessionId,type,amount,note});
     $('#cashMovementDialog').close();
-    await loadCashMovements(currentCashSession.id);
-    renderCash();
+    await loadCashSessions();
   }catch(err){
     console.error(err);
-    $('#cashMovementError').textContent='Não foi possível salvar o movimento.';
+    $('#cashMovementError').textContent=cashOperationMessage(err);
     $('#cashMovementError').classList.remove('hidden');
+    await loadCashSessions();
+  }finally{
+    if(submit) submit.disabled=false;
   }
 });
+
+let cashCloseRevision=0;
 
 $('#closeCashBtn')?.addEventListener('click',()=>{
   if(!hasPermission('cashOperate')||!currentCashSession) return;
   const summary=cashSummary();
-  const expected=Number(currentCashSession.openingAmount||0)+summary.money+summary.supplies-summary.withdrawals;
+  const expected=cashMoney(currentCashSession.openingAmount)+summary.money+summary.supplies-summary.withdrawals;
+  cashCloseRevision=Number(currentCashSession.financialRevision||0);
   $('#cashClosingAmount').value=expected.toFixed(2);
   $('#cashClosingNote').value='';
-  $('#cashClosePreview').innerHTML=`<p>Dinheiro esperado: <strong>${money(expected)}</strong></p><p>Vendas totais do período: <strong>${money(summary.gross)}</strong></p>`;
+  $('#cashClosePreview').innerHTML=`<p>Dinheiro esperado: <strong>${money(expected)}</strong></p><p>Vendas vinculadas a este caixa: <strong>${summary.count}</strong></p><p>Vendas totais do período: <strong>${money(summary.gross)}</strong></p><p class="muted">Se entrar uma venda, suprimento ou sangria durante a conferência, o fechamento será bloqueado para você revisar os valores.</p>`;
   $('#cashCloseError').classList.add('hidden');
   $('#cashCloseDialog').showModal();
 });
 
 $('#cashCloseForm')?.addEventListener('submit',async e=>{
   e.preventDefault();
-  if(!currentCashSession) return;
-  const session=currentCashSession;
+  if(!hasPermission('cashOperate')||!currentCashSession) return;
+  const sessionId=currentCashSession.id;
   const declared=Number($('#cashClosingAmount').value||0);
-  if(!Number.isFinite(declared)||declared<0){
+  if(!Number.isFinite(declared)||declared<0||declared>10_000_000){
     $('#cashCloseError').textContent='Informe um valor contado válido, igual ou maior que zero.';
     $('#cashCloseError').classList.remove('hidden');
     $('#cashClosingAmount').focus();
     return;
   }
-  const summary=cashSummary(session);
-  const expected=Number(session.openingAmount||0)+summary.money+summary.supplies-summary.withdrawals;
-  const stateRef=doc(db,'cashState','current');
-  const sessionRef=doc(db,'cashSessions',session.id);
 
+  const submit=$('#cashCloseForm button[type=submit]');
+  if(submit) submit.disabled=true;
   try{
-    await runTransaction(db,async tx=>{
-      const state=await tx.get(stateRef);
-      if(!state.exists()||state.data()?.sessionId!==session.id) throw new Error('cash-session-changed');
-
-      tx.update(sessionRef,{
-        status:'closed',
-        closingAmount:declared,
-        expectedCash:expected,
-        difference:declared-expected,
-        closingNote:$('#cashClosingNote').value.trim(),
-        closedBy:auth.currentUser.uid,
-        closedByName:currentProfile.displayName||currentProfile.username||'Usuário',
-        closedAt:serverTimestamp(),
-        summary,
-        updatedAt:serverTimestamp()
-      });
-      tx.delete(stateRef);
+    const result=await cashOperation('close',{
+      sessionId,
+      closingAmount:declared,
+      closingNote:$('#cashClosingNote').value.trim(),
+      expectedRevision:cashCloseRevision
     });
     $('#cashCloseDialog').close();
     await loadCashSessions();
+    const difference=Number(result.difference||0);
+    showToast(
+      Math.abs(difference)<0.005
+        ?'Caixa fechado sem diferença.'
+        :`Caixa fechado. Diferença registrada: ${money(difference)}.`,
+      Math.abs(difference)<0.005?'success':'warning',
+      {duration:7000}
+    );
   }catch(err){
     console.error(err);
-    $('#cashCloseError').textContent=err?.message==='cash-session-changed'
-      ?'O caixa atual mudou em outro computador. Atualize a página.'
-      :'Não foi possível fechar o caixa.';
+    $('#cashCloseError').textContent=cashOperationMessage(err);
     $('#cashCloseError').classList.remove('hidden');
+    await loadCashSessions();
+  }finally{
+    if(submit) submit.disabled=false;
   }
 });
-
 
 function adminPromotionActive(promo){
   if(!promo||promo.active===false) return false;
