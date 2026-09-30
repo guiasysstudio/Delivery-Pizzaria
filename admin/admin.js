@@ -2113,10 +2113,16 @@ function stopCashLedgerListeners(){
 
 function attachCashSessionListeners(sessionId){
   if(!sessionId){
+    const hadSession=!!currentCashSession;
     stopCashSessionListeners();
     currentCashSession=null;
     cashMovements=[];
+    cashMovementRequestId='';
+    cashMovementFingerprint='';
+    if($('#cashMovementDialog')?.open) $('#cashMovementDialog').close();
+    if($('#cashCloseDialog')?.open) $('#cashCloseDialog').close();
     renderCash();
+    if(hadSession) showToast('O caixa foi fechado. O painel financeiro foi atualizado.','info');
     return;
   }
   if(cashLiveSessionId===sessionId&&unsubscribeCashSession&&unsubscribeCashMovements) return;
@@ -2408,14 +2414,20 @@ $('#cashMovementForm')?.addEventListener('submit',async e=>{
 
 let cashCloseRevision=0;
 
-$('#closeCashBtn')?.addEventListener('click',()=>{
-  if(!hasPermission('cashOperate')||!currentCashSession) return;
+function refreshCashClosePreview({resetDeclared=false}={}){
+  if(!currentCashSession) return false;
   const summary=cashSummary();
   const expected=cashMoney(currentCashSession.openingAmount)+summary.money+summary.supplies-summary.withdrawals;
   cashCloseRevision=Number(currentCashSession.financialRevision||0);
-  $('#cashClosingAmount').value=expected.toFixed(2);
-  $('#cashClosingNote').value='';
+  if(resetDeclared) $('#cashClosingAmount').value=expected.toFixed(2);
   $('#cashClosePreview').innerHTML=`<p>Dinheiro esperado: <strong>${money(expected)}</strong></p><p>Vendas vinculadas a este caixa: <strong>${summary.count}</strong></p><p>Vendas totais do período: <strong>${money(summary.gross)}</strong></p><p class="muted">Se entrar uma venda, suprimento ou sangria durante a conferência, o fechamento será bloqueado para você revisar os valores.</p>`;
+  return true;
+}
+
+$('#closeCashBtn')?.addEventListener('click',()=>{
+  if(!hasPermission('cashOperate')||!currentCashSession) return;
+  refreshCashClosePreview({resetDeclared:true});
+  $('#cashClosingNote').value='';
   $('#cashCloseError').classList.add('hidden');
   $('#cashCloseDialog').showModal();
 });
@@ -2456,6 +2468,9 @@ $('#cashCloseForm')?.addEventListener('submit',async e=>{
     $('#cashCloseError').textContent=cashOperationMessage(err);
     $('#cashCloseError').classList.remove('hidden');
     await loadCashSessions();
+    if(err?.code==='cash_changed_recheck'&&currentCashSession){
+      refreshCashClosePreview({resetDeclared:false});
+    }
   }finally{
     if(submit) submit.disabled=false;
   }
