@@ -9,6 +9,9 @@ const publicFiles=[
   'index.html',
   '404.html',
   'privacy.html',
+  'offline.html',
+  'robots.txt',
+  'sitemap.xml',
   'manifest.webmanifest',
   'service-worker.js',
   'firebase-config.js'
