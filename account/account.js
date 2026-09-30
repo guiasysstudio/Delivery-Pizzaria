@@ -216,9 +216,11 @@ function renderProfile(){
   $('#profileCpfHint').textContent=identity?.identityComplete
     ?'CPF confirmado. Por segurança, ele não pode ser trocado pelo site e não fica visível para a pizzaria.'
     :'Obrigatório para realizar pedidos. A pizzaria não visualiza este dado.';
-  $('#identityStatus').innerHTML=identity?.identityComplete
-    ?'<span class="status-pill status-completed">✓ Cadastro pronto para pedidos</span>'
-    :'<span class="status-pill status-pending">Complete nome, telefone e CPF para poder pedir.</span>';
+  $('#identityStatus').innerHTML=identity?.demoFallback
+    ?'<span class="status-pill status-pending">Cadastro salvo para demonstração • validação do CPF pendente no servidor</span>'
+    :identity?.identityComplete
+      ?'<span class="status-pill status-completed">✓ Cadastro pronto para pedidos</span>'
+      :'<span class="status-pill status-pending">Complete nome, telefone e CPF para poder pedir.</span>';
   pendingCustomPhotoURL=undefined;
   renderProfilePhoto();
 }
@@ -289,11 +291,13 @@ $('#profileForm').onsubmit=async e=>{
   }
 
   try{
-    identity=await saveCustomerIdentity({name,phone,cpf});
-
     const payload={name,phone};
     if(pendingCustomPhotoURL!==undefined) payload.customPhotoURL=pendingCustomPhotoURL;
+
+    // Nome/telefone/foto não dependem da Cloud Function de CPF e devem ser
+    // persistidos mesmo durante a demonstração sem Blaze.
     await saveCustomerProfile(user.uid,payload);
+    identity=await saveCustomerIdentity({name,phone,cpf});
 
     profile=await getCustomerProfile(user.uid);
     pendingCustomPhotoURL=undefined;
@@ -301,6 +305,9 @@ $('#profileForm').onsubmit=async e=>{
     renderProfile();
     $('#profileSaved').classList.remove('hidden');
     setTimeout(()=>$('#profileSaved').classList.add('hidden'),1800);
+    if(identity?.demoFallback){
+      showToast('Nome e telefone salvos. O CPF ficou somente mascarado neste navegador para a demonstração; a validação definitiva depende do Firebase Functions.','info',{duration:7000});
+    }
 
     if(localStorage.getItem('deliveryReturnToCheckout')==='1'){
       localStorage.removeItem('deliveryReturnToCheckout');
