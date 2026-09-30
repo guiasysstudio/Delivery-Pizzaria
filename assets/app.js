@@ -14,6 +14,14 @@ const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
 const placeholder='./assets/products/placeholder.svg';
+
+function renderDemoModeBanner(){
+  const banner=$('#publicDemoBanner');
+  if(banner) banner.classList.toggle('hidden',!demoEnvironmentAllowed());
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',renderDemoModeBanner,{once:true});
+else renderDemoModeBanner();
+
 const SECURE_ORDER_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/createOrder';
 
 function readStoredJson(storage,key,fallback){
