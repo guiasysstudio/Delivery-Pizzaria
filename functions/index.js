@@ -749,6 +749,31 @@ export const manageStaffRole = onRequest(
 );
 
 
+function minimalOrderCustomer(value={}) {
+  return {
+    name:normalizeText(value?.name,100),
+    phone:normalizeText(value?.phone,40)
+  };
+}
+
+function minimalOrderAddress(value) {
+  if(!value) return null;
+  return {
+    id:normalizeText(value.id,120),
+    label:normalizeText(value.label,40),
+    recipient:normalizeText(value.recipient,100),
+    phone:normalizeText(value.phone,40),
+    zip:normalizeText(value.zip,10),
+    street:normalizeText(value.street,160),
+    number:normalizeText(value.number,20),
+    complement:normalizeText(value.complement,100),
+    neighborhood:normalizeText(value.neighborhood,80),
+    city:normalizeText(value.city,80),
+    state:normalizeText(value.state,2),
+    reference:normalizeText(value.reference,140)
+  };
+}
+
 async function verifyStaffOrderPrivateRequest(req) {
   const authHeader=req.headers.authorization||"";
   const match=authHeader.match(/^Bearer\s+(.+)$/i);
@@ -809,8 +834,8 @@ export const staffOrderPrivate = onRequest(
           tx.set(privateRef,{
             orderId,
             customerId:order.customerId||"",
-            customer:order.customer||null,
-            address:order.address||null,
+            customer:order.customer?minimalOrderCustomer(order.customer):null,
+            address:minimalOrderAddress(order.address),
             createdAt:order.createdAt||new Date(),
             updatedAt:new Date()
           },{merge:true});
@@ -821,6 +846,9 @@ export const staffOrderPrivate = onRequest(
           };
           if(order.deliveryPricing?.verifiedNeighborhood!==undefined){
             patch["deliveryPricing.verifiedNeighborhood"]=FieldValue.delete();
+          }
+          if(order.deliveryPricing?.zone!==undefined){
+            patch["deliveryPricing.zone"]=FieldValue.delete();
           }
           tx.update(orderRef,patch);
         });
@@ -838,11 +866,25 @@ export const staffOrderPrivate = onRequest(
       }
 
       const data=privateSnap.data()||{};
+      const customer=data.customer?minimalOrderCustomer(data.customer):null;
+      const address=minimalOrderAddress(data.address);
+      if(
+        data.customer?.email!==undefined ||
+        data.address?.location!==undefined ||
+        data.deliveryPrivate!==undefined
+      ){
+        await privateRef.set({
+          customer,
+          address,
+          deliveryPrivate:FieldValue.delete(),
+          updatedAt:new Date()
+        },{merge:true});
+      }
       res.json({
         ok:true,
         orderId,
-        customer:data.customer||null,
-        address:data.address||null
+        customer,
+        address
       });
     }catch(err){
       console.error("staffOrderPrivate failed",err);
@@ -893,8 +935,9 @@ export const migrateOrderPrivacy = onRequest(
         batch.set(privateRef,{
           orderId:orderDoc.id,
           customerId:order.customerId||"",
-          customer:order.customer||null,
-          address:order.address||null,
+          customer:order.customer?minimalOrderCustomer(order.customer):null,
+          address:minimalOrderAddress(order.address),
+          deliveryPrivate:FieldValue.delete(),
           createdAt:order.createdAt||new Date(),
           updatedAt:new Date()
         },{merge:true});
@@ -904,6 +947,9 @@ export const migrateOrderPrivacy = onRequest(
         };
         if(order.deliveryPricing?.verifiedNeighborhood!==undefined){
           orderPatch["deliveryPricing.verifiedNeighborhood"]=FieldValue.delete();
+        }
+        if(order.deliveryPricing?.zone!==undefined){
+          orderPatch["deliveryPricing.zone"]=FieldValue.delete();
         }
         batch.update(orderDoc.ref,orderPatch);
         writes+=2;
@@ -2367,6 +2413,12 @@ export const deleteCustomerAccount = onRequest(
         return;
       }
 
+      const authTimeMs=Number(decoded.auth_time||0)*1000;
+      if(!Number.isFinite(authTimeMs)||Date.now()-authTimeMs>15*60*1000){
+        res.status(401).json({error:"recent_login_required"});
+        return;
+      }
+
       const db=getFirestore();
       const uid=decoded.uid;
       const customerRef=db.doc(`customers/${uid}`);
@@ -3052,7 +3104,6 @@ export const createOrder = onRequest(
             fee:deliveryFee,
             distanceKm:Number.isFinite(delivery.distanceKm)?Number(delivery.distanceKm.toFixed(3)):null,
             distanceMethod:delivery.distanceMethod||null,
-            zone:delivery.zone||null,
             maxKm:delivery.maxKm??null
           }:{mode:"pickup",fee:0},
           payment:{
@@ -3074,12 +3125,8 @@ export const createOrder = onRequest(
         tx.set(orderPrivateRef,{
           orderId:orderRef.id,
           customerId:decoded.uid,
-          customer:{
-            name,
-            email:decoded.email||"",
-            phone
-          },
-          address:fulfillment==="delivery"?{
+          customer:minimalOrderCustomer({name,phone}),
+          address:fulfillment==="delivery"?minimalOrderAddress({
             id:address.id,
             label:address.label||"",
             recipient:address.recipient||name,
@@ -3091,13 +3138,8 @@ export const createOrder = onRequest(
             neighborhood:address.neighborhood||"",
             city:address.city||"",
             state:address.state||"",
-            reference:address.reference||"",
-            location:delivery.addressLocation||null
-          }:null,
-          deliveryPrivate:fulfillment==="delivery"?{
-            verifiedNeighborhood:delivery.verifiedNeighborhood||null,
-            addressLocation:delivery.addressLocation||null
-          }:null,
+            reference:address.reference||""
+          }):null,
           createdAt:now,
           updatedAt:now
         });
