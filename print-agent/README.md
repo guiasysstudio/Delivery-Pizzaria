@@ -4,7 +4,7 @@ Aplicativo local para Windows que permite à Central Delivery imprimir comandas 
 
 ## Versão atual
 
-`1.5.0`
+`1.6.0`
 
 ## Como funciona
 
@@ -27,7 +27,7 @@ A instalação é feita em:
 
 O Print Agent usa o registro do usuário atual (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`) e não precisa executar como administrador para iniciar com o Windows.
 
-O instalador 1.5.0 remove do executável instalado o **Mark-of-the-Web / Zone.Identifier** herdado do ZIP baixado. O próprio Agent também tenta remover essa marca após a primeira execução autorizada. Isso evita que o aviso **“O fornecedor não pôde ser verificado”** seja mostrado novamente a cada login.
+O instalador 1.6.0 remove o **Mark-of-the-Web / Zone.Identifier** primeiro do pacote extraído e depois do executável instalado. Antes de concluir, ele verifica se o stream realmente desapareceu. Se o Windows ainda mantiver o bloqueio, a instalação para e informa o erro em vez de cadastrar um Agent que pediria confirmação a cada login.
 
 > O executável continua sem assinatura Authenticode. Por isso o Windows ainda pode exibir um aviso na primeira execução do arquivo recém-baixado. Eliminar também o primeiro aviso exige assinatura digital de código.
 
@@ -43,7 +43,7 @@ Pelo ícone ao lado do relógio ou pela janela de configurações é possível:
 - abrir a Central Delivery;
 - fechar apenas a janela mantendo o Agent ativo;
 - **Sair do Print Agent**, encerrando realmente o serviço local;
-- **Desinstalar Print Agent**, removendo startup, preferências e arquivos instalados.
+- **Desinstalar Print Agent**, removendo startup, preferências, registro em Aplicativos instalados e arquivos instalados.
 
 A ação **Sair do Print Agent** é diferente de fechar a janela: fechar a janela apenas a oculta na bandeja.
 
@@ -65,7 +65,7 @@ A logo da pizzaria é impressa nos modelos compatíveis. Alguns drivers térmico
 2. Extraia o ZIP.
 3. Execute `Instalar.cmd`.
 4. Se o Windows pedir confirmação para o arquivo recém-baixado, confirme a primeira execução.
-5. O instalador copia e desbloqueia o EXE em AppData antes de iniciar o Agent.
+5. O instalador copia o EXE e o desinstalador para AppData, remove o Mark-of-the-Web, verifica o desbloqueio e só então registra a inicialização automática.
 6. Abra as configurações pelo ícone ao lado do relógio.
 7. Escolha a impressora física.
 8. Use **Imprimir teste**.
@@ -78,7 +78,7 @@ Há duas formas:
 - no próprio Print Agent, escolha **Desinstalar Print Agent**;
 - ou execute `Desinstalar.cmd` do pacote baixado.
 
-Nenhuma das duas exige remoção manual da chave de inicialização do Windows.
+O Agent também aparece em **Configurações do Windows → Aplicativos instalados**, com desinstalação pelo usuário atual. Nenhuma opção exige remoção manual de chaves do Registro.
 
 ## Compatibilidade
 
