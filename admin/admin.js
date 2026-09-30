@@ -1397,9 +1397,11 @@ async function updateOrderStatus(order,status){
       await printOrder(updated,true);
     }
     showToast(
-      'Status alterado no pedido de demonstração. '+blazeRequiredMessage('checkout'),
+      status==='completed'
+        ?'Pedido de demonstração concluído localmente. '+blazeRequiredMessage('cash')
+        :'Status alterado no pedido de demonstração. O pedido real em produção usa validações server-side no Blaze.',
       'info',
-      {duration:6500}
+      {duration:7500}
     );
     return;
   }
