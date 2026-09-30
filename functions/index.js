@@ -682,10 +682,19 @@ export const manageCash = onRequest(
       if(action==="open"){
         const openingAmount=cleanCashMoney(req.body?.openingAmount,{min:0,max:1_000_000});
         const openingNote=normalizeText(req.body?.openingNote,300);
-        if(openingAmount==null){
+        const requestId=normalizeText(req.body?.requestId,80);
+        if(openingAmount==null||!/^[A-Za-z0-9_-]{16,80}$/.test(requestId)){
           res.status(400).json({error:"invalid_opening_amount"});
           return;
         }
+
+        const requestFingerprint=createHash("sha256").update(JSON.stringify({
+          openingAmount,openingNote
+        })).digest("hex");
+        const requestKey=createHash("sha256")
+          .update(decoded.uid+":cash-open:"+requestId)
+          .digest("hex");
+        const requestRef=db.doc(`cashOperationRequests/${requestKey}`);
 
         const settingsSnap=await db.doc("settings/store").get();
         const timezone=settingsSnap.data()?.timezone||"America/Porto_Velho";
@@ -694,12 +703,23 @@ export const manageCash = onRequest(
         const dayRef=db.doc(`cashDays/${businessDate}`);
         const sessionRef=db.collection("cashSessions").doc();
         let sessionNumber=1;
+        let duplicateResult=null;
 
         await db.runTransaction(async tx=>{
-          const [stateSnap,daySnap]=await Promise.all([
+          const [requestSnap,stateSnap,daySnap]=await Promise.all([
+            tx.get(requestRef),
             tx.get(stateRef),
             tx.get(dayRef)
           ]);
+
+          if(requestSnap.exists){
+            const stored=requestSnap.data()||{};
+            if(stored.requestFingerprint!==requestFingerprint){
+              throw Object.assign(new Error("idempotency_conflict"),{code:"idempotency_conflict"});
+            }
+            duplicateResult=stored;
+            return;
+          }
 
           if(stateSnap.exists&&stateSnap.data()?.sessionId){
             const existingSessionId=normalizeText(stateSnap.data().sessionId,120);
@@ -756,8 +776,23 @@ export const manageCash = onRequest(
             lastOpenedAt:now,
             updatedAt:now
           },{merge:true});
+          tx.set(requestRef,{
+            action,
+            requestId,
+            requestFingerprint,
+            operatorId:decoded.uid,
+            sessionId:sessionRef.id,
+            businessDate,
+            sessionNumber,
+            openingAmount,
+            createdAt:now
+          });
         });
 
+        if(duplicateResult){
+          res.json({ok:true,idempotent:true,...duplicateResult});
+          return;
+        }
         res.json({
           ok:true,
           action,
