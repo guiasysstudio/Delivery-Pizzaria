@@ -197,7 +197,8 @@
         <label class="field"><span>Telefone</span><input id="registerPhone" required maxlength="15" inputmode="tel" autocomplete="tel" placeholder="(00) 00000-0000"></label>
         <label class="field"><span>CPF</span><input id="registerCpf" required maxlength="14" inputmode="numeric" autocomplete="off" placeholder="000.000.000-00"></label>
         <label class="field"><span>E-mail</span><input id="registerEmail" type="email" required autocomplete="email"></label>
-        <label class="field"><span>Senha</span><input id="registerPassword" type="password" minlength="6" required autocomplete="new-password"></label>
+        <label class="field"><span>Senha</span><input id="registerPassword" type="password" minlength="8" maxlength="128" required autocomplete="new-password"><small class="muted">Use pelo menos 8 caracteres, com letra e número.</small></label>
+        <label class="check-row"><input id="registerPrivacyNotice" type="checkbox" required><span>Li o <a href="./privacy.html" target="_blank" rel="noopener">Aviso de Privacidade</a> e estou ciente do uso dos dados necessários para cadastro, pedidos e entrega.</span></label>
         <div id="registerAuthError" class="alert alert-error hidden"></div>
         <button class="btn btn-primary btn-block" type="submit">Criar minha conta</button>
         <p class="auth-switch">Já possui conta? <button id="showLoginBtn" class="link-button" type="button">Entrar</button></p>
