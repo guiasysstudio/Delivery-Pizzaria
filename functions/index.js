@@ -702,7 +702,15 @@ export const manageCash = onRequest(
           ]);
 
           if(stateSnap.exists&&stateSnap.data()?.sessionId){
-            throw Object.assign(new Error("cash_already_open"),{code:"cash_already_open"});
+            const existingSessionId=normalizeText(stateSnap.data().sessionId,120);
+            const existingSessionSnap=existingSessionId
+              ?await tx.get(db.doc(`cashSessions/${existingSessionId}`))
+              :null;
+            if(existingSessionSnap?.exists&&existingSessionSnap.data()?.status==="open"){
+              throw Object.assign(new Error("cash_already_open"),{code:"cash_already_open"});
+            }
+            // Recupera automaticamente um ponteiro órfão/obsoleto.
+            tx.delete(stateRef);
           }
 
           const day=daySnap.exists?daySnap.data()||{}:{};
