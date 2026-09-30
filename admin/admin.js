@@ -169,6 +169,7 @@ const STAFF_USER_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5
 const STAFF_ROLE_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageStaffRole';
 const STAFF_ORDER_PRIVATE_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/staffOrderPrivate';
 const ORDER_PRIVACY_MIGRATION_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/migrateOrderPrivacy';
+const CUSTOMER_PRIVACY_MIGRATION_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/migrateCustomerPrivacy';
 const CASH_OPERATION_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageCash';
 async function cashOperation(action,payload={}){
   const user=auth.currentUser;
@@ -327,27 +328,48 @@ const defaults={
 function normalizeUsername(value){
   return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9._-]/g,'');
 }
-async function migrateLegacyOrderPrivacyIfAvailable(){
-  if(!isMaster()||sessionStorage.getItem('deliveryOrderPrivacyMigrated')==='1') return;
+async function runPrivacyMigration(endpoint,storageKey,label){
+  if(!isMaster()||sessionStorage.getItem(storageKey)==='1') return;
+  const token=await auth.currentUser?.getIdToken();
+  if(!token) return;
+  const response=await fetch(endpoint,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:'{}'
+  });
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok){
+    const err=new Error(data?.error||('privacy-migration-http-'+response.status));
+    err.code=data?.error||'privacy-migration-failed';
+    throw err;
+  }
+  sessionStorage.setItem(storageKey,'1');
+  console.info(label,data);
+}
+
+async function migrateLegacyPrivacyIfAvailable(){
+  if(!isMaster()) return;
   try{
-    const token=await auth.currentUser?.getIdToken();
-    if(!token) return;
-    const response=await fetch(ORDER_PRIVACY_MIGRATION_ENDPOINT,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body:'{}'
-    });
-    if(!response.ok) throw new Error('privacy-migration-http-'+response.status);
-    const data=await response.json().catch(()=>({}));
-    sessionStorage.setItem('deliveryOrderPrivacyMigrated','1');
-    if(Number(data?.migrated||0)>0){
-      orderPrivateCache.clear();
-      console.info('Migração de privacidade dos pedidos concluída:',data.migrated);
-    }
+    await runPrivacyMigration(
+      CUSTOMER_PRIVACY_MIGRATION_ENDPOINT,
+      'deliveryCustomerPrivacyMigrated',
+      'Migração de privacidade dos clientes concluída:'
+    );
+  }catch(err){
+    console.warn('Migração de privacidade dos clientes ainda indisponível.',err);
+  }
+
+  try{
+    await runPrivacyMigration(
+      ORDER_PRIVACY_MIGRATION_ENDPOINT,
+      'deliveryOrderPrivacyMigrated',
+      'Migração de privacidade dos pedidos concluída:'
+    );
+    orderPrivateCache.clear();
   }catch(err){
     // Antes do deploy das Functions (Módulo 4), o painel continua operando.
     // Após o deploy, o próximo acesso Master tentará novamente automaticamente.
-    console.warn('Migração de privacidade ainda indisponível.',err);
+    console.warn('Migração de privacidade dos pedidos ainda indisponível.',err);
   }
 }
 
@@ -546,7 +568,7 @@ async function initializeAdmin(){
   $('#currentUserDisplay').textContent=`${currentProfile.displayName||currentProfile.username||'Usuário'} • ${roleLabel(currentProfile.role)}`;
 
   await loadSettings();
-  await migrateLegacyOrderPrivacyIfAvailable();
+  await migrateLegacyPrivacyIfAvailable();
 
   showAdminSkeletons();
   const tasks=[];
