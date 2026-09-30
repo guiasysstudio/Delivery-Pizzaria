@@ -761,8 +761,7 @@ async function verifyStaffOrderPrivateRequest(req) {
     permissions.ordersDispatch===true ||
     permissions.ordersComplete===true ||
     permissions.ordersCancel===true ||
-    permissions.printingManage===true ||
-    permissions.cashOperate===true;
+    permissions.printingManage===true;
   if(!allowed) throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
   return decoded;
 }
