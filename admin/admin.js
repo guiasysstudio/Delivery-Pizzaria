@@ -168,6 +168,7 @@ const STAFF_LOGIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.c
 const STAFF_USER_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageStaffUser';
 const STAFF_ROLE_ADMIN_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageStaffRole';
 const STAFF_ORDER_PRIVATE_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/staffOrderPrivate';
+const ORDER_PRIVACY_MIGRATION_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/migrateOrderPrivacy';
 const CASH_OPERATION_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/manageCash';
 async function cashOperation(action,payload={}){
   const user=auth.currentUser;
@@ -323,13 +324,30 @@ const defaults={
 function normalizeUsername(value){
   return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9._-]/g,'');
 }
-function legacyUsernameEmail(username){
-  return `${normalizeUsername(username)}@delivery-pizzaria.local`;
+async function migrateLegacyOrderPrivacyIfAvailable(){
+  if(!isMaster()||sessionStorage.getItem('deliveryOrderPrivacyMigrated')==='1') return;
+  try{
+    const token=await auth.currentUser?.getIdToken();
+    if(!token) return;
+    const response=await fetch(ORDER_PRIVACY_MIGRATION_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:'{}'
+    });
+    if(!response.ok) throw new Error('privacy-migration-http-'+response.status);
+    const data=await response.json().catch(()=>({}));
+    sessionStorage.setItem('deliveryOrderPrivacyMigrated','1');
+    if(Number(data?.migrated||0)>0){
+      orderPrivateCache.clear();
+      console.info('Migração de privacidade dos pedidos concluída:',data.migrated);
+    }
+  }catch(err){
+    // Antes do deploy das Functions (Módulo 4), o painel continua operando.
+    // Após o deploy, o próximo acesso Master tentará novamente automaticamente.
+    console.warn('Migração de privacidade ainda indisponível.',err);
+  }
 }
-function randomStaffEmail(username){
-  const token=crypto.randomUUID().replace(/-/g,'').slice(0,18);
-  return `staff.${normalizeUsername(username)}.${token}@delivery-pizzaria.local`;
-}
+
 async function resolveStaffEmail(username){
   const normalized=normalizeUsername(username);
   const response=await fetch(STAFF_LOGIN_ENDPOINT,{
@@ -407,6 +425,7 @@ $('#loginForm').onsubmit=async e=>{
 };
 
 $('#logoutBtn').onclick=async()=>{
+  orderPrivateCache.clear();
   stopCashLedgerListeners();
   await signOut(auth);
 };
@@ -416,6 +435,7 @@ onAuthStateChanged(auth,async user=>{
 
   if(!user){
     currentProfile=null;
+    orderPrivateCache.clear();
     stopCashLedgerListeners();
     $('#loginView').classList.remove('hidden');
     $('#adminApp').classList.add('hidden');
@@ -509,6 +529,7 @@ async function initializeAdmin(){
   $('#currentUserDisplay').textContent=`${currentProfile.displayName||currentProfile.username||'Usuário'} • ${roleLabel(currentProfile.role)}`;
 
   await loadSettings();
+  await migrateLegacyOrderPrivacyIfAvailable();
 
   showAdminSkeletons();
   const tasks=[];
