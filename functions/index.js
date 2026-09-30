@@ -490,7 +490,14 @@ const cashCors=[
 ];
 
 function cashBusinessDate(timezone="America/Porto_Velho",date=new Date()) {
-  return new Intl.DateTimeFormat("en-CA",{timeZone:timezone}).format(date);
+  const parts=new Intl.DateTimeFormat("en-CA",{
+    timeZone:timezone,
+    year:"numeric",
+    month:"2-digit",
+    day:"2-digit"
+  }).formatToParts(date);
+  const values=Object.fromEntries(parts.map(part=>[part.type,part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function roundCashMoney(value) {
@@ -521,6 +528,8 @@ function safeCashSalesSummary(value={}) {
   const credit=cleanCashMoney(value.credit??0);
   const other=cleanCashMoney(value.other??0);
   if([count,gross,money,pix,debit,credit,other].some(v=>v==null)) return null;
+  const components=roundCashMoney(money+pix+debit+credit+other);
+  if(components==null||Math.abs(components-gross)>0.01) return null;
   return {count,gross,money,pix,debit,credit,other};
 }
 
@@ -597,6 +606,7 @@ export const manageCash = onRequest(
         const stateRef=db.doc("cashState/current");
         const dayRef=db.doc(`cashDays/${businessDate}`);
         const sessionRef=db.collection("cashSessions").doc();
+        let sessionNumber=1;
 
         await db.runTransaction(async tx=>{
           const [stateSnap,daySnap]=await Promise.all([
@@ -612,7 +622,7 @@ export const manageCash = onRequest(
           const previousIds=Array.isArray(day.sessionIds)
             ?day.sessionIds.filter(id=>typeof id==="string"&&id)
             :[];
-          const sessionNumber=previousIds.length+1;
+          sessionNumber=previousIds.length+1;
           const salesSummary=emptyCashSalesSummary();
           const movementSummary=emptyCashMovementSummary();
           tx.set(sessionRef,{
@@ -726,9 +736,17 @@ export const manageCash = onRequest(
             createdByName:operatorName,
             createdAt:now
           });
+          const revision=finiteNumber(
+            session.financialRevision??0,
+            {min:0,max:1_000_000_000,integer:true}
+          );
+          if(revision==null){
+            throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+          }
+
           tx.update(sessionRef,{
             movementSummary,
-            financialRevision:(finiteNumber(session.financialRevision??0,{min:0,max:1_000_000_000,integer:true})??0)+1,
+            financialRevision:revision+1,
             updatedAt:now
           });
         });
