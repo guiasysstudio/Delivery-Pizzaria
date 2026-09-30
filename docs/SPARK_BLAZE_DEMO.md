@@ -26,21 +26,21 @@ Cloud Functions for Firebase exige Blaze. As funções do repositório são:
 
 | Function | Uso | Demonstração sem Blaze |
 | --- | --- | --- |
-| \`backendHealth\` | health check do backend | não é necessária para demonstrar o site |
-| \`createOrder\` | criação segura, preço server-side, contador, idempotência e rate limit | pedido local de demonstração |
-| \`customerIdentity\` | CPF único, hash e dados privados | fallback local guarda somente CPF mascarado; validação real fica pendente |
-| \`cancelCustomerOrder\` | cancelamento seguro de pedido real | pedido local de demonstração pode ser cancelado localmente |
-| \`deleteCustomerAccount\` | exclusão/anônimização + Firebase Admin Auth | não simulado; UI informa que requer Blaze |
-| \`manageCash\` | livro financeiro, caixa, sangria, suprimento e conclusão financeira | não simulado; UI informa que requer Blaze |
-| \`grantLoyaltyCoupons\` | concessão automática ao concluir pedido | cadastro de cupom funciona; concessão automática aguarda Blaze |
-| \`resolveStaffLogin\` | resolve usuário administrativo sem expor mapeamento | login Master mantém ponte compatível; produção usa Function |
-| \`manageStaffUser\` | criar/desativar/excluir usuário e trocar senha | não simulado; UI informa que requer Blaze |
-| \`manageStaffRole\` | gravar/semear perfis administrativos | leitura funciona; alterações seguras aguardam Blaze |
-| \`staffOrderPrivate\` | libera PII de pedido conforme permissão | pedido local já possui snapshot local; pedidos reais precisam da Function |
-| \`migrateOrderPrivacy\` | migração administrativa de PII de pedidos | manutenção, não necessária na demonstração |
-| \`migrateCustomerPrivacy\` | migração administrativa de PII de clientes | manutenção, não necessária na demonstração |
-| \`uploadProductImage\` | upload ao GitHub com token mantido no servidor | editor/recorte funciona e a imagem pode ser baixada manualmente |
-| \`uploadStoreLogo\` | upload de logo ao GitHub com segredo server-side | demais dados da loja funcionam; upload automático aguarda Blaze |
+| `backendHealth` | health check do backend | não é necessária para demonstrar o site |
+| `createOrder` | criação segura, preço server-side, contador, idempotência e rate limit | pedido local de demonstração |
+| `customerIdentity` | CPF único, hash e dados privados | fallback local guarda somente CPF mascarado; validação real fica pendente |
+| `cancelCustomerOrder` | cancelamento seguro de pedido real | pedido local de demonstração pode ser cancelado localmente |
+| `deleteCustomerAccount` | exclusão/anônimização + Firebase Admin Auth | não simulado; UI informa que requer Blaze |
+| `manageCash` | livro financeiro, caixa, sangria, suprimento e conclusão financeira | não simulado; UI informa que requer Blaze |
+| `grantLoyaltyCoupons` | concessão automática ao concluir pedido | cadastro de cupom funciona; concessão automática aguarda Blaze |
+| `resolveStaffLogin` | resolve usuário administrativo sem expor mapeamento | login Master mantém ponte compatível; produção usa Function |
+| `manageStaffUser` | criar/desativar/excluir usuário e trocar senha | não simulado; UI informa que requer Blaze |
+| `manageStaffRole` | gravar/semear perfis administrativos | leitura funciona; alterações seguras aguardam Blaze |
+| `staffOrderPrivate` | libera PII de pedido conforme permissão | pedido local já possui snapshot local; pedidos reais precisam da Function |
+| `migrateOrderPrivacy` | migração administrativa de PII de pedidos | manutenção, não necessária na demonstração |
+| `migrateCustomerPrivacy` | migração administrativa de PII de clientes | manutenção, não necessária na demonstração |
+| `uploadProductImage` | upload ao GitHub com token mantido no servidor | editor/recorte funciona e a imagem pode ser baixada manualmente |
+| `uploadStoreLogo` | upload de logo ao GitHub com segredo server-side | demais dados da loja funcionam; upload automático aguarda Blaze |
 
 ## Notificações
 
@@ -51,9 +51,9 @@ O som de novo pedido e a Web Notification do navegador **não exigem Blaze**. Fi
 O fallback local não é usado como substituto de produção:
 
 - é automático somente em GitHub Pages, localhost/127.0.0.1;
-- pode ser habilitado explicitamente com \`?demo=1\`;
+- pode ser habilitado explicitamente com `?demo=1`;
 - pedidos locais expiram após 24 horas;
-- não grava pedido simulado na coleção real \`orders\`;
+- não grava pedido simulado na coleção real `orders`;
 - não abre permissões extras nas Firestore Rules;
 - não persiste CPF bruto no fallback local;
 - erros reais de negócio retornados pelo backend não são convertidos em demonstração.
