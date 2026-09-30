@@ -8,11 +8,20 @@ import {
   collection, doc, getDoc, getDocs, query, where, orderBy, limit, startAfter, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { showToast, confirmAction, emptyStateHtml, iconHtml, applyBrandTheme } from '../assets/ui.js';
-import { listenDemoOrders, updateDemoOrder, isDemoOrderId, blazeRequiredMessage } from '../assets/demo-mode.js';
+import {
+  demoEnvironmentAllowed, backendUnavailable, listenDemoOrders, updateDemoOrder, isDemoOrderId, blazeRequiredMessage
+} from '../assets/demo-mode.js';
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
+
+function renderDemoModeBanner(){
+  const banner=$('#accountDemoBanner');
+  if(banner) banner.classList.toggle('hidden',!demoEnvironmentAllowed());
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',renderDemoModeBanner,{once:true});
+else renderDemoModeBanner();
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const placeholder='../assets/products/placeholder.svg';
 
@@ -437,6 +446,8 @@ $('#deleteMyAccountBtn')?.addEventListener('click',async()=>{
       showToast('Existe pedido em andamento. Aguarde a conclusão ou o cancelamento antes de excluir a conta.','warning',{duration:8000});
     }else if(code.includes('recent_login_required')){
       showToast('Por segurança, saia da conta, entre novamente e repita a exclusão em até 15 minutos.','warning',{duration:9000});
+    }else if(demoEnvironmentAllowed()&&backendUnavailable(err)){
+      showToast(blazeRequiredMessage('customerDelete'),'info',{duration:9000});
     }else{
       showToast('Não foi possível excluir sua conta agora. Tente novamente ou entre em contato com a pizzaria.','error',{duration:7000});
     }
