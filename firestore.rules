@@ -252,8 +252,9 @@ service cloud.firestore {
     }
 
     match /settings/{document=**} {
-      allow read: if true;
-      allow write: if hasPermission('settingsManage');
+      // Somente settings/store é público. Documentos futuros nesta coleção
+      // começam privados por padrão para evitar exposição acidental.
+      allow read, write: if false;
     }
 
     match /categories/{categoryId} {
@@ -274,8 +275,10 @@ service cloud.firestore {
     }
 
     match /coupons/{couponId} {
+      // O cliente pode consultar somente um código exato que está tentando usar.
+      // Listar o catálogo completo de cupons é reservado à administração comercial.
       allow get: if signedIn() || hasPermission('couponsManage');
-      allow list: if hasPermission('ordersView') || hasPermission('couponsManage');
+      allow list: if hasPermission('couponsManage');
       allow create, update, delete: if hasPermission('couponsManage');
     }
 
@@ -304,11 +307,9 @@ service cloud.firestore {
     }
 
     match /counters/orders {
-      // Numeração de pedidos é mantida somente pela Cloud Function createOrder.
-      // Clientes não podem reservar/manipular números diretamente.
-      allow read: if signedIn();
-      allow create, update: if false;
-      allow delete: if isMaster();
+      // Numeração de pedidos é exclusivamente server-side. Nem clientes nem
+      // funcionários precisam conhecer/manipular o contador global.
+      allow read, write: if false;
     }
 
     match /orderPrivate/{orderId} {
@@ -328,7 +329,9 @@ service cloud.firestore {
         (signedIn() && resource.data.customerId == request.auth.uid);
 
       allow update: if canUpdateOrder();
-      allow delete: if isMaster();
+      // Registros financeiros/operacionais não são apagados pelo navegador.
+      // Direitos de exclusão do cliente são atendidos por anonimização server-side.
+      allow delete: if false;
     }
 
     match /{document=**} {
