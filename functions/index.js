@@ -622,6 +622,132 @@ export const manageStaffUser = onRequest(
   }
 );
 
+const assignableRolePermissions=[
+  "ordersView","ordersAccept","ordersPrepare","ordersDispatch","ordersComplete","ordersCancel",
+  "productsView","productsCreate","productsEdit","productsDelete","categoriesManage",
+  "promotionsManage","couponsManage","customersView","printingManage","cashView","cashOperate",
+  "settingsManage"
+];
+
+export const manageStaffRole = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:staffAdminCors,
+    timeoutSeconds:30,
+    memory:"256MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    try{
+      await verifyStaffAdminRequest(req);
+      const db=getFirestore();
+      const action=normalizeText(req.body?.action,40);
+
+      if(action==="seedDefaults"){
+        const defaults={
+          manager:{name:"Gerente",permissions:{
+            ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true,
+            productsView:true,productsCreate:true,productsEdit:true,productsDelete:true,categoriesManage:true,
+            promotionsManage:true,couponsManage:true,customersView:true,printingManage:true,cashView:true,cashOperate:true,settingsManage:true
+          }},
+          cashier:{name:"Caixa",permissions:{
+            ordersView:true,ordersAccept:true,ordersCancel:true,customersView:true,printingManage:true,cashView:true,cashOperate:true
+          }},
+          kitchen:{name:"Cozinha",permissions:{ordersView:true,ordersPrepare:true}},
+          delivery:{name:"Entrega",permissions:{ordersView:true,ordersDispatch:true,ordersComplete:true}},
+          operator:{name:"Operador",permissions:{
+            ordersView:true,ordersAccept:true,ordersPrepare:true,ordersDispatch:true,ordersComplete:true,ordersCancel:true
+          }}
+        };
+        const batch=db.batch();
+        for(const [id,role] of Object.entries(defaults)){
+          batch.set(db.doc(`roles/${id}`),{
+            name:role.name,
+            permissions:role.permissions,
+            system:true,
+            active:true,
+            updatedAt:new Date()
+          },{merge:true});
+        }
+        await batch.commit();
+        res.json({ok:true});
+        return;
+      }
+
+      const roleId=normalizeText(req.body?.roleId,120);
+      if(!roleId || roleId==="master"){
+        res.status(400).json({error:"invalid_role"});
+        return;
+      }
+      const roleRef=db.doc(`roles/${roleId}`);
+
+      if(action==="save"){
+        const name=normalizeText(req.body?.name,80);
+        if(!name){
+          res.status(400).json({error:"role_name_required"});
+          return;
+        }
+        const input=req.body?.permissions||{};
+        const permissions={};
+        for(const key of assignableRolePermissions){
+          permissions[key]=input[key]===true;
+        }
+        if(permissions.ordersAccept||permissions.ordersPrepare||permissions.ordersDispatch||permissions.ordersComplete||permissions.ordersCancel){
+          permissions.ordersView=true;
+        }
+        if(permissions.productsCreate||permissions.productsEdit||permissions.productsDelete||permissions.categoriesManage||permissions.promotionsManage){
+          permissions.productsView=true;
+        }
+        if(permissions.cashOperate) permissions.cashView=true;
+
+        const existing=await roleRef.get();
+        await roleRef.set({
+          name,
+          permissions,
+          active:req.body?.active!==false,
+          system:existing.exists?existing.data()?.system===true:false,
+          updatedAt:new Date(),
+          ...(existing.exists?{}:{createdAt:new Date()})
+        },{merge:true});
+        res.json({ok:true,roleId});
+        return;
+      }
+
+      if(action==="delete"){
+        const existing=await roleRef.get();
+        if(!existing.exists){
+          res.status(404).json({error:"role_not_found"});
+          return;
+        }
+        if(existing.data()?.system===true){
+          res.status(409).json({error:"system_role"});
+          return;
+        }
+        const users=await db.collection("users").where("role","==",roleId).limit(1).get();
+        if(!users.empty){
+          res.status(409).json({error:"role_in_use"});
+          return;
+        }
+        await roleRef.delete();
+        res.json({ok:true,deleted:true});
+        return;
+      }
+
+      res.status(400).json({error:"invalid_action"});
+    }catch(err){
+      console.error("manageStaffRole failed",err);
+      res.status(Number(err?.status)||500).json({
+        error:err?.code||err?.message||"staff_role_action_failed"
+      });
+    }
+  }
+);
+
+
 const cashCors=[
   "https://guiasysstudio.github.io",
   "https://guiasys.online",
