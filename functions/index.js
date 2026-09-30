@@ -412,8 +412,9 @@ export const resolveStaffLogin = onRequest(
 
     const username=normalizeStaffUsername(req.body?.username);
     const decoy=()=>{
-      const token=createHash("sha256").update("invalid:"+username).digest("hex").slice(0,24);
-      return `invalid.${token}@delivery-pizzaria.local`;
+      const safeUsername=username||"unknown";
+      const token=createHash("sha256").update("invalid:"+safeUsername).digest("hex").slice(0,24);
+      return `staff.${safeUsername}.${token}@delivery-pizzaria.local`;
     };
 
     if(!validStaffUsername(username)){
@@ -2012,8 +2013,9 @@ function maskCpf(value) {
 }
 
 function privateIdentityVerified(data={}) {
-  return data.cpfVerified===true ||
-    (!!data.cpfHash && validCpf(data.cpf));
+  const hash=String(data.cpfHash||"");
+  return (data.cpfVerified===true && /^[a-f0-9]{64}$/i.test(hash)) ||
+    validCpf(data.cpf);
 }
 
 function privateIdentityMasked(data={}) {
@@ -2061,12 +2063,20 @@ export const customerIdentity = onRequest(
         const masked=verified?privateIdentityMasked(data):"";
 
         // Migração transparente de registros antigos que ainda continham CPF bruto.
+        const customerSnap=await customerRef.get();
+        const legacyPublicEmail=customerSnap.exists&&!!customerSnap.data()?.email;
         if(verified&&(data.cpf||data.email)){
           await privateRef.set({
             cpf:FieldValue.delete(),
             email:FieldValue.delete(),
             cpfVerified:true,
             cpfMasked:masked,
+            updatedAt:new Date()
+          },{merge:true});
+        }
+        if(legacyPublicEmail){
+          await customerRef.set({
+            email:FieldValue.delete(),
             updatedAt:new Date()
           },{merge:true});
         }
