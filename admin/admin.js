@@ -1381,7 +1381,7 @@ function renderOrders(){
   $$('.order-details-action').forEach(b=>b.onclick=()=>openOrder(b.dataset.id));
   updateOrderHistoryControls();
 
-  $('.quick-order-action').forEach(b=>b.onclick=async()=>{
+  $$('.quick-order-action').forEach(b=>b.onclick=async()=>{
     b.disabled=true;
     try{
       const order=orders.find(o=>o.id===b.dataset.id);
