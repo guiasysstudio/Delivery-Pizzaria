@@ -199,6 +199,7 @@ function cashOperationMessage(err){
     cash_not_open:'É necessário manter um caixa aberto para concluir esta operação.',
     cash_changed_recheck:'O caixa recebeu uma venda ou movimento enquanto você conferia. Revise os valores antes de fechar.',
     insufficient_cash:'A sangria é maior que o dinheiro disponível esperado no caixa.',
+    idempotency_conflict:'A mesma tentativa foi reutilizada com valores diferentes. Revise e tente novamente.',
     invalid_opening_amount:'Informe um valor inicial válido.',
     invalid_cash_movement:'Informe um movimento e valor válidos.',
     invalid_closing_amount:'Informe um valor contado válido.',
@@ -2293,6 +2294,9 @@ function renderCash(){
   }).join(''):emptyStateHtml({icon:'wallet-cards',title:'Nenhum caixa registrado',description:'O histórico de aberturas e fechamentos aparecerá aqui.'});
 }
 
+let cashOpenRequestId='';
+let cashOpenFingerprint='';
+
 $('#openCashBtn')?.addEventListener('click',async()=>{
   if(!hasPermission('cashOperate')) return;
   const openingAmount=Number($('#cashOpeningAmount').value||0);
@@ -2302,19 +2306,33 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
     return;
   }
 
+  const openingNote=$('#cashOpeningNote').value.trim();
+  const fingerprint=JSON.stringify({openingAmount,openingNote});
+  if(!cashOpenRequestId||cashOpenFingerprint!==fingerprint){
+    cashOpenRequestId=crypto.randomUUID().replace(/-/g,'');
+    cashOpenFingerprint=fingerprint;
+  }
+
   const button=$('#openCashBtn');
   button.disabled=true;
   try{
     await cashOperation('open',{
+      requestId:cashOpenRequestId,
       openingAmount,
-      openingNote:$('#cashOpeningNote').value.trim()
+      openingNote
     });
+    cashOpenRequestId='';
+    cashOpenFingerprint='';
     $('#cashOpeningAmount').value='0';
     $('#cashOpeningNote').value='';
     await loadCashSessions();
     showToast('Caixa aberto com sucesso.','success');
   }catch(err){
     console.error(err);
+    if(err?.code==='idempotency_conflict'){
+      cashOpenRequestId='';
+      cashOpenFingerprint='';
+    }
     showToast(cashOperationMessage(err),'error',{duration:7000});
     await loadCashSessions();
   }finally{
@@ -2322,8 +2340,13 @@ $('#openCashBtn')?.addEventListener('click',async()=>{
   }
 });
 
+let cashMovementRequestId='';
+let cashMovementFingerprint='';
+
 function openCashMovement(type){
   if(!hasPermission('cashOperate')||!currentCashSession) return;
+  cashMovementRequestId='';
+  cashMovementFingerprint='';
   $('#cashMovementType').value=type;
   $('#cashMovementTitle').textContent=type==='supply'?'Adicionar suprimento':'Registrar sangria';
   $('#cashMovementAmount').value='';
@@ -2349,14 +2372,32 @@ $('#cashMovementForm')?.addEventListener('submit',async e=>{
     return;
   }
 
+  const fingerprint=JSON.stringify({sessionId,type,amount,note});
+  if(!cashMovementRequestId||cashMovementFingerprint!==fingerprint){
+    cashMovementRequestId=crypto.randomUUID().replace(/-/g,'');
+    cashMovementFingerprint=fingerprint;
+  }
+
   const submit=$('#cashMovementForm button[type=submit]');
   if(submit) submit.disabled=true;
   try{
-    await cashOperation('movement',{sessionId,type,amount,note});
+    await cashOperation('movement',{
+      requestId:cashMovementRequestId,
+      sessionId,
+      type,
+      amount,
+      note
+    });
+    cashMovementRequestId='';
+    cashMovementFingerprint='';
     $('#cashMovementDialog').close();
     await loadCashSessions();
   }catch(err){
     console.error(err);
+    if(err?.code==='idempotency_conflict'){
+      cashMovementRequestId='';
+      cashMovementFingerprint='';
+    }
     $('#cashMovementError').textContent=cashOperationMessage(err);
     $('#cashMovementError').classList.remove('hidden');
     await loadCashSessions();
