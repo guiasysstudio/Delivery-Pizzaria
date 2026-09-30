@@ -216,7 +216,7 @@ export const uploadProductImage = onRequest(
       console.error(err);
       res.status(500).json({
         error: "upload_failed",
-        message: err?.message || "Falha ao enviar imagem."
+        message:"Falha ao enviar imagem."
       });
     }
   }
@@ -288,7 +288,7 @@ export const uploadStoreLogo = onRequest(
       });
     }catch(err){
       console.error("uploadStoreLogo failed",err);
-      res.status(500).json({error:"upload_failed",message:err?.message||"Falha ao enviar logo."});
+      res.status(500).json({error:"upload_failed",message:"Falha ao enviar logo."});
     }
   }
 );
@@ -2285,7 +2285,7 @@ export const customerIdentity = onRequest(
         res.status(409).json({error:"cpf_change_not_allowed"});
         return;
       }
-      res.status(500).json({error:"identity_failed",message:err?.message||"Falha ao salvar os dados."});
+      res.status(500).json({error:"identity_failed",message:"Falha ao salvar os dados."});
     }
   }
 );
@@ -3229,7 +3229,7 @@ export const createOrder = onRequest(
         res.status(500).json({error:"invalid_order_counter"});
         return;
       }
-      res.status(500).json({error:"order_failed",message:err?.message||"Falha ao criar pedido."});
+      res.status(500).json({error:"order_failed",message:"Falha ao criar pedido."});
     }
   }
 );
