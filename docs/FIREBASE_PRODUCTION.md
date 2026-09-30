@@ -17,7 +17,7 @@ No Firebase Console:
 4. Em Authentication > Settings > Authorized domains, manter/adicionar:
    - `delivery-pizzaria-f5b08.web.app`;
    - `delivery-pizzaria-f5b08.firebaseapp.com`;
-   - `guiasysstudio.github.io` enquanto a demonstração via GitHub Pages existir;
+   - `pizzaria.guiasys.online` como domínio público de produção;
    - `guiasys.online` se esse domínio continuar sendo usado;
    - o domínio final da pizzaria quando ele for conectado.
 5. Configurar uma política de senha compatível com o sistema. O cliente exige
