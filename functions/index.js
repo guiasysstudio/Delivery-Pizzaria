@@ -100,6 +100,7 @@ async function verifyActiveStaffRequest(req, requiredPermission) {
 async function githubJson(url, options = {}) {
   const response = await fetch(url, {
     ...options,
+    signal:options.signal||AbortSignal.timeout(15000),
     headers: {
       Accept: "application/vnd.github+json",
       Authorization: `Bearer ${githubToken.value()}`,
