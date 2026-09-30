@@ -493,8 +493,15 @@ function cashBusinessDate(timezone="America/Porto_Velho",date=new Date()) {
   return new Intl.DateTimeFormat("en-CA",{timeZone:timezone}).format(date);
 }
 
+function roundCashMoney(value) {
+  const parsed=Number(value);
+  if(!Number.isFinite(parsed)) return null;
+  return Math.round((parsed+Number.EPSILON)*100)/100;
+}
+
 function cleanCashMoney(value,{min=0,max=10_000_000}={}) {
-  return finiteNumber(value,{min,max});
+  const parsed=finiteNumber(value,{min,max});
+  return parsed==null?null:roundCashMoney(parsed);
 }
 
 function emptyCashSalesSummary() {
@@ -678,12 +685,30 @@ export const manageCash = onRequest(
 
           const session=sessionSnap.data()||{};
           const movementSummary=safeCashMovementSummary(session.movementSummary);
-          if(!movementSummary){
+          const salesSummary=safeCashSalesSummary(session.salesSummary);
+          const openingAmount=cleanCashMoney(session.openingAmount,{min:0,max:1_000_000});
+          if(!movementSummary||!salesSummary||openingAmount==null){
             throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
           }
 
-          if(type==="supply") movementSummary.supplies+=amount;
-          else movementSummary.withdrawals+=amount;
+          if(type==="withdrawal"){
+            const availableCash=roundCashMoney(
+              openingAmount+salesSummary.money+movementSummary.supplies-movementSummary.withdrawals
+            );
+            if(availableCash==null||amount>availableCash){
+              throw Object.assign(new Error("insufficient_cash"),{code:"insufficient_cash"});
+            }
+            movementSummary.withdrawals=roundCashMoney(movementSummary.withdrawals+amount);
+          }else{
+            movementSummary.supplies=roundCashMoney(movementSummary.supplies+amount);
+          }
+
+          if(
+            movementSummary.supplies==null || movementSummary.withdrawals==null ||
+            movementSummary.supplies>10_000_000 || movementSummary.withdrawals>10_000_000
+          ){
+            throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+          }
 
           tx.set(movementRef,{
             type,
@@ -764,8 +789,14 @@ export const manageCash = onRequest(
 
           const bucket=cashPaymentBucket(order.payment?.method);
           salesSummary.count+=1;
-          salesSummary.gross+=total;
-          salesSummary[bucket]+=total;
+          salesSummary.gross=roundCashMoney(salesSummary.gross+total);
+          salesSummary[bucket]=roundCashMoney(salesSummary[bucket]+total);
+          if(
+            salesSummary.gross==null || salesSummary[bucket]==null ||
+            salesSummary.gross>100_000_000 || salesSummary[bucket]>100_000_000
+          ){
+            throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+          }
           const revision=finiteNumber(
             session.financialRevision??0,
             {min:0,max:1_000_000_000,integer:true}
@@ -863,11 +894,13 @@ export const manageCash = onRequest(
         }
 
         const summary=cashSummarySnapshot(sales,movements);
-        const expectedCash=openingAmount+sales.money+movements.supplies-movements.withdrawals;
-        if(!Number.isFinite(expectedCash)){
+        const expectedCash=roundCashMoney(
+          openingAmount+sales.money+movements.supplies-movements.withdrawals
+        );
+        if(expectedCash==null||expectedCash<0){
           throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
         }
-        const difference=closingAmount-expectedCash;
+        const difference=roundCashMoney(closingAmount-expectedCash);
         const dayRef=db.doc(`cashDays/${session.businessDate}`);
 
         tx.update(sessionRef,{
@@ -918,6 +951,7 @@ export const manageCash = onRequest(
           "cash_session_changed",
           "cash_not_open",
           "cash_changed_recheck",
+          "insufficient_cash",
           "invalid_order_transition"
         ].includes(code)?409:
         [
