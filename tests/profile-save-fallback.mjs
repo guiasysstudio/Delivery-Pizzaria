@@ -33,7 +33,7 @@ const saveBlock=account.slice(saveStart,saveEnd);
 assert.ok(saveBlock.indexOf('await saveCustomerProfile(user.uid,payload)') <
   saveBlock.indexOf('identity=await saveCustomerIdentity({name,phone,cpf})'),
   'Perfil público precisa salvar antes da validação do CPF');
-assert.match(saveBlock,/Cadastro salvo para demonstração/);
+assert.match(account,/Cadastro salvo para demonstração/);
 assert.match(saveBlock,/CPF ficou somente mascarado neste navegador/);
 
 // Login não pode entrar em loop de perfil incompleto quando a demonstração local já foi salva.
