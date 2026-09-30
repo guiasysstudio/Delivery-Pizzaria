@@ -58,7 +58,7 @@
             <span class="eyebrow">CONTROLE FINANCEIRO</span><h2>Caixa atual</h2>
             <div id="cashClosedState">
               <p class="muted">Nenhum caixa está aberto no sistema.</p>
-              <label class="field"><span>Valor inicial em dinheiro (R$)</span><input id="cashOpeningAmount" type="number" min="0" step="0.01" value="0"></label>
+              <label class="field"><span>Valor inicial em dinheiro (R$)</span><input id="cashOpeningAmount" type="number" min="0" max="1000000" step="0.01" value="0"></label>
               <label class="field"><span>Observação da abertura</span><textarea id="cashOpeningNote" rows="2" placeholder="Ex.: troco inicial do turno"></textarea></label>
               <button id="openCashBtn" class="btn btn-primary" type="button">Abrir caixa</button>
             </div>
@@ -470,7 +470,7 @@
       <button class="modal-close dialog-close" type="button" aria-label="Fechar"><span class="ui-icon icon-circle-x" aria-hidden="true"></span></button>
       <span class="eyebrow">MOVIMENTO DE CAIXA</span><h2 id="cashMovementTitle">Suprimento</h2>
       <input id="cashMovementType" type="hidden" value="supply">
-      <label class="field"><span>Valor (R$)</span><input id="cashMovementAmount" type="number" min="0.01" step="0.01" required></label>
+      <label class="field"><span>Valor (R$)</span><input id="cashMovementAmount" type="number" min="0.01" max="1000000" step="0.01" required></label>
       <label class="field"><span>Motivo / observação</span><textarea id="cashMovementNote" rows="3" maxlength="240" placeholder="Ex.: troco adicional, retirada para pagamento..."></textarea></label>
       <div id="cashMovementError" class="alert alert-error hidden"></div>
       <button class="btn btn-primary btn-block" type="submit">Salvar movimento</button>
@@ -481,7 +481,7 @@
     <form id="cashCloseForm" class="modal-card" novalidate>
       <button class="modal-close dialog-close" type="button" aria-label="Fechar"><span class="ui-icon icon-circle-x" aria-hidden="true"></span></button>
       <span class="eyebrow">FECHAMENTO</span><h2>Fechar caixa</h2>
-      <label class="field"><span>Dinheiro contado no caixa (R$)</span><input id="cashClosingAmount" type="number" min="0" step="0.01" required></label>
+      <label class="field"><span>Dinheiro contado no caixa (R$)</span><input id="cashClosingAmount" type="number" min="0" max="10000000" step="0.01" required></label>
       <label class="field"><span>Observação</span><textarea id="cashClosingNote" rows="3"></textarea></label>
       <div id="cashClosePreview" class="cash-close-preview"></div>
       <div id="cashCloseError" class="alert alert-error hidden"></div>

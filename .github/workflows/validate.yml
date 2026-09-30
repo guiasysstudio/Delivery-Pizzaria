@@ -30,6 +30,9 @@ jobs:
       - name: Test Module 1 order security
         run: node tests/module1-order-security.mjs
 
+      - name: Test Module 2 cash ledger
+        run: node tests/module2-cash-ledger.mjs
+
       - name: Detect common selector mistakes
         run: |
           python - <<'PY'

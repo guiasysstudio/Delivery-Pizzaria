@@ -33,7 +33,9 @@ async function staffPermissions(uid) {
 
   const roleSnap = await db.doc(`roles/${user.role}`).get();
   if (!roleSnap.exists) return null;
-  return roleSnap.data()?.permissions || {};
+  const role=roleSnap.data()||{};
+  if (role.active === false) return null;
+  return role.permissions || {};
 }
 
 async function staffCanUpload(uid) {
@@ -48,6 +50,35 @@ async function staffCanUpload(uid) {
 async function staffCanManageSettings(uid) {
   const permissions=await staffPermissions(uid);
   return !!permissions && (permissions.master===true||permissions.settingsManage===true);
+}
+
+async function verifyActiveStaffRequest(req, requiredPermission) {
+  const authHeader=req.headers.authorization||"";
+  const match=authHeader.match(/^Bearer\s+(.+)$/i);
+  if(!match) throw Object.assign(new Error("missing_auth"),{status:401,code:"missing_auth"});
+
+  const decoded=await getAuth().verifyIdToken(match[1]);
+  const db=getFirestore();
+  const callerSnap=await db.doc(`users/${decoded.uid}`).get();
+  if(!callerSnap.exists) {
+    throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
+  }
+
+  const caller=callerSnap.data()||{};
+  if(caller.active===false) {
+    throw Object.assign(new Error("user_disabled"),{status:403,code:"user_disabled"});
+  }
+
+  const permissions=await staffPermissions(decoded.uid);
+  const allowed=permissions && (
+    permissions.master===true ||
+    permissions[requiredPermission]===true
+  );
+  if(!allowed) {
+    throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
+  }
+
+  return {decoded,caller,permissions,isMaster:caller.role==="master"};
 }
 
 async function githubJson(url, options = {}) {
@@ -447,6 +478,690 @@ export const manageStaffUser = onRequest(
       res.status(Number(err?.status)||500).json({
         error:err?.code||err?.message||"staff_user_action_failed"
       });
+    }
+  }
+);
+
+
+const cashCors=[
+  "https://guiasysstudio.github.io",
+  "https://guiasys.online",
+  /https:\/\/.*\.guiasys\.online$/
+];
+
+function cashBusinessDate(timezone="America/Porto_Velho",date=new Date()) {
+  const parts=new Intl.DateTimeFormat("en-CA",{
+    timeZone:timezone,
+    year:"numeric",
+    month:"2-digit",
+    day:"2-digit"
+  }).formatToParts(date);
+  const values=Object.fromEntries(parts.map(part=>[part.type,part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function roundCashMoney(value) {
+  const parsed=Number(value);
+  if(!Number.isFinite(parsed)) return null;
+  return Math.round((parsed+Number.EPSILON)*100)/100;
+}
+
+function cleanCashMoney(value,{min=0,max=10_000_000}={}) {
+  const parsed=finiteNumber(value,{min,max});
+  return parsed==null?null:roundCashMoney(parsed);
+}
+
+function emptyCashSalesSummary() {
+  return {count:0,gross:0,money:0,pix:0,debit:0,credit:0,other:0};
+}
+
+function emptyCashMovementSummary() {
+  return {supplies:0,withdrawals:0};
+}
+
+function safeCashSalesSummary(value={}) {
+  const count=finiteNumber(value.count??0,{min:0,max:10_000_000,integer:true});
+  const gross=cleanCashMoney(value.gross??0);
+  const money=cleanCashMoney(value.money??0);
+  const pix=cleanCashMoney(value.pix??0);
+  const debit=cleanCashMoney(value.debit??0);
+  const credit=cleanCashMoney(value.credit??0);
+  const other=cleanCashMoney(value.other??0);
+  if([count,gross,money,pix,debit,credit,other].some(v=>v==null)) return null;
+  const components=roundCashMoney(money+pix+debit+credit+other);
+  if(components==null||Math.abs(components-gross)>0.01) return null;
+  return {count,gross,money,pix,debit,credit,other};
+}
+
+function safeCashMovementSummary(value={}) {
+  const supplies=cleanCashMoney(value.supplies??0);
+  const withdrawals=cleanCashMoney(value.withdrawals??0);
+  if([supplies,withdrawals].some(v=>v==null)) return null;
+  return {supplies,withdrawals};
+}
+
+function cashPaymentBucket(method) {
+  const value=String(method||"").toLowerCase();
+  if(value.includes("dinheiro")) return "money";
+  if(value.includes("pix")) return "pix";
+  if(value.includes("débito")||value.includes("debito")) return "debit";
+  if(value.includes("crédito")||value.includes("credito")) return "credit";
+  return "other";
+}
+
+function cashSummarySnapshot(sales,movements) {
+  return {
+    count:sales.count,
+    gross:sales.gross,
+    money:sales.money,
+    pix:sales.pix,
+    debit:sales.debit,
+    credit:sales.credit,
+    other:sales.other,
+    supplies:movements.supplies,
+    withdrawals:movements.withdrawals
+  };
+}
+
+async function buildLegacyCashLedger(db,sessionId,session) {
+  const openedMs=session.openedAt?.toMillis?.() ||
+    new Date(session.openedAt||0).getTime();
+  const closedMs=session.closedAt?.toMillis?.() ||
+    new Date(session.closedAt||0).getTime() ||
+    Date.now();
+  if(!Number.isFinite(openedMs)||openedMs<=0){
+    throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+  }
+
+  const [ordersSnap,movementsSnap]=await Promise.all([
+    db.collection("orders").where("status","==","completed").get(),
+    db.collection("cashSessions").doc(sessionId).collection("movements").get()
+  ]);
+
+  const sales=emptyCashSalesSummary();
+  for(const orderDoc of ordersSnap.docs){
+    const order=orderDoc.data()||{};
+    const completedMs=order.completedAt?.toMillis?.() ||
+      new Date(order.completedAt||0).getTime();
+    if(!Number.isFinite(completedMs)||completedMs<openedMs||completedMs>closedMs) continue;
+
+    const total=cleanCashMoney(order.total,{min:0,max:5_000_000});
+    if(total==null){
+      throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+    }
+    const bucket=cashPaymentBucket(order.payment?.method);
+    sales.count+=1;
+    sales.gross=roundCashMoney(sales.gross+total);
+    sales[bucket]=roundCashMoney(sales[bucket]+total);
+  }
+
+  const movements=emptyCashMovementSummary();
+  for(const movementDoc of movementsSnap.docs){
+    const movement=movementDoc.data()||{};
+    const amount=cleanCashMoney(movement.amount,{min:0.01,max:1_000_000});
+    if(amount==null||!["supply","withdrawal"].includes(movement.type)){
+      throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+    }
+    if(movement.type==="supply"){
+      movements.supplies=roundCashMoney(movements.supplies+amount);
+    }else{
+      movements.withdrawals=roundCashMoney(movements.withdrawals+amount);
+    }
+  }
+
+  if(!safeCashSalesSummary(sales)||!safeCashMovementSummary(movements)){
+    throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+  }
+  return {sales,movements};
+}
+
+async function ensureCashLedgerV2(db,sessionId) {
+  if(!sessionId) return;
+  const sessionRef=db.doc(`cashSessions/${sessionId}`);
+  const initialSnap=await sessionRef.get();
+  if(!initialSnap.exists) {
+    throw Object.assign(new Error("cash_session_not_found"),{code:"cash_session_not_found"});
+  }
+
+  const initial=initialSnap.data()||{};
+  if(Number(initial.summaryVersion||0)>=2&&initial.salesSummary&&initial.movementSummary) return;
+
+  const legacy=await buildLegacyCashLedger(db,sessionId,initial);
+  await db.runTransaction(async tx=>{
+    const currentSnap=await tx.get(sessionRef);
+    if(!currentSnap.exists){
+      throw Object.assign(new Error("cash_session_not_found"),{code:"cash_session_not_found"});
+    }
+    const current=currentSnap.data()||{};
+    if(Number(current.summaryVersion||0)>=2&&current.salesSummary&&current.movementSummary) return;
+    if(current.status!=="open"){
+      throw Object.assign(new Error("cash_not_open"),{code:"cash_not_open"});
+    }
+
+    tx.update(sessionRef,{
+      summaryVersion:2,
+      locked:false,
+      salesSummary:legacy.sales,
+      movementSummary:legacy.movements,
+      financialRevision:0,
+      migratedAt:new Date(),
+      updatedAt:new Date()
+    });
+  });
+}
+
+export const manageCash = onRequest(
+  {
+    region:"southamerica-east1",
+    cors:cashCors,
+    timeoutSeconds:30,
+    memory:"256MiB"
+  },
+  async (req,res)=>{
+    if(req.method!=="POST"){
+      res.status(405).json({error:"method_not_allowed"});
+      return;
+    }
+
+    try{
+      const action=normalizeText(req.body?.action,40);
+      if(!["open","movement","close","completeOrder"].includes(action)){
+        res.status(400).json({error:"invalid_action"});
+        return;
+      }
+
+      const requiredPermission=action==="completeOrder"?"ordersComplete":"cashOperate";
+      const {decoded,caller}=await verifyActiveStaffRequest(req,requiredPermission);
+      const db=getFirestore();
+      const now=new Date();
+      const operatorName=normalizeText(
+        caller.displayName||caller.username||decoded.name||"Usuário",
+        100
+      )||"Usuário";
+
+      if(action==="open"){
+        const openingAmount=cleanCashMoney(req.body?.openingAmount,{min:0,max:1_000_000});
+        const openingNote=normalizeText(req.body?.openingNote,300);
+        const requestId=normalizeText(req.body?.requestId,80);
+        if(openingAmount==null||!/^[A-Za-z0-9_-]{16,80}$/.test(requestId)){
+          res.status(400).json({error:"invalid_opening_amount"});
+          return;
+        }
+
+        const requestFingerprint=createHash("sha256").update(JSON.stringify({
+          openingAmount,openingNote
+        })).digest("hex");
+        const requestKey=createHash("sha256")
+          .update(decoded.uid+":cash-open:"+requestId)
+          .digest("hex");
+        const requestRef=db.doc(`cashOperationRequests/${requestKey}`);
+
+        const settingsSnap=await db.doc("settings/store").get();
+        const timezone=settingsSnap.data()?.timezone||"America/Porto_Velho";
+        const businessDate=cashBusinessDate(timezone,now);
+        const stateRef=db.doc("cashState/current");
+        const dayRef=db.doc(`cashDays/${businessDate}`);
+        const sessionRef=db.collection("cashSessions").doc();
+        let sessionNumber=1;
+        let duplicateResult=null;
+
+        await db.runTransaction(async tx=>{
+          const [requestSnap,stateSnap,daySnap]=await Promise.all([
+            tx.get(requestRef),
+            tx.get(stateRef),
+            tx.get(dayRef)
+          ]);
+
+          if(requestSnap.exists){
+            const stored=requestSnap.data()||{};
+            if(stored.requestFingerprint!==requestFingerprint){
+              throw Object.assign(new Error("idempotency_conflict"),{code:"idempotency_conflict"});
+            }
+            duplicateResult=stored;
+            return;
+          }
+
+          if(stateSnap.exists&&stateSnap.data()?.sessionId){
+            const existingSessionId=normalizeText(stateSnap.data().sessionId,120);
+            const existingSessionSnap=existingSessionId
+              ?await tx.get(db.doc(`cashSessions/${existingSessionId}`))
+              :null;
+            if(existingSessionSnap?.exists&&existingSessionSnap.data()?.status==="open"){
+              throw Object.assign(new Error("cash_already_open"),{code:"cash_already_open"});
+            }
+            // Recupera automaticamente um ponteiro órfão/obsoleto.
+            tx.delete(stateRef);
+          }
+
+          const day=daySnap.exists?daySnap.data()||{}:{};
+          const previousIds=Array.isArray(day.sessionIds)
+            ?day.sessionIds.filter(id=>typeof id==="string"&&id)
+            :[];
+          sessionNumber=previousIds.length+1;
+          const salesSummary=emptyCashSalesSummary();
+          const movementSummary=emptyCashMovementSummary();
+          tx.set(sessionRef,{
+            status:"open",
+            locked:false,
+            summaryVersion:2,
+            businessDate,
+            sessionNumber,
+            timezone,
+            openingAmount,
+            openingNote,
+            openedBy:decoded.uid,
+            openedByName:operatorName,
+            openedAt:now,
+            updatedAt:now,
+            financialRevision:0,
+            salesSummary,
+            movementSummary
+          });
+          tx.set(stateRef,{
+            sessionId:sessionRef.id,
+            businessDate,
+            status:"open",
+            openedBy:decoded.uid,
+            openedAt:now,
+            updatedAt:now
+          });
+          tx.set(dayRef,{
+            businessDate,
+            status:"open",
+            activeSessionId:sessionRef.id,
+            lastSessionId:sessionRef.id,
+            sessionIds:[...previousIds,sessionRef.id],
+            sessionCount:sessionNumber,
+            openedAt:day.openedAt||now,
+            lastOpenedAt:now,
+            updatedAt:now
+          },{merge:true});
+          tx.set(requestRef,{
+            action,
+            requestId,
+            requestFingerprint,
+            operatorId:decoded.uid,
+            sessionId:sessionRef.id,
+            businessDate,
+            sessionNumber,
+            openingAmount,
+            createdAt:now
+          });
+        });
+
+        if(duplicateResult){
+          res.json({ok:true,idempotent:true,...duplicateResult});
+          return;
+        }
+        res.json({
+          ok:true,
+          action,
+          sessionId:sessionRef.id,
+          businessDate,
+          sessionNumber,
+          openingAmount
+        });
+        return;
+      }
+
+      if(action==="movement"){
+        const sessionId=normalizeText(req.body?.sessionId,120);
+        const type=req.body?.type==="withdrawal"?"withdrawal":
+          req.body?.type==="supply"?"supply":"";
+        const amount=cleanCashMoney(req.body?.amount,{min:0.01,max:1_000_000});
+        const note=normalizeText(req.body?.note,300);
+        const requestId=normalizeText(req.body?.requestId,80);
+        if(!sessionId||!type||amount==null||!/^[A-Za-z0-9_-]{16,80}$/.test(requestId)){
+          res.status(400).json({error:"invalid_cash_movement"});
+          return;
+        }
+
+        const requestFingerprint=createHash("sha256").update(JSON.stringify({
+          sessionId,type,amount,note
+        })).digest("hex");
+        const requestKey=createHash("sha256")
+          .update(decoded.uid+":cash-movement:"+requestId)
+          .digest("hex");
+        const requestRef=db.doc(`cashOperationRequests/${requestKey}`);
+        const stateRef=db.doc("cashState/current");
+        const sessionRef=db.doc(`cashSessions/${sessionId}`);
+        const movementRef=sessionRef.collection("movements").doc();
+        let duplicateResult=null;
+
+        await ensureCashLedgerV2(db,sessionId);
+
+        await db.runTransaction(async tx=>{
+          const [requestSnap,stateSnap,sessionSnap]=await Promise.all([
+            tx.get(requestRef),
+            tx.get(stateRef),
+            tx.get(sessionRef)
+          ]);
+
+          if(requestSnap.exists){
+            const stored=requestSnap.data()||{};
+            if(stored.requestFingerprint!==requestFingerprint){
+              throw Object.assign(new Error("idempotency_conflict"),{code:"idempotency_conflict"});
+            }
+            duplicateResult=stored;
+            return;
+          }
+          if(!stateSnap.exists||stateSnap.data()?.sessionId!==sessionId){
+            throw Object.assign(new Error("cash_session_changed"),{code:"cash_session_changed"});
+          }
+          if(!sessionSnap.exists||sessionSnap.data()?.status!=="open"){
+            throw Object.assign(new Error("cash_not_open"),{code:"cash_not_open"});
+          }
+
+          const session=sessionSnap.data()||{};
+          const movementSummary=safeCashMovementSummary(session.movementSummary);
+          const salesSummary=safeCashSalesSummary(session.salesSummary);
+          const openingAmount=cleanCashMoney(session.openingAmount,{min:0,max:1_000_000});
+          if(!movementSummary||!salesSummary||openingAmount==null){
+            throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+          }
+
+          if(type==="withdrawal"){
+            const availableCash=roundCashMoney(
+              openingAmount+salesSummary.money+movementSummary.supplies-movementSummary.withdrawals
+            );
+            if(availableCash==null||amount>availableCash){
+              throw Object.assign(new Error("insufficient_cash"),{code:"insufficient_cash"});
+            }
+            movementSummary.withdrawals=roundCashMoney(movementSummary.withdrawals+amount);
+          }else{
+            movementSummary.supplies=roundCashMoney(movementSummary.supplies+amount);
+          }
+
+          if(
+            movementSummary.supplies==null || movementSummary.withdrawals==null ||
+            movementSummary.supplies>10_000_000 || movementSummary.withdrawals>10_000_000
+          ){
+            throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+          }
+
+          tx.set(movementRef,{
+            type,
+            amount,
+            note,
+            createdBy:decoded.uid,
+            createdByName:operatorName,
+            createdAt:now
+          });
+          const revision=finiteNumber(
+            session.financialRevision??0,
+            {min:0,max:1_000_000_000,integer:true}
+          );
+          if(revision==null){
+            throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+          }
+
+          tx.update(sessionRef,{
+            movementSummary,
+            financialRevision:revision+1,
+            updatedAt:now
+          });
+          tx.set(requestRef,{
+            action,
+            requestId,
+            requestFingerprint,
+            operatorId:decoded.uid,
+            movementId:movementRef.id,
+            sessionId,
+            type,
+            amount,
+            createdAt:now
+          });
+        });
+
+        if(duplicateResult){
+          res.json({ok:true,idempotent:true,...duplicateResult});
+          return;
+        }
+        res.json({ok:true,action,movementId:movementRef.id,sessionId,type,amount});
+        return;
+      }
+
+      if(action==="completeOrder"){
+        const orderId=normalizeText(req.body?.orderId,120);
+        if(!orderId){
+          res.status(400).json({error:"order_required"});
+          return;
+        }
+
+        const orderRef=db.doc(`orders/${orderId}`);
+        const stateRef=db.doc("cashState/current");
+        let responseData=null;
+
+        const preState=await stateRef.get();
+        if(preState.exists&&preState.data()?.sessionId){
+          await ensureCashLedgerV2(db,preState.data().sessionId);
+        }
+
+        await db.runTransaction(async tx=>{
+          const [orderSnap,stateSnap]=await Promise.all([
+            tx.get(orderRef),
+            tx.get(stateRef)
+          ]);
+          if(!orderSnap.exists){
+            throw Object.assign(new Error("order_not_found"),{code:"order_not_found"});
+          }
+
+          const order=orderSnap.data()||{};
+          if(order.status==="completed"&&order.cashSessionId){
+            responseData={
+              ok:true,
+              action,
+              orderId,
+              sessionId:order.cashSessionId,
+              status:"completed",
+              idempotent:true
+            };
+            return;
+          }
+
+          const validTransition=
+            order.status==="out_for_delivery" ||
+            (order.status==="ready"&&order.fulfillment==="pickup");
+          if(!validTransition){
+            throw Object.assign(new Error("invalid_order_transition"),{code:"invalid_order_transition"});
+          }
+
+          if(!stateSnap.exists||!stateSnap.data()?.sessionId){
+            throw Object.assign(new Error("cash_not_open"),{code:"cash_not_open"});
+          }
+
+          const sessionId=stateSnap.data().sessionId;
+          const sessionRef=db.doc(`cashSessions/${sessionId}`);
+          const sessionSnap=await tx.get(sessionRef);
+          if(!sessionSnap.exists||sessionSnap.data()?.status!=="open"){
+            throw Object.assign(new Error("cash_not_open"),{code:"cash_not_open"});
+          }
+
+          const session=sessionSnap.data()||{};
+          const total=cleanCashMoney(order.total,{min:0,max:5_000_000});
+          const salesSummary=safeCashSalesSummary(session.salesSummary);
+          if(total==null||!salesSummary){
+            throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+          }
+
+          const bucket=cashPaymentBucket(order.payment?.method);
+          salesSummary.count+=1;
+          salesSummary.gross=roundCashMoney(salesSummary.gross+total);
+          salesSummary[bucket]=roundCashMoney(salesSummary[bucket]+total);
+          if(
+            salesSummary.gross==null || salesSummary[bucket]==null ||
+            salesSummary.gross>100_000_000 || salesSummary[bucket]>100_000_000
+          ){
+            throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+          }
+          const revision=finiteNumber(
+            session.financialRevision??0,
+            {min:0,max:1_000_000_000,integer:true}
+          );
+          if(revision==null){
+            throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+          }
+
+          tx.update(orderRef,{
+            status:"completed",
+            completedAt:now,
+            updatedAt:now,
+            cashSessionId:sessionId,
+            cashBusinessDate:session.businessDate||stateSnap.data()?.businessDate||null
+          });
+          tx.update(sessionRef,{
+            salesSummary,
+            financialRevision:revision+1,
+            updatedAt:now
+          });
+
+          responseData={
+            ok:true,
+            action,
+            orderId,
+            sessionId,
+            status:"completed"
+          };
+        });
+
+        res.json(responseData||{ok:true,action,orderId,status:"completed"});
+        return;
+      }
+
+      // close
+      const sessionId=normalizeText(req.body?.sessionId,120);
+      const closingAmount=cleanCashMoney(req.body?.closingAmount,{min:0,max:10_000_000});
+      const closingNote=normalizeText(req.body?.closingNote,300);
+      const expectedRevision=finiteNumber(
+        req.body?.expectedRevision,
+        {min:0,max:1_000_000_000,integer:true}
+      );
+      if(!sessionId||closingAmount==null||expectedRevision==null){
+        res.status(400).json({error:"invalid_closing_amount"});
+        return;
+      }
+
+      const stateRef=db.doc("cashState/current");
+      const sessionRef=db.doc(`cashSessions/${sessionId}`);
+      let closeResult=null;
+
+      await ensureCashLedgerV2(db,sessionId);
+
+      await db.runTransaction(async tx=>{
+        const [stateSnap,sessionSnap]=await Promise.all([
+          tx.get(stateRef),
+          tx.get(sessionRef)
+        ]);
+        if(!sessionSnap.exists){
+          throw Object.assign(new Error("cash_session_not_found"),{code:"cash_session_not_found"});
+        }
+
+        const session=sessionSnap.data()||{};
+        if(session.status==="closed"){
+          closeResult={
+            ok:true,
+            action,
+            sessionId,
+            status:"closed",
+            idempotent:true,
+            expectedCash:session.expectedCash??0,
+            difference:session.difference??0,
+            summary:session.summary||{}
+          };
+          return;
+        }
+
+        if(!stateSnap.exists||stateSnap.data()?.sessionId!==sessionId){
+          throw Object.assign(new Error("cash_session_changed"),{code:"cash_session_changed"});
+        }
+        if(session.status!=="open"||session.locked===true){
+          throw Object.assign(new Error("cash_not_open"),{code:"cash_not_open"});
+        }
+
+        const openingAmount=cleanCashMoney(session.openingAmount,{min:0,max:1_000_000});
+        const sales=safeCashSalesSummary(session.salesSummary);
+        const movements=safeCashMovementSummary(session.movementSummary);
+        const revision=finiteNumber(
+          session.financialRevision??0,
+          {min:0,max:1_000_000_000,integer:true}
+        );
+        if(openingAmount==null||!sales||!movements||revision==null){
+          throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+        }
+        if(revision!==expectedRevision){
+          throw Object.assign(new Error("cash_changed_recheck"),{code:"cash_changed_recheck"});
+        }
+
+        const summary=cashSummarySnapshot(sales,movements);
+        const expectedCash=roundCashMoney(
+          openingAmount+sales.money+movements.supplies-movements.withdrawals
+        );
+        if(expectedCash==null||expectedCash<0){
+          throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+        }
+        const difference=roundCashMoney(closingAmount-expectedCash);
+        const dayRef=db.doc(`cashDays/${session.businessDate}`);
+
+        tx.update(sessionRef,{
+          status:"closed",
+          locked:true,
+          closingAmount,
+          expectedCash,
+          difference,
+          closingNote,
+          closedBy:decoded.uid,
+          closedByName:operatorName,
+          closedAt:now,
+          summary,
+          financialRevision:revision+1,
+          updatedAt:now
+        });
+        tx.set(dayRef,{
+          businessDate:session.businessDate,
+          status:"closed",
+          activeSessionId:null,
+          lastSessionId:sessionId,
+          lastClosedAt:now,
+          updatedAt:now
+        },{merge:true});
+        tx.delete(stateRef);
+
+        closeResult={
+          ok:true,
+          action,
+          sessionId,
+          status:"closed",
+          expectedCash,
+          difference,
+          summary
+        };
+      });
+
+      res.json(closeResult||{ok:true,action,sessionId,status:"closed"});
+    }catch(err){
+      console.error("manageCash failed",err);
+      const code=err?.code||err?.message||"cash_operation_failed";
+      const status=
+        ["missing_auth"].includes(code)?401:
+        ["permission_denied","user_disabled"].includes(code)?403:
+        ["order_not_found","cash_session_not_found"].includes(code)?404:
+        [
+          "cash_already_open",
+          "cash_session_changed",
+          "cash_not_open",
+          "cash_changed_recheck",
+          "insufficient_cash",
+          "idempotency_conflict",
+          "invalid_order_transition"
+        ].includes(code)?409:
+        [
+          "invalid_action",
+          "invalid_opening_amount",
+          "invalid_cash_movement",
+          "invalid_closing_amount",
+          "order_required"
+        ].includes(code)?400:500;
+      res.status(status).json({error:code});
     }
   }
 );
