@@ -45,7 +45,7 @@ function dateTimeWindowActive(startsAt,endsAt,timezone='America/Porto_Velho'){
     const localMatch=raw.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::\d{2})?$/);
     if(localMatch) return isStart?nowKey>=localMatch[1]:nowKey<=localMatch[1];
     const epoch=Date.parse(raw);
-    if(!Number.isFinite(epoch)) return true;
+    if(!Number.isFinite(epoch)) return false;
     return isStart?nowMs>=epoch:nowMs<=epoch;
   };
   return boundary(startsAt,true)&&boundary(endsAt,false);
