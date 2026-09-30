@@ -977,7 +977,7 @@ $('#productForm').addEventListener('submit',e=>{
     showToast('Esta combinação não está disponível. Revise os sabores e o tamanho.','warning');
     return;
   }
-  const extras=$('input[name=extra]:checked').map(el=>currentProduct.extras[Number(el.value)]);
+  const extras=$$('input[name=extra]:checked').map(el=>currentProduct.extras[Number(el.value)]);
   cart.push({
     lineId:crypto.randomUUID(),
     productId:currentProduct.id,
