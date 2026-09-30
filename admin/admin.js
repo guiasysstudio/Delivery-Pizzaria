@@ -1302,10 +1302,12 @@ async function openOrder(id){
     <div class="order-detail-grid">
       <div class="detail-card">
         <h3>Cliente</h3>
-        <p><strong>${esc(o.customer?.name||'')}</strong></p>
-        <p>${esc(o.customer?.phone||'')}</p>
-        <p>${esc(o.customer?.email||'')}</p>
-        <p>${esc(address)}</p>
+        ${o.customer
+          ?`<p><strong>${esc(o.customer?.name||'Cliente')}</strong></p>
+             <p>${esc(o.customer?.phone||'')}</p>
+             <p>${esc(o.customer?.email||'')}</p>
+             <p>${esc(address)}</p>`
+          :`<p class="muted">Dados pessoais ocultos para este perfil. Itens, valores e andamento continuam disponíveis.</p>`}
       </div>
 
       <div class="detail-card">
