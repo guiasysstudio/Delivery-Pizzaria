@@ -341,13 +341,45 @@ async function verifyStaffAdminRequest(req) {
 
   const caller=callerSnap.data()||{};
   if(caller.active===false) throw Object.assign(new Error("user_disabled"),{status:403,code:"user_disabled"});
-
-  const permissions=await staffPermissions(decoded.uid);
-  if(!permissions || !(permissions.master===true || permissions.usersManage===true)) {
+  if(caller.role!=="master") {
     throw Object.assign(new Error("permission_denied"),{status:403,code:"permission_denied"});
   }
 
-  return {decoded,caller,isMaster:caller.role==="master"};
+  return {decoded,caller,isMaster:true};
+}
+
+function normalizeStaffUsername(value) {
+  return String(value||"")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-z0-9._-]/g,"")
+    .slice(0,32);
+}
+
+function validStaffUsername(value) {
+  return /^[a-z0-9][a-z0-9._-]{2,31}$/.test(value);
+}
+
+function validStaffPassword(value) {
+  const password=String(value||"");
+  return password.length>=10 &&
+    password.length<=128 &&
+    /[A-Za-z]/.test(password) &&
+    /\d/.test(password);
+}
+
+async function validateNonMasterRole(db,roleId) {
+  const role=normalizeText(roleId,120);
+  if(!role || role==="master") {
+    throw Object.assign(new Error("invalid_role"),{status:400,code:"invalid_role"});
+  }
+  const snap=await db.doc(`roles/${role}`).get();
+  if(!snap.exists || snap.data()?.active===false) {
+    throw Object.assign(new Error("invalid_role"),{status:400,code:"invalid_role"});
+  }
+  return role;
 }
 
 async function ensureMasterCanBeChanged(db,targetUid,target) {
