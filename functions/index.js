@@ -1195,12 +1195,21 @@ export const createOrder = onRequest(
       }
 
       const productCache=new Map();
+      const categoryCache=new Map();
       const getProduct=async id=>{
         if (productCache.has(id)) return productCache.get(id);
         const snap=await db.doc(`products/${id}`).get();
         const value=snap.exists?{id:snap.id,...snap.data()}:null;
         productCache.set(id,value);
         return value;
+      };
+      const categoryAvailable=async categoryId=>{
+        if(!categoryId) return false;
+        if(categoryCache.has(categoryId)) return categoryCache.get(categoryId);
+        const snap=await db.doc(`categories/${categoryId}`).get();
+        const available=snap.exists&&snap.data()?.active!==false;
+        categoryCache.set(categoryId,available);
+        return available;
       };
 
       const promotions=promotionsSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -1210,7 +1219,7 @@ export const createOrder = onRequest(
       for (const raw of rawItems) {
         const productId=normalizeText(raw.productId,120);
         const first=await getProduct(productId);
-        if (!first || first.active===false) {
+        if (!first || first.active===false || !(await categoryAvailable(first.categoryId))) {
           res.status(400).json({error:"product_unavailable",productId});
           return;
         }
@@ -1228,6 +1237,11 @@ export const createOrder = onRequest(
           return;
         }
         let size=null;
+
+        if ((!Array.isArray(first.sizes)||!first.sizes.length) && base<=0) {
+          res.status(500).json({error:"product_config_invalid",productId});
+          return;
+        }
 
         if (Array.isArray(first.sizes) && first.sizes.length) {
           size=first.sizes.find(s=>normalizeKey(s.name)===normalizeKey(sizeName));
@@ -1298,9 +1312,11 @@ export const createOrder = onRequest(
           return;
         }
 
-        const requestedExtras=(Array.isArray(raw.extras)?raw.extras:[])
-          .map(x=>normalizeText(typeof x==="string"?x:x?.name,80))
-          .filter(Boolean);
+        const requestedExtras=[...new Set(
+          (Array.isArray(raw.extras)?raw.extras:[])
+            .map(x=>normalizeText(typeof x==="string"?x:x?.name,80))
+            .filter(Boolean)
+        )];
         const extras=[];
         let extrasValue=0;
 
