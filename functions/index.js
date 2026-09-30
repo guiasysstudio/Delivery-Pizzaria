@@ -2353,9 +2353,6 @@ export const deleteCustomerAccount = onRequest(
       return;
     }
 
-    let disabledForDeletion=false;
-    let cleanupCompleted=false;
-    let deletionUid="";
     try{
       const decoded=await verifyCustomerToken(req);
       if(!decoded?.uid){
@@ -2371,7 +2368,6 @@ export const deleteCustomerAccount = onRequest(
 
       const db=getFirestore();
       const uid=decoded.uid;
-      deletionUid=uid;
       const customerRef=db.doc(`customers/${uid}`);
       const privateRef=db.doc(`customerPrivate/${uid}`);
       const privateSnap=await privateRef.get();
@@ -2390,7 +2386,6 @@ export const deleteCustomerAccount = onRequest(
       }
 
       await getAuth().updateUser(uid,{disabled:true});
-      disabledForDeletion=true;
       await getAuth().revokeRefreshTokens(uid).catch(()=>{});
 
       const [
@@ -2433,7 +2428,6 @@ export const deleteCustomerAccount = onRequest(
       writer.delete(db.doc(`orderRateLimits/${uid}`));
       if(cpfHashValue) writer.delete(db.doc(`cpfIndex/${cpfHashValue}`));
       await writer.close();
-      cleanupCompleted=true;
 
       try{
         await getAuth().deleteUser(uid);
@@ -2449,11 +2443,6 @@ export const deleteCustomerAccount = onRequest(
       });
     }catch(err){
       console.error("deleteCustomerAccount failed",err);
-      if(disabledForDeletion&&!cleanupCompleted&&deletionUid){
-        await getAuth().updateUser(deletionUid,{disabled:false}).catch(reenableErr=>{
-          console.error("Could not re-enable customer after failed deletion",reenableErr);
-        });
-      }
       res.status(Number(err?.status)||500).json({
         error:err?.code||err?.message||"account_delete_failed"
       });
