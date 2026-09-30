@@ -5,7 +5,7 @@ import { firebaseConfig } from '../firebase-config.js';
 import { showToast, confirmAction, emptyStateHtml, iconHtml, skeletonListHtml, applyBrandTheme } from '../assets/ui.js';
 import { lookupBrazilianZip as lookupZipGeo } from '../assets/cep.js';
 import {
-  demoEnvironmentAllowed, listenDemoOrders, updateDemoOrder, isDemoOrderId, blazeRequiredMessage
+  demoEnvironmentAllowed, backendUnavailable, listenDemoOrders, updateDemoOrder, isDemoOrderId, blazeRequiredMessage
 } from '../assets/demo-mode.js';
 
 const app=initializeApp(firebaseConfig);
@@ -14,6 +14,14 @@ const db=getFirestore(app);
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
+
+function renderDemoModeIndicators(){
+  const enabled=demoEnvironmentAllowed();
+  $('#adminDemoBanner')?.classList.toggle('hidden',!enabled);
+  $('[data-demo-blaze]').forEach(el=>el.classList.toggle('hidden',!enabled));
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',renderDemoModeIndicators,{once:true});
+else renderDemoModeIndicators();
 
 function readStoredJson(storage,key,fallback){
   try{
@@ -182,14 +190,25 @@ async function cashOperation(action,payload={}){
   const user=auth.currentUser;
   if(!user) throw Object.assign(new Error('auth-required'),{code:'auth-required'});
   const token=await user.getIdToken();
-  const response=await fetch(CASH_OPERATION_ENDPOINT,{
-    method:'POST',
-    headers:{
-      'Content-Type':'application/json',
-      'Authorization':'Bearer '+token
-    },
-    body:JSON.stringify({action,...payload})
-  });
+  let response;
+  try{
+    response=await fetch(CASH_OPERATION_ENDPOINT,{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':'Bearer '+token
+      },
+      body:JSON.stringify({action,...payload})
+    });
+  }catch(err){
+    if(demoEnvironmentAllowed()&&backendUnavailable(err)){
+      throw Object.assign(new Error('blaze_required'),{code:'blaze_required'});
+    }
+    throw err;
+  }
+  if(demoEnvironmentAllowed()&&backendUnavailable(response)){
+    throw Object.assign(new Error('blaze_required'),{code:'blaze_required'});
+  }
   const data=await response.json().catch(()=>({}));
   if(!response.ok){
     const err=new Error(data?.error||'cash-operation-failed');
@@ -213,11 +232,19 @@ async function fetchOrderPrivate(orderId){
   const user=auth.currentUser;
   if(!user) return null;
   const token=await user.getIdToken();
-  const response=await fetch(STAFF_ORDER_PRIVATE_ENDPOINT,{
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-    body:JSON.stringify({orderId})
-  });
+  let response;
+  try{
+    response=await fetch(STAFF_ORDER_PRIVATE_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({orderId})
+    });
+  }catch(err){
+    if(demoEnvironmentAllowed()&&backendUnavailable(err)){
+      throw Object.assign(new Error('blaze_required_private'),{code:'blaze_required_private'});
+    }
+    throw err;
+  }
   const data=await response.json().catch(()=>({}));
   if(!response.ok){
     if(response.status===403) return null;
@@ -279,7 +306,8 @@ function cashOperationMessage(err){
     invalid_cash_ledger:'O livro financeiro está inconsistente e o fechamento foi bloqueado para evitar perda de dados.',
     permission_denied:'Seu perfil não possui permissão para esta operação financeira.',
     user_disabled:'Seu usuário está desativado.',
-    order_not_found:'O pedido não existe mais.'
+    order_not_found:'O pedido não existe mais.',
+    blaze_required:blazeRequiredMessage('cash')
   };
   return messages[code]||'Não foi possível concluir a operação financeira. Verifique as Firebase Functions e tente novamente.';
 }
@@ -626,11 +654,22 @@ async function staffRoleAdminAction(action,payload={}){
   const user=auth.currentUser;
   if(!user) throw Object.assign(new Error('auth-required'),{code:'auth-required'});
   const token=await user.getIdToken();
-  const response=await fetch(STAFF_ROLE_ADMIN_ENDPOINT,{
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-    body:JSON.stringify({action,...payload})
-  });
+  let response;
+  try{
+    response=await fetch(STAFF_ROLE_ADMIN_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({action,...payload})
+    });
+  }catch(err){
+    if(demoEnvironmentAllowed()&&backendUnavailable(err)){
+      throw Object.assign(new Error('blaze_required'),{code:'blaze_required'});
+    }
+    throw err;
+  }
+  if(demoEnvironmentAllowed()&&backendUnavailable(response)){
+    throw Object.assign(new Error('blaze_required'),{code:'blaze_required'});
+  }
   const data=await response.json().catch(()=>({}));
   if(!response.ok){
     const err=new Error(data?.error||'staff-role-action-failed');
@@ -1086,7 +1125,9 @@ $('#storeLogoFile')?.addEventListener('change',async e=>{
     renderStoreLogoPreview();
   }catch(err){
     console.error(err);
-    $('#storeLogoStatus').textContent='Não foi possível enviar a logo. Verifique se as Firebase Functions estão publicadas.';
+    $('#storeLogoStatus').textContent=demoEnvironmentAllowed()
+      ?blazeRequiredMessage('imageUpload')
+      :'Não foi possível enviar a logo. Verifique se as Firebase Functions estão publicadas.';
   }finally{
     button.disabled=false;
     e.target.value='';
@@ -2099,7 +2140,9 @@ $('#roleEditorForm')?.addEventListener('submit',async e=>{
     await loadUsers();
   }catch(err){
     console.error(err);
-    $('#roleEditorError').textContent='Não foi possível salvar o perfil.';
+    $('#roleEditorError').textContent=String(err?.code||'').includes('blaze_required')
+      ?blazeRequiredMessage('staffRoles')
+      :'Não foi possível salvar o perfil.';
     $('#roleEditorError').classList.remove('hidden');
   }
 });
@@ -2118,7 +2161,7 @@ async function deleteRole(id){
     const code=String(err?.code||'');
     if(code.includes('role_in_use')) showToast('Este perfil ainda está associado a um usuário.','warning');
     else if(code.includes('system_role')) showToast('Perfis padrão não podem ser excluídos.','warning');
-    else showToast('Não foi possível excluir o perfil.','error');
+    else showToast(String(err?.code||'').includes('blaze_required')?blazeRequiredMessage('staffRoles'):'Não foi possível excluir o perfil.',String(err?.code||'').includes('blaze_required')?'info':'error',{duration:8000});
   }
 }
 
@@ -2994,7 +3037,9 @@ $('#uploadProductImageBtn')?.addEventListener('click',async()=>{
     status.innerHTML='Imagem enviada com sucesso e disponível imediatamente.';
   }catch(err){
     console.error(err);
-    status.textContent='O serviço seguro de imagens ainda não está ativado ou falhou. Você pode baixar a imagem recortada enquanto isso.';
+    status.textContent=demoEnvironmentAllowed()
+      ?blazeRequiredMessage('imageUpload')+' Você pode baixar a imagem recortada enquanto isso.'
+      :'O serviço seguro de imagens ainda não está ativado ou falhou. Você pode baixar a imagem recortada enquanto isso.';
   }finally{
     button.disabled=false;
   }
@@ -3883,14 +3928,25 @@ async function staffUserAdminAction(action,uid,extra={}){
   const user=auth.currentUser;
   if(!user) throw new Error('auth-required');
   const token=await user.getIdToken();
-  const response=await fetch(STAFF_USER_ADMIN_ENDPOINT,{
-    method:'POST',
-    headers:{
-      'Content-Type':'application/json',
-      'Authorization':'Bearer '+token
-    },
-    body:JSON.stringify({action,uid,...extra})
-  });
+  let response;
+  try{
+    response=await fetch(STAFF_USER_ADMIN_ENDPOINT,{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':'Bearer '+token
+      },
+      body:JSON.stringify({action,uid,...extra})
+    });
+  }catch(err){
+    if(demoEnvironmentAllowed()&&backendUnavailable(err)){
+      throw Object.assign(new Error('blaze_required'),{code:'blaze_required'});
+    }
+    throw err;
+  }
+  if(demoEnvironmentAllowed()&&backendUnavailable(response)){
+    throw Object.assign(new Error('blaze_required'),{code:'blaze_required'});
+  }
   const data=await response.json().catch(()=>({}));
   if(!response.ok){
     const err=new Error(data?.error||'staff-user-action-failed');
@@ -3913,6 +3969,7 @@ function staffUserActionMessage(err){
   if(code.includes('self_role_change')) return 'A própria conta Master não pode ter o perfil alterado.';
   if(code.includes('user_not_found')) return 'Este usuário não existe mais.';
   if(code.includes('permission_denied')) return 'Seu perfil não possui permissão para administrar este usuário.';
+  if(code.includes('blaze_required')) return blazeRequiredMessage('staffUsers');
   return 'Não foi possível concluir a ação. Verifique as Firebase Functions e tente novamente.';
 }
 
