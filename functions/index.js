@@ -492,7 +492,7 @@ function dateTimeWindowActive(startsAt, endsAt, timezone = "America/Porto_Velho"
     const localMatch = raw.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::\d{2})?$/);
     if (localMatch) return isStart ? nowKey >= localMatch[1] : nowKey <= localMatch[1];
     const epoch = Date.parse(raw);
-    if (!Number.isFinite(epoch)) return true;
+    if (!Number.isFinite(epoch)) return false;
     return isStart ? nowMs >= epoch : nowMs <= epoch;
   };
   return boundary(startsAt, true) && boundary(endsAt, false);
@@ -558,19 +558,52 @@ function promoMatches(promo, product, timezone) {
   return false;
 }
 
+function finiteNumber(value, { min = -Infinity, max = Infinity, integer = false } = {}) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) return null;
+  if (integer && !Number.isInteger(parsed)) return null;
+  return parsed;
+}
+
+function finiteMoney(value, { min = 0, max = 1_000_000 } = {}) {
+  return finiteNumber(value, { min, max });
+}
+
 function applyPromotion(base, promo) {
-  if (!promo) return Number(base || 0);
+  const baseValue = finiteMoney(base);
+  if (baseValue == null || !promo) return baseValue;
+
+  const discount = finiteMoney(promo.discountValue, { min: 0, max: 1_000_000 });
+  if (discount == null || discount <= 0) return null;
+
   if (promo.discountType === "percentage") {
-    return Math.max(0, Number(base || 0) * (1 - Number(promo.discountValue || 0) / 100));
+    if (discount > 100) return null;
+    return Math.max(0, baseValue * (1 - discount / 100));
   }
-  return Math.max(0, Number(base || 0) - Number(promo.discountValue || 0));
+
+  if (promo.discountType !== "fixed") return null;
+  return Math.max(0, baseValue - discount);
 }
 
 function bestPromotion(promotions, product, base, timezone) {
   const candidates = promotions
     .filter(p => promoMatches(p, product, timezone))
     .map(p => ({ promo:p, price:applyPromotion(base,p) }))
+    .filter(entry => entry.price != null && Number.isFinite(entry.price))
     .sort((a,b) => a.price - b.price);
+  return candidates[0] || null;
+}
+
+function bestPromotionForSelection(promotions, products, base, timezone) {
+  const selection = (Array.isArray(products) ? products : [products]).filter(Boolean);
+  if (!selection.length) return null;
+
+  const candidates = promotions
+    .filter(promo => selection.every(product => promoMatches(promo, product, timezone)))
+    .map(promo => ({ promo, price:applyPromotion(base, promo) }))
+    .filter(entry => entry.price != null && Number.isFinite(entry.price))
+    .sort((a,b) => a.price - b.price);
+
   return candidates[0] || null;
 }
 
@@ -587,87 +620,220 @@ function distanceKm(a,b) {
   return R * 2 * Math.atan2(Math.sqrt(q),Math.sqrt(1-q));
 }
 
-async function lookupCepLocation(zip) {
+async function lookupCepData(zip) {
   const digits=String(zip||"").replace(/\D/g,"");
   if (digits.length !== 8) return null;
+
+  let primary=null;
+
   try {
-    const response = await fetch(`https://brasilapi.com.br/api/cep/v2/${digits}`);
-    if (!response.ok) return null;
-    const data = await response.json();
-    const latitude = Number(data?.location?.coordinates?.latitude);
-    const longitude = Number(data?.location?.coordinates?.longitude);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-    return { latitude, longitude, source:"brasilapi-cep-v2" };
+    const response = await fetch(`https://brasilapi.com.br/api/cep/v2/${digits}`, {
+      signal: AbortSignal.timeout(6000)
+    });
+    if (response.ok) {
+      const data = await response.json();
+      const latitude = Number(data?.location?.coordinates?.latitude);
+      const longitude = Number(data?.location?.coordinates?.longitude);
+      primary={
+        zip:digits,
+        street:normalizeText(data?.street,160),
+        neighborhood:normalizeText(data?.neighborhood,80),
+        city:normalizeText(data?.city,80),
+        state:normalizeText(data?.state,2).toUpperCase(),
+        location:Number.isFinite(latitude)&&Number.isFinite(longitude)
+          ? {latitude,longitude,source:"brasilapi-cep-v2"}
+          : null
+      };
+
+      // Se os dados textuais vieram completos, não precisamos de outra API.
+      if (primary.neighborhood&&primary.city&&primary.state) return primary;
+    }
   } catch {
-    return null;
+    // O ViaCEP abaixo funciona como fallback e complemento.
   }
+
+  try {
+    const response = await fetch(`https://viacep.com.br/ws/${digits}/json/`, {
+      signal: AbortSignal.timeout(6000)
+    });
+    if (!response.ok) return primary;
+    const data = await response.json();
+    if (data?.erro) return primary;
+    return {
+      zip:digits,
+      street:primary?.street||normalizeText(data?.logradouro,160),
+      neighborhood:primary?.neighborhood||normalizeText(data?.bairro,80),
+      city:primary?.city||normalizeText(data?.localidade,80),
+      state:primary?.state||normalizeText(data?.uf,2).toUpperCase(),
+      location:primary?.location||null
+    };
+  } catch {
+    return primary;
+  }
+}
+
+function validLocation(value) {
+  const latitude=finiteNumber(value?.latitude,{min:-90,max:90});
+  const longitude=finiteNumber(value?.longitude,{min:-180,max:180});
+  return latitude == null || longitude == null ? null : {latitude,longitude};
+}
+
+function validatedDeliveryFee(value) {
+  return finiteMoney(value,{min:0,max:10_000});
 }
 
 async function calculateServerDelivery(db, settings, address) {
   const mode = settings.deliveryPricingMode || "fixed";
+
   if (mode === "fixed") {
-    return { supported:true, fee:Number(settings.deliveryFee||0), mode };
+    const fee=validatedDeliveryFee(settings.deliveryFee);
+    return fee == null
+      ? { supported:false, fee:0, mode, reason:"invalid_delivery_config" }
+      : { supported:true, fee, mode };
+  }
+
+  const zip=String(address?.zip||"").replace(/\D/g,"");
+  if (zip.length!==8) {
+    return { supported:false, fee:0, mode, reason:"address_zip_required" };
+  }
+
+  // Bairro e coordenadas usados para cobrar frete nunca vêm do cliente.
+  // O servidor reconstrói estes dados a partir do CEP a cada pedido.
+  const verifiedAddress=await lookupCepData(zip);
+  if (!verifiedAddress) {
+    return { supported:false, fee:0, mode, reason:"cep_validation_unavailable" };
   }
 
   if (mode === "neighborhood") {
     const zones = Array.isArray(settings.deliveryZones) ? settings.deliveryZones : [];
-    const key = normalizeKey(address?.neighborhood);
+    const neighborhood=normalizeText(verifiedAddress.neighborhood,80);
+    if (!neighborhood) {
+      return { supported:false, fee:0, mode, reason:"neighborhood_unavailable" };
+    }
+
+    for (const zone of zones) {
+      if (!normalizeText(zone?.neighborhood,80)) {
+        return { supported:false, fee:0, mode, reason:"invalid_delivery_config" };
+      }
+      if (validatedDeliveryFee(zone?.fee)==null) {
+        return { supported:false, fee:0, mode, reason:"invalid_delivery_config" };
+      }
+    }
+
+    const key = normalizeKey(neighborhood);
     const zone = zones.find(z => normalizeKey(z.neighborhood) === key);
     if (zone) {
-      return { supported:true, fee:Number(zone.fee||0), mode, zone:zone.neighborhood||"" };
+      return {
+        supported:true,
+        fee:validatedDeliveryFee(zone.fee),
+        mode,
+        zone:zone.neighborhood||neighborhood,
+        verifiedNeighborhood:neighborhood,
+        addressLocation:verifiedAddress.location
+      };
     }
+
     if (settings.restrictDeliveryZones === true && zones.length) {
-      return { supported:false, fee:0, mode, reason:"neighborhood_not_served" };
+      return {
+        supported:false,
+        fee:0,
+        mode,
+        reason:"neighborhood_not_served",
+        verifiedNeighborhood:neighborhood
+      };
     }
-    return {
-      supported:true,
-      fee:Number(settings.deliveryNeighborhoodFallbackFee ?? settings.deliveryFee ?? 0),
-      mode,
-      zone:null
-    };
+
+    const fallback=validatedDeliveryFee(
+      settings.deliveryNeighborhoodFallbackFee ?? settings.deliveryFee ?? 0
+    );
+    return fallback == null
+      ? { supported:false, fee:0, mode, reason:"invalid_delivery_config" }
+      : {
+          supported:true,
+          fee:fallback,
+          mode,
+          zone:null,
+          verifiedNeighborhood:neighborhood,
+          addressLocation:verifiedAddress.location
+        };
   }
 
   if (mode === "km") {
-    let storeLocation = settings.storeLocation || null;
+    let storeLocation=validLocation(settings.storeLocation);
     if (!storeLocation && settings.storeZip) {
-      storeLocation = await lookupCepLocation(settings.storeZip);
+      const storeCep=await lookupCepData(settings.storeZip);
+      storeLocation=validLocation(storeCep?.location);
     }
 
-    let addressLocation = address?.location || null;
-    if (!addressLocation && address?.zip) {
-      addressLocation = await lookupCepLocation(address.zip);
-    }
-
+    const addressLocation=validLocation(verifiedAddress.location);
     const km = distanceKm(storeLocation,addressLocation);
     if (km == null) {
-      return { supported:false, fee:0, mode, reason:"location_unavailable" };
+      return {
+        supported:false,
+        fee:0,
+        mode,
+        reason:"location_unavailable",
+        verifiedNeighborhood:verifiedAddress.neighborhood||""
+      };
     }
 
-    const bands = (Array.isArray(settings.deliveryKmBands) ? settings.deliveryKmBands : [])
-      .slice()
-      .sort((a,b) => Number(a.maxKm||0)-Number(b.maxKm||0));
+    const rawBands=Array.isArray(settings.deliveryKmBands) ? settings.deliveryKmBands : [];
+    const bands=[];
+    for (const raw of rawBands) {
+      const maxKm=finiteNumber(raw?.maxKm,{min:0.1,max:500});
+      const fee=validatedDeliveryFee(raw?.fee);
+      if (maxKm==null || fee==null) {
+        return { supported:false, fee:0, mode, reason:"invalid_delivery_config" };
+      }
+      bands.push({maxKm,fee});
+    }
+    bands.sort((a,b) => a.maxKm-b.maxKm);
 
-    const band = bands.find(b => km <= Number(b.maxKm||0));
+    if (!bands.length) {
+      return { supported:false, fee:0, mode, reason:"invalid_delivery_config" };
+    }
+
+    const band = bands.find(b => km <= b.maxKm);
     if (band) {
-      return { supported:true, fee:Number(band.fee||0), mode, distanceKm:km, maxKm:Number(band.maxKm||0), addressLocation };
+      return {
+        supported:true,
+        fee:band.fee,
+        mode,
+        distanceKm:km,
+        maxKm:band.maxKm,
+        addressLocation,
+        verifiedNeighborhood:verifiedAddress.neighborhood||"",
+        distanceMethod:"straight_line_cep"
+      };
     }
 
-    if (settings.restrictDeliveryKm === true && bands.length) {
-      return { supported:false, fee:0, mode, distanceKm:km, reason:"distance_not_served", addressLocation };
+    if (settings.restrictDeliveryKm === true) {
+      return {
+        supported:false,
+        fee:0,
+        mode,
+        distanceKm:km,
+        reason:"distance_not_served",
+        addressLocation,
+        verifiedNeighborhood:verifiedAddress.neighborhood||"",
+        distanceMethod:"straight_line_cep"
+      };
     }
 
     const last=bands.at(-1);
     return {
       supported:true,
-      fee:last?Number(last.fee||0):Number(settings.deliveryFee||0),
+      fee:last.fee,
       mode,
       distanceKm:km,
-      maxKm:last?Number(last.maxKm||0):null,
-      addressLocation
+      maxKm:last.maxKm,
+      addressLocation,
+      verifiedNeighborhood:verifiedAddress.neighborhood||"",
+      distanceMethod:"straight_line_cep"
     };
   }
 
-  return { supported:true, fee:Number(settings.deliveryFee||0), mode:"fixed" };
+  return { supported:false, fee:0, mode, reason:"invalid_delivery_config" };
 }
 
 async function verifyCustomerToken(req) {
@@ -929,7 +1095,50 @@ export const createOrder = onRequest(
         return;
       }
 
+      const provider=String(decoded.firebase?.sign_in_provider||"");
+      if (provider==="password" && decoded.email_verified!==true) {
+        res.status(409).json({error:"email_not_verified"});
+        return;
+      }
+
+      const body=req.body||{};
+      const requestId=normalizeText(body.requestId,80);
+      if (!/^[A-Za-z0-9_-]{16,80}$/.test(requestId)) {
+        res.status(400).json({error:"invalid_request_id"});
+        return;
+      }
+
+      const requestFingerprint=createHash("sha256").update(JSON.stringify({
+        fulfillment:body.fulfillment||"",
+        addressId:body.addressId||"",
+        phone:body.phone||"",
+        note:body.note||"",
+        couponCode:body.couponCode||"",
+        payment:body.payment||{},
+        pricing:body.pricing||{},
+        items:Array.isArray(body.items)?body.items:[]
+      })).digest("hex");
+
       const db=getFirestore();
+      const requestKey=createHash("sha256")
+        .update(decoded.uid+":"+requestId)
+        .digest("hex");
+      const requestRef=db.doc(`orderRequests/${requestKey}`);
+      const existingRequest=await requestRef.get();
+      if (existingRequest.exists) {
+        const stored=existingRequest.data()||{};
+        if (stored.requestFingerprint&&stored.requestFingerprint!==requestFingerprint) {
+          res.status(409).json({
+            error:"idempotency_conflict",
+            orderId:stored.orderId||"",
+            orderNumber:stored.orderNumber||0
+          });
+          return;
+        }
+        res.json({ok:true,idempotent:true,...stored});
+        return;
+      }
+
       const [settingsSnap,customerSnap,privateCustomerSnap,promotionsSnap]=await Promise.all([
         db.doc("settings/store").get(),
         db.doc(`customers/${decoded.uid}`).get(),
@@ -953,7 +1162,6 @@ export const createOrder = onRequest(
         res.status(409).json({error:"full_name_required"});
         return;
       }
-      const body=req.body||{};
       const rawItems=Array.isArray(body.items)?body.items:[];
       if (!rawItems.length || rawItems.length>80) {
         res.status(400).json({error:"invalid_items"});
@@ -979,15 +1187,34 @@ export const createOrder = onRequest(
           return;
         }
         address={id:addressSnap.id,...addressSnap.data()};
+        const addressRequired=[
+          normalizeText(address.street,160),
+          normalizeText(address.number,20),
+          normalizeText(address.city,80),
+          normalizeText(address.state,2)
+        ];
+        if (addressRequired.some(value=>!value)) {
+          res.status(400).json({error:"invalid_address"});
+          return;
+        }
       }
 
       const productCache=new Map();
+      const categoryCache=new Map();
       const getProduct=async id=>{
         if (productCache.has(id)) return productCache.get(id);
         const snap=await db.doc(`products/${id}`).get();
         const value=snap.exists?{id:snap.id,...snap.data()}:null;
         productCache.set(id,value);
         return value;
+      };
+      const categoryAvailable=async categoryId=>{
+        if(!categoryId) return false;
+        if(categoryCache.has(categoryId)) return categoryCache.get(categoryId);
+        const snap=await db.doc(`categories/${categoryId}`).get();
+        const available=snap.exists&&snap.data()?.active!==false;
+        categoryCache.set(categoryId,available);
+        return available;
       };
 
       const promotions=promotionsSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -997,15 +1224,29 @@ export const createOrder = onRequest(
       for (const raw of rawItems) {
         const productId=normalizeText(raw.productId,120);
         const first=await getProduct(productId);
-        if (!first || first.active===false) {
+        if (!first || first.active===false || !(await categoryAvailable(first.categoryId))) {
           res.status(400).json({error:"product_unavailable",productId});
           return;
         }
 
-        const qty=Math.max(1,Math.min(99,Number(raw.qty||1)));
+        const qty=finiteNumber(raw.qty,{min:1,max:99,integer:true});
+        if (qty==null) {
+          res.status(400).json({error:"invalid_quantity",productId});
+          return;
+        }
+
         const sizeName=normalizeText(raw.sizeName||raw.size?.name,80);
-        let base=Number(first.price||0);
+        let base=finiteMoney(first.price,{min:0,max:100_000});
+        if (base==null) {
+          res.status(500).json({error:"product_config_invalid",productId});
+          return;
+        }
         let size=null;
+
+        if ((!Array.isArray(first.sizes)||!first.sizes.length) && base<=0) {
+          res.status(500).json({error:"product_config_invalid",productId});
+          return;
+        }
 
         if (Array.isArray(first.sizes) && first.sizes.length) {
           size=first.sizes.find(s=>normalizeKey(s.name)===normalizeKey(sizeName));
@@ -1013,7 +1254,12 @@ export const createOrder = onRequest(
             res.status(400).json({error:"invalid_size",productId});
             return;
           }
-          base=Number(size.price||0);
+          const sizePrice=finiteMoney(size.price,{min:0.01,max:100_000});
+          if (sizePrice==null) {
+            res.status(500).json({error:"product_config_invalid",productId});
+            return;
+          }
+          base=sizePrice;
         }
 
         const flavorIds=(Array.isArray(raw.flavorProductIds)?raw.flavorProductIds:[productId])
@@ -1021,6 +1267,7 @@ export const createOrder = onRequest(
           .filter(Boolean);
         const flavorNames=[first.name||""];
         const validFlavorIds=[productId];
+        const flavorProducts=[first];
 
         if (flavorIds.length>1) {
           if (first.allowHalfHalf===false || first.isPizza!==true) {
@@ -1029,7 +1276,13 @@ export const createOrder = onRequest(
           }
           for (const id of [...new Set(flavorIds.slice(1))].slice(0,1)) {
             const flavor=await getProduct(id);
-            if (!flavor || flavor.active===false || flavor.categoryId!==first.categoryId || flavor.isPizza!==true) {
+            if (
+              !flavor ||
+              flavor.active===false ||
+              flavor.categoryId!==first.categoryId ||
+              flavor.isPizza!==true ||
+              flavor.allowHalfHalf===false
+            ) {
               res.status(400).json({error:"invalid_second_flavor",productId:id});
               return;
             }
@@ -1039,24 +1292,36 @@ export const createOrder = onRequest(
                 res.status(400).json({error:"second_flavor_size_unavailable",productId:id});
                 return;
               }
-              base=Math.max(base,Number(matching.price||0));
+              const matchingPrice=finiteMoney(matching.price,{min:0.01,max:100_000});
+              if (matchingPrice==null) {
+                res.status(500).json({error:"product_config_invalid",productId:id});
+                return;
+              }
+              base=Math.max(base,matchingPrice);
             }
             flavorNames.push(flavor.name||"");
             validFlavorIds.push(flavor.id);
+            flavorProducts.push(flavor);
           }
         }
 
-        const best=bestPromotion(
+        const best=bestPromotionForSelection(
           promotions,
-          first,
+          flavorProducts,
           base,
           settings.timezone || "America/Porto_Velho"
         );
-        let promotedBase=best?best.price:base;
+        const promotedBase=best?best.price:base;
+        if (!Number.isFinite(promotedBase) || promotedBase<0) {
+          res.status(500).json({error:"promotion_config_invalid"});
+          return;
+        }
 
-        const requestedExtras=(Array.isArray(raw.extras)?raw.extras:[])
-          .map(x=>normalizeText(typeof x==="string"?x:x?.name,80))
-          .filter(Boolean);
+        const requestedExtras=[...new Set(
+          (Array.isArray(raw.extras)?raw.extras:[])
+            .map(x=>normalizeText(typeof x==="string"?x:x?.name,80))
+            .filter(Boolean)
+        )];
         const extras=[];
         let extrasValue=0;
 
@@ -1066,12 +1331,25 @@ export const createOrder = onRequest(
             res.status(400).json({error:"invalid_extra",productId,extra:name});
             return;
           }
-          extras.push({name:catalogExtra.name,price:Number(catalogExtra.price||0)});
-          extrasValue+=Number(catalogExtra.price||0);
+          const extraPrice=finiteMoney(catalogExtra.price,{min:0,max:100_000});
+          if (extraPrice==null) {
+            res.status(500).json({error:"product_config_invalid",productId});
+            return;
+          }
+          extras.push({name:catalogExtra.name,price:extraPrice});
+          extrasValue+=extraPrice;
         }
 
         const unitPrice=promotedBase+extrasValue;
+        if (!Number.isFinite(unitPrice) || unitPrice<0) {
+          res.status(500).json({error:"product_config_invalid",productId});
+          return;
+        }
         subtotal+=unitPrice*qty;
+        if (!Number.isFinite(subtotal) || subtotal<0 || subtotal>5_000_000) {
+          res.status(400).json({error:"invalid_order_total"});
+          return;
+        }
         items.push({
           productId:first.id,
           flavorProductIds:validFlavorIds,
@@ -1093,8 +1371,13 @@ export const createOrder = onRequest(
         });
       }
 
-      if (subtotal < Number(settings.minimumOrder||0)) {
-        res.status(400).json({error:"minimum_order",minimumOrder:Number(settings.minimumOrder||0)});
+      const minimumOrder=finiteMoney(settings.minimumOrder||0,{min:0,max:1_000_000});
+      if (minimumOrder==null) {
+        res.status(500).json({error:"invalid_store_config"});
+        return;
+      }
+      if (subtotal < minimumOrder) {
+        res.status(400).json({error:"minimum_order",minimumOrder});
         return;
       }
 
@@ -1119,31 +1402,53 @@ export const createOrder = onRequest(
           res.status(400).json({error:"coupon_inactive"});
           return;
         }
-        if (subtotal<Number(cp.minimumOrder||0)) {
-          res.status(400).json({error:"coupon_minimum_order",minimumOrder:Number(cp.minimumOrder||0)});
+        const couponMinimum=finiteMoney(cp.minimumOrder||0,{min:0,max:1_000_000});
+        const couponValue=finiteMoney(cp.value,{min:0.01,max:1_000_000});
+        const couponMax=finiteMoney(cp.maxDiscount||0,{min:0,max:1_000_000});
+        const minOrders=finiteNumber(cp.minOrders||0,{min:0,max:100_000,integer:true});
+        const minSpent=finiteMoney(cp.minSpent||0,{min:0,max:10_000_000});
+        if (
+          couponMinimum==null || couponValue==null || couponMax==null ||
+          minOrders==null || minSpent==null ||
+          !["percentage","fixed"].includes(cp.type||"percentage") ||
+          ((cp.type||"percentage")==="percentage" && couponValue>100)
+        ) {
+          res.status(500).json({error:"coupon_config_invalid"});
           return;
         }
 
-        if (Number(cp.minOrders||0)>0 || Number(cp.minSpent||0)>0) {
+        if (subtotal<couponMinimum) {
+          res.status(400).json({error:"coupon_minimum_order",minimumOrder:couponMinimum});
+          return;
+        }
+
+        if (minOrders>0 || minSpent>0) {
           const ordersSnap=await db.collection("orders").where("customerId","==",decoded.uid).get();
           const completed=ordersSnap.docs.map(d=>d.data()).filter(o=>o.status==="completed");
-          const spent=completed.reduce((sum,o)=>sum+Number(o.total||0),0);
-          if (completed.length<Number(cp.minOrders||0) || spent<Number(cp.minSpent||0)) {
+          const spent=completed.reduce((sum,o)=>{
+            const value=finiteMoney(o.total||0,{min:0,max:1_000_000});
+            return sum+(value??0);
+          },0);
+          if (completed.length<minOrders || spent<minSpent) {
             res.status(400).json({error:"coupon_not_eligible"});
             return;
           }
         }
 
-        discount=cp.type==="percentage"
-          ?subtotal*Number(cp.value||0)/100
-          :Number(cp.value||0);
-        if (Number(cp.maxDiscount||0)>0) discount=Math.min(discount,Number(cp.maxDiscount||0));
+        discount=(cp.type||"percentage")==="percentage"
+          ?subtotal*couponValue/100
+          :couponValue;
+        if (couponMax>0) discount=Math.min(discount,couponMax);
         discount=Math.max(0,Math.min(subtotal,discount));
+        if (!Number.isFinite(discount)) {
+          res.status(500).json({error:"coupon_config_invalid"});
+          return;
+        }
         coupon={
           id:cp.id,
           code:cp.code||cp.id,
           type:cp.type||"percentage",
-          value:Number(cp.value||0),
+          value:couponValue,
           amount:discount
         };
       }
@@ -1152,10 +1457,17 @@ export const createOrder = onRequest(
       if (fulfillment==="delivery") {
         delivery=await calculateServerDelivery(db,settings,address);
         if (!delivery.supported) {
-          res.status(400).json({error:"delivery_not_supported",reason:delivery.reason||""});
+          const reason=delivery.reason||"delivery_not_supported";
+          const serverConfigError=reason==="invalid_delivery_config";
+          res.status(serverConfigError?500:400).json({
+            error:serverConfigError?"invalid_delivery_config":reason,
+            reason
+          });
           return;
         }
-        if (delivery.addressLocation && !address.location) {
+        if (delivery.addressLocation) {
+          // Mantém apenas uma cópia de conveniência no perfil. O cálculo do
+          // pedido nunca confia nesta coordenada persistida.
           address.location=delivery.addressLocation;
           await db.doc(`customers/${decoded.uid}/addresses/${address.id}`).set(
             {location:delivery.addressLocation,updatedAt:new Date()},
@@ -1164,8 +1476,45 @@ export const createOrder = onRequest(
         }
       }
 
-      const deliveryFee=Number(delivery.fee||0);
+      const deliveryFee=finiteMoney(delivery.fee,{min:0,max:10_000});
+      if (deliveryFee==null) {
+        res.status(500).json({error:"invalid_delivery_config"});
+        return;
+      }
+
       const total=Math.max(0,subtotal-discount+deliveryFee);
+      if (![subtotal,discount,deliveryFee,total].every(Number.isFinite)) {
+        res.status(400).json({error:"invalid_order_total"});
+        return;
+      }
+
+      const pricing=body.pricing||{};
+      const expectedSubtotal=finiteMoney(pricing.subtotal,{min:0,max:5_000_000});
+      const expectedDiscount=finiteMoney(pricing.discount,{min:0,max:5_000_000});
+      const expectedDeliveryFee=finiteMoney(pricing.deliveryFee,{min:0,max:10_000});
+      const expectedTotal=finiteMoney(pricing.total,{min:0,max:5_000_000});
+      if ([expectedSubtotal,expectedDiscount,expectedDeliveryFee,expectedTotal].some(v=>v==null)) {
+        res.status(400).json({error:"invalid_pricing_confirmation"});
+        return;
+      }
+
+      const differs=(a,b)=>Math.abs(Number(a)-Number(b))>0.009;
+      if (
+        differs(expectedSubtotal,subtotal) ||
+        differs(expectedDiscount,discount) ||
+        differs(expectedDeliveryFee,deliveryFee) ||
+        differs(expectedTotal,total)
+      ) {
+        res.status(409).json({
+          error:"pricing_changed",
+          subtotal,
+          discount,
+          deliveryFee,
+          total
+        });
+        return;
+      }
+
       const paymentMethod=normalizeText(body.payment?.method,80);
       const allowedPayments=Array.isArray(settings.payments)?settings.payments:[];
       if (!paymentMethod || (allowedPayments.length&&!allowedPayments.includes(paymentMethod))) {
@@ -1174,8 +1523,10 @@ export const createOrder = onRequest(
       }
 
       const needsChange=paymentMethod.toLowerCase().includes("dinheiro")&&body.payment?.needsChange===true;
-      const changeFor=needsChange?Number(body.payment?.changeFor||0):0;
-      if (needsChange&&changeFor<total) {
+      const changeFor=needsChange
+        ?finiteMoney(body.payment?.changeFor,{min:0,max:1_000_000})
+        :0;
+      if (changeFor==null || (needsChange&&changeFor<total)) {
         res.status(400).json({error:"invalid_change"});
         return;
       }
@@ -1188,20 +1539,62 @@ export const createOrder = onRequest(
       }
 
       const counterRef=db.doc("counters/orders");
+      const rateRef=db.doc(`orderRateLimits/${decoded.uid}`);
       const orderRef=db.collection("orders").doc();
       let orderNumber=0;
+      let duplicateResult=null;
       const now=new Date();
+      const nowMs=now.getTime();
       const autoAccepted=settings.autoAcceptOrders===true;
 
       await db.runTransaction(async tx=>{
-        const counter=await tx.get(counterRef);
-        orderNumber=(counter.exists?Number(counter.data().value||0):0)+1;
+        const [requestSnap,rateSnap,counter]=await Promise.all([
+          tx.get(requestRef),
+          tx.get(rateRef),
+          tx.get(counterRef)
+        ]);
+
+        if (requestSnap.exists) {
+          const stored=requestSnap.data()||{};
+          if (stored.requestFingerprint&&stored.requestFingerprint!==requestFingerprint) {
+            throw Object.assign(new Error("idempotency_conflict"),{code:"idempotency_conflict"});
+          }
+          duplicateResult=stored;
+          return;
+        }
+
+        const rate=rateSnap.exists?rateSnap.data():{};
+        const lastCreatedMs=rate.lastCreatedAt?.toMillis?.() ||
+          new Date(rate.lastCreatedAt||0).getTime() || 0;
+        if (lastCreatedMs && nowMs-lastCreatedMs<5000) {
+          throw Object.assign(new Error("rate_limited"),{code:"rate_limited"});
+        }
+
+        let windowStartMs=rate.windowStart?.toMillis?.() ||
+          new Date(rate.windowStart||0).getTime() || 0;
+        let windowCount=finiteNumber(rate.windowCount||0,{min:0,max:100_000,integer:true})??0;
+        if (!windowStartMs || nowMs-windowStartMs>10*60*1000) {
+          windowStartMs=nowMs;
+          windowCount=0;
+        }
+        if (windowCount>=12) {
+          throw Object.assign(new Error("rate_limited"),{code:"rate_limited"});
+        }
+
+        const counterValue=counter.exists
+          ?finiteNumber(counter.data().value,{min:0,max:999_999_999,integer:true})
+          :0;
+        if (counterValue==null) {
+          throw Object.assign(new Error("invalid_order_counter"),{code:"invalid_order_counter"});
+        }
+        orderNumber=counterValue+1;
         tx.set(counterRef,{value:orderNumber,updatedAt:now},{merge:true});
         tx.set(orderRef,{
           orderNumber,
           customerId:decoded.uid,
           status:autoAccepted?"accepted":"pending",
           autoAccepted,
+          requestId,
           createdAt:now,
           acceptedAt:autoAccepted?now:null,
           customer:{
@@ -1223,13 +1616,15 @@ export const createOrder = onRequest(
             city:address.city||"",
             state:address.state||"",
             reference:address.reference||"",
-            location:address.location||delivery.addressLocation||null
+            location:delivery.addressLocation||null
           }:null,
           deliveryPricing:fulfillment==="delivery"?{
             mode:delivery.mode||settings.deliveryPricingMode||"fixed",
             fee:deliveryFee,
             distanceKm:Number.isFinite(delivery.distanceKm)?Number(delivery.distanceKm.toFixed(3)):null,
+            distanceMethod:delivery.distanceMethod||null,
             zone:delivery.zone||null,
+            verifiedNeighborhood:delivery.verifiedNeighborhood||null,
             maxKm:delivery.maxKm??null
           }:{mode:"pickup",fee:0},
           payment:{
@@ -1247,7 +1642,35 @@ export const createOrder = onRequest(
           total,
           createdBy:"secure-function"
         });
+
+        const resultData={
+          orderId:orderRef.id,
+          orderNumber,
+          status:autoAccepted?"accepted":"pending",
+          subtotal,
+          discount,
+          deliveryFee,
+          total,
+          createdAt:now
+        };
+        tx.set(requestRef,{
+          ...resultData,
+          customerId:decoded.uid,
+          requestId,
+          requestFingerprint
+        });
+        tx.set(rateRef,{
+          lastCreatedAt:now,
+          windowStart:new Date(windowStartMs),
+          windowCount:windowCount+1,
+          updatedAt:now
+        },{merge:true});
       });
+
+      if (duplicateResult) {
+        res.json({ok:true,idempotent:true,...duplicateResult});
+        return;
+      }
 
       res.json({
         ok:true,
@@ -1261,6 +1684,19 @@ export const createOrder = onRequest(
       });
     } catch (err) {
       console.error("createOrder failed",err);
+      const code=err?.code||err?.message||"order_failed";
+      if (code==="rate_limited") {
+        res.status(429).json({error:"rate_limited"});
+        return;
+      }
+      if (code==="idempotency_conflict") {
+        res.status(409).json({error:"idempotency_conflict"});
+        return;
+      }
+      if (code==="invalid_order_counter") {
+        res.status(500).json({error:"invalid_order_counter"});
+        return;
+      }
       res.status(500).json({error:"order_failed",message:err?.message||"Falha ao criar pedido."});
     }
   }

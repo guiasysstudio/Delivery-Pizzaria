@@ -55,7 +55,7 @@ function dateTimeWindowActive(startsAt,endsAt,timezone='America/Porto_Velho'){
     const localMatch=raw.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::\d{2})?$/);
     if(localMatch) return isStart?nowKey>=localMatch[1]:nowKey<=localMatch[1];
     const epoch=Date.parse(raw);
-    if(!Number.isFinite(epoch)) return true;
+    if(!Number.isFinite(epoch)) return false;
     return isStart?nowMs>=epoch:nowMs<=epoch;
   };
   return boundary(startsAt,true)&&boundary(endsAt,false);
@@ -70,6 +70,20 @@ let customer=null,customerProfile=null,addresses=[],selectedAddressId=localStora
 let favorites=new Set(),afterAuthAction=null,selectedPayment='',activeCoupon=null,customerOrderStats={count:0,spent:0};
 let deferredInstallPrompt=null;
 let pendingCouponCode=normalizeCouponCode(new URLSearchParams(location.search).get('coupon')||'');
+let pendingOrderRequestId=sessionStorage.getItem('deliveryPendingOrderRequestId')||'';
+
+function getPendingOrderRequestId(){
+  if(!pendingOrderRequestId){
+    pendingOrderRequestId=crypto.randomUUID();
+    sessionStorage.setItem('deliveryPendingOrderRequestId',pendingOrderRequestId);
+  }
+  return pendingOrderRequestId;
+}
+
+function clearPendingOrderRequestId(){
+  pendingOrderRequestId='';
+  sessionStorage.removeItem('deliveryPendingOrderRequestId');
+}
 
 const defaultSettings={
   storeName:'Delivery Pizzaria',
@@ -142,7 +156,17 @@ async function loadStore(){
       .sort((a,b)=>(a.order||0)-(b.order||0));
     promotions=promoSnap?.docs?.map(d=>({id:d.id,...d.data()}))||[];
     settings=setSnap.exists()?{...defaultSettings,...setSnap.data()}:defaultSettings;
+    const cartReconciliation=reconcileCartWithCatalog();
     renderStore();
+    if(cartReconciliation.changed){
+      setTimeout(()=>showToast(
+        cartReconciliation.removed
+          ?'Seu carrinho foi atualizado porque alguns itens mudaram ou não estão mais disponíveis.'
+          :'Os preços do seu carrinho foram atualizados para o cardápio atual.',
+        'warning',
+        {duration:7000}
+      ),80);
+    }
     const productId=new URLSearchParams(location.search).get('product');
     if(productId&&products.some(p=>p.id===productId)) setTimeout(()=>openProduct(productId),50);
   }catch(err){
@@ -451,19 +475,37 @@ function promotionMatchesProduct(p,product){
 }
 
 function applyPromotionValue(base,promo){
-  const value=Number(base||0);
+  const value=Number(base);
+  if(!Number.isFinite(value)||value<0) return NaN;
   if(!promo) return value;
+
+  const discount=Number(promo.discountValue);
+  if(!Number.isFinite(discount)||discount<=0) return NaN;
   if(promo.discountType==='percentage'){
-    return Math.max(0,value-(value*Number(promo.discountValue||0)/100));
+    if(discount>100) return NaN;
+    return Math.max(0,value-(value*discount/100));
   }
-  return Math.max(0,value-Number(promo.discountValue||0));
+  if(promo.discountType!=='fixed') return NaN;
+  return Math.max(0,value-discount);
+}
+
+function bestPromotionForSelection(selection,basePrice){
+  const productsToPrice=(Array.isArray(selection)?selection:[selection]).filter(Boolean);
+  if(!productsToPrice.length) return null;
+
+  const matches=promotions.filter(p=>
+    productsToPrice.every(product=>promotionMatchesProduct(p,product))
+  );
+  if(!matches.length) return null;
+
+  return matches
+    .map(p=>({promo:p,price:applyPromotionValue(basePrice,p)}))
+    .filter(entry=>Number.isFinite(entry.price)&&entry.price>=0)
+    .sort((a,b)=>a.price-b.price)[0]||null;
 }
 
 function bestPromotionForProduct(product,basePrice){
-  const matches=promotions.filter(p=>promotionMatchesProduct(p,product));
-  if(!matches.length) return null;
-  return matches.map(p=>({promo:p,price:applyPromotionValue(basePrice,p)}))
-    .sort((a,b)=>a.price-b.price)[0];
+  return bestPromotionForSelection([product],basePrice);
 }
 
 function productDisplayPrice(product,basePrice){
@@ -492,12 +534,30 @@ function normalizeCouponCode(value){
 
 function couponValidation(coupon,subtotal){
   if(!coupon||coupon.active===false) return {valid:false,message:'Cupom inválido ou inativo.'};
+  const value=Number(coupon.value);
+  const minimum=Number(coupon.minimumOrder||0);
+  const maxDiscount=Number(coupon.maxDiscount||0);
+  const minOrders=Number(coupon.minOrders||0);
+  const minSpent=Number(coupon.minSpent||0);
+  const type=coupon.type||'percentage';
+  if(
+    !Number.isFinite(value)||value<=0||
+    !Number.isFinite(minimum)||minimum<0||
+    !Number.isFinite(maxDiscount)||maxDiscount<0||
+    !Number.isInteger(minOrders)||minOrders<0||
+    !Number.isFinite(minSpent)||minSpent<0||
+    !['percentage','fixed'].includes(type)||
+    (type==='percentage'&&value>100)
+  ){
+    return {valid:false,message:'Este cupom está com configuração inválida. Entre em contato com a pizzaria.'};
+  }
+
   const timezone=settings?.timezone||'America/Porto_Velho';
   if(!dateTimeWindowActive(coupon.startsAt,'',timezone)) return {valid:false,message:'Este cupom ainda não começou.'};
   if(!dateTimeWindowActive('',coupon.endsAt,timezone)) return {valid:false,message:'Este cupom expirou.'};
-  if(subtotal<Number(coupon.minimumOrder||0)) return {valid:false,message:`Pedido mínimo para este cupom: ${money(coupon.minimumOrder)}.`};
-  if(customerOrderStats.count<Number(coupon.minOrders||0)) return {valid:false,message:`Este cupom exige pelo menos ${coupon.minOrders} pedido(s) concluído(s).`};
-  if(customerOrderStats.spent<Number(coupon.minSpent||0)) return {valid:false,message:`Este cupom exige ${money(coupon.minSpent)} em compras anteriores.`};
+  if(subtotal<minimum) return {valid:false,message:`Pedido mínimo para este cupom: ${money(minimum)}.`};
+  if(customerOrderStats.count<minOrders) return {valid:false,message:`Este cupom exige pelo menos ${minOrders} pedido(s) concluído(s).`};
+  if(customerOrderStats.spent<minSpent) return {valid:false,message:`Este cupom exige ${money(minSpent)} em compras anteriores.`};
   return {valid:true,message:'Cupom aplicado com sucesso.'};
 }
 
@@ -505,9 +565,9 @@ function couponDiscount(subtotal){
   if(!activeCoupon) return 0;
   const validation=couponValidation(activeCoupon,subtotal);
   if(!validation.valid) return 0;
-  let discount=activeCoupon.type==='percentage'
-    ?subtotal*Number(activeCoupon.value||0)/100
-    :Number(activeCoupon.value||0);
+  let discount=(activeCoupon.type||'percentage')==='percentage'
+    ?subtotal*Number(activeCoupon.value)/100
+    :Number(activeCoupon.value);
   const max=Number(activeCoupon.maxDiscount||0);
   if(max>0) discount=Math.min(discount,max);
   return Math.max(0,Math.min(subtotal,discount));
@@ -771,7 +831,13 @@ function renderFlavorOptions(){
     $('#flavorOptions').innerHTML='';
     return;
   }
-  const others=products.filter(p=>p.id!==currentProduct.id&&p.categoryId===currentProduct.categoryId&&categoryIsPizza(p)&&p.active!==false);
+  const others=products.filter(p=>
+    p.id!==currentProduct.id &&
+    p.categoryId===currentProduct.categoryId &&
+    categoryIsPizza(p) &&
+    p.active!==false &&
+    p.allowHalfHalf!==false
+  );
   $('#flavorOptions').innerHTML=`<div class="option-group">
     <h3>Sabores</h3>
     <div class="segmented flavor-mode">
@@ -787,21 +853,83 @@ function renderFlavorOptions(){
     const half=document.querySelector('input[name=flavorMode]:checked')?.value==='half';
     $('#secondFlavorField').classList.toggle('hidden',!half);
     if(!half){currentSecondFlavorId='';$('#secondFlavorSelect').value='';}
+    refreshSizePriceLabels();
     updateModalPrice();
   });
-  $('#secondFlavorSelect').onchange=()=>{currentSecondFlavorId=$('#secondFlavorSelect').value;updateModalPrice();};
+  $('#secondFlavorSelect').onchange=()=>{
+    currentSecondFlavorId=$('#secondFlavorSelect').value;
+    refreshSizePriceLabels();
+    updateModalPrice();
+  };
+}
+
+function selectionPriceForSize(size){
+  if(!currentProduct) return {available:false,raw:0,price:0,best:null};
+
+  let raw=size?Number(size.price||0):Number(currentProduct.price||0);
+  if(!Number.isFinite(raw)||raw<0) return {available:false,raw:0,price:0,best:null};
+
+  const half=document.querySelector('input[name=flavorMode]:checked')?.value==='half';
+  const second=half&&currentSecondFlavorId
+    ?products.find(p=>p.id===currentSecondFlavorId)
+    :null;
+
+  if(half){
+    if(!second||second.allowHalfHalf===false) return {available:false,raw,price:raw,best:null};
+    if(size){
+      const matching=second.sizes?.find(s=>normalizeZoneName(s.name)===normalizeZoneName(size.name));
+      if(!matching||!Number.isFinite(Number(matching.price))||Number(matching.price)<=0){
+        return {available:false,raw,price:raw,best:null};
+      }
+      raw=Math.max(raw,Number(matching.price));
+    }
+  }
+
+  const selection=second?[currentProduct,second]:[currentProduct];
+  const best=bestPromotionForSelection(selection,raw);
+  return {
+    available:true,
+    raw,
+    price:best?best.price:raw,
+    best
+  };
+}
+
+function sizePriceHtml(pricing){
+  if(!pricing.available) return '<span class="muted">Indisponível no 2º sabor</span>';
+  return (pricing.price<pricing.raw
+    ?`<del class="old-price">${money(pricing.raw)}</del> `
+    :'')+money(pricing.price);
+}
+
+function refreshSizePriceLabels(){
+  const sizes=currentProduct?.sizes||[];
+  let firstEnabled=null;
+  let selectedDisabled=false;
+
+  $$('input[name=size]').forEach(input=>{
+    const index=Number(input.value||0);
+    const pricing=selectionPriceForSize(sizes[index]);
+    input.disabled=!pricing.available;
+    if(pricing.available&&!firstEnabled) firstEnabled=input;
+    if(input.checked&&!pricing.available) selectedDisabled=true;
+    const priceHost=document.querySelector(`[data-size-price="${index}"]`);
+    if(priceHost) priceHost.innerHTML=sizePriceHtml(pricing);
+  });
+
+  if(selectedDisabled&&firstEnabled) firstEnabled.checked=true;
 }
 
 function renderOptionGroups(){
   const sizes=currentProduct.sizes||[];
   $('#sizeOptions').innerHTML=sizes.length?`<div class="option-group"><h3>Escolha o tamanho</h3><div class="option-list">${sizes.map((s,i)=>{
-    const raw=Number(s.price||0);
-    const promo=productDisplayPrice(currentProduct,raw);
-    return `<label class="option-choice"><span><input type="radio" name="size" value="${i}" ${i===0?'checked':''}> ${esc(s.name)}</span><strong>${promo<raw?`<del class="old-price">${money(raw)}</del> `:''}${money(promo)}</strong></label>`;
+    const pricing=selectionPriceForSize(s);
+    return `<label class="option-choice"><span><input type="radio" name="size" value="${i}" ${i===0?'checked':''} ${pricing.available?'':'disabled'}> ${esc(s.name)}</span><strong data-size-price="${i}">${sizePriceHtml(pricing)}</strong></label>`;
   }).join('')}</div></div>`:'';
   const extras=currentProduct.extras||[];
   $('#extraOptions').innerHTML=extras.length?`<div class="option-group"><h3>Adicionais</h3><div class="option-list">${extras.map((x,i)=>`<label class="option-choice"><span><input type="checkbox" name="extra" value="${i}"> ${esc(x.name)}</span><strong>+ ${money(x.price)}</strong></label>`).join('')}</div></div>`:'';
   $$('input[name=size],input[name=extra]').forEach(i=>i.onchange=updateModalPrice);
+  refreshSizePriceLabels();
 }
 
 function selectedSize(){
@@ -811,32 +939,37 @@ function selectedSize(){
   return sizes[idx]||sizes[0];
 }
 
-function flavorBasePrice(){
-  let raw=Number(currentProduct?.price||0);
+function currentSelectionPricing(){
+  if(!currentProduct) return {valid:false,raw:0,price:0,best:null,second:null};
   const size=selectedSize();
-  if(size) raw=Number(size.price||0);
+  const pricing=selectionPriceForSize(size);
   const half=document.querySelector('input[name=flavorMode]:checked')?.value==='half';
-  if(half&&currentSecondFlavorId&&size){
-    const second=products.find(p=>p.id===currentSecondFlavorId);
-    const matching=second?.sizes?.find(s=>String(s.name).toLowerCase()===String(size.name).toLowerCase());
-    if(matching) raw=Math.max(raw,Number(matching.price||0));
-  }
-  return productDisplayPrice(currentProduct,raw);
+  const second=half&&currentSecondFlavorId
+    ?products.find(p=>p.id===currentSecondFlavorId)
+    :null;
+  return {
+    valid:pricing.available,
+    raw:pricing.raw,
+    price:pricing.price,
+    best:pricing.best,
+    second
+  };
+}
+
+function flavorBasePrice(){
+  return currentSelectionPricing().price;
 }
 
 function currentPromotionSnapshot(){
-  if(!currentProduct) return null;
-  let raw=Number(currentProduct.price||0);
-  const size=selectedSize();
-  if(size) raw=Number(size.price||0);
-  const best=bestPromotionForProduct(currentProduct,raw);
-  if(!best) return null;
+  const pricing=currentSelectionPricing();
+  const best=pricing.best;
+  if(!pricing.valid||!best) return null;
   return {
     id:best.promo.id,
     name:best.promo.name||'Promoção',
     discountType:best.promo.discountType,
     discountValue:Number(best.promo.discountValue||0),
-    originalBasePrice:raw,
+    originalBasePrice:pricing.raw,
     promotedBasePrice:best.price
   };
 }
@@ -885,8 +1018,19 @@ $('#productForm').addEventListener('submit',e=>{
     return;
   }
   const second=half?products.find(p=>p.id===currentSecondFlavorId):null;
-  const extras=$$('input[name=extra]:checked').map(el=>currentProduct.extras[Number(el.value)]);
   const size=selectedSize();
+  if(half&&second&&size){
+    const matching=second.sizes?.find(s=>normalizeZoneName(s.name)===normalizeZoneName(size.name));
+    if(!matching){
+      showToast('O segundo sabor não está disponível neste tamanho. Escolha outro sabor ou tamanho.','warning');
+      return;
+    }
+  }
+  if(!currentSelectionPricing().valid){
+    showToast('Esta combinação não está disponível. Revise os sabores e o tamanho.','warning');
+    return;
+  }
+  const extras=$$('input[name=extra]:checked').map(el=>currentProduct.extras[Number(el.value)]);
   cart.push({
     lineId:crypto.randomUUID(),
     productId:currentProduct.id,
@@ -907,6 +1051,151 @@ $('#productForm').addEventListener('submit',e=>{
 function saveCart(){
   localStorage.setItem('deliveryCart',JSON.stringify(cart));
   renderCart();
+}
+
+function cartItemFromCurrentCatalog(item){
+  const first=products.find(p=>p.id===item?.productId&&p.active!==false);
+  if(!first) return null;
+
+  const qty=Number(item.qty);
+  const safeQty=Number.isInteger(qty)&&qty>=1&&qty<=99?qty:1;
+  const sizeName=String(item.size?.name||'');
+  let size=null;
+  let raw=Number(first.price||0);
+
+  if(first.sizes?.length){
+    size=first.sizes.find(s=>normalizeZoneName(s.name)===normalizeZoneName(sizeName));
+    if(!size||!Number.isFinite(Number(size.price))||Number(size.price)<=0) return null;
+    raw=Number(size.price);
+  }else if(!Number.isFinite(raw)||raw<=0){
+    return null;
+  }
+
+  const flavorIds=Array.isArray(item.flavorProductIds)&&item.flavorProductIds.length
+    ?item.flavorProductIds
+    :[first.id];
+  let second=null;
+  if(flavorIds.length>1){
+    if(first.isPizza!==true||first.allowHalfHalf===false) return null;
+    second=products.find(p=>
+      p.id===flavorIds[1] &&
+      p.active!==false &&
+      p.categoryId===first.categoryId &&
+      p.isPizza===true &&
+      p.allowHalfHalf!==false
+    );
+    if(!second) return null;
+    if(size){
+      const secondSize=second.sizes?.find(s=>normalizeZoneName(s.name)===normalizeZoneName(size.name));
+      if(!secondSize||!Number.isFinite(Number(secondSize.price))||Number(secondSize.price)<=0) return null;
+      raw=Math.max(raw,Number(secondSize.price));
+    }
+  }
+
+  const best=bestPromotionForSelection(second?[first,second]:[first],raw);
+  const promoted=best?best.price:raw;
+  const requestedExtras=[...new Set((item.extras||[]).map(x=>String(x?.name||'')).filter(Boolean))];
+  const extras=[];
+  let extraTotal=0;
+  for(const name of requestedExtras){
+    const current=first.extras?.find(x=>normalizeZoneName(x.name)===normalizeZoneName(name));
+    if(!current||!Number.isFinite(Number(current.price))||Number(current.price)<0) return null;
+    extras.push({name:current.name,price:Number(current.price)});
+    extraTotal+=Number(current.price);
+  }
+
+  const unitPrice=promoted+extraTotal;
+  if(!Number.isFinite(unitPrice)||unitPrice<0) return null;
+
+  return {
+    ...item,
+    productId:first.id,
+    flavorProductIds:second?[first.id,second.id]:[first.id],
+    name:second?`${first.name} / ${second.name}`:first.name,
+    flavors:second?[first.name,second.name]:[first.name],
+    size:size?{name:size.name,price:Number(size.price)}:null,
+    extras,
+    unitPrice,
+    promotion:best?{
+      id:best.promo.id,
+      name:best.promo.name||'Promoção',
+      discountType:best.promo.discountType,
+      discountValue:Number(best.promo.discountValue||0),
+      originalBasePrice:raw,
+      promotedBasePrice:best.price
+    }:null,
+    qty:safeQty,
+    note:String(item.note||'').slice(0,300),
+    lineId:item.lineId||crypto.randomUUID()
+  };
+}
+
+function reconcileCartWithCatalog(){
+  const previous=cart;
+  const next=[];
+  let removed=0;
+  let changed=false;
+
+  for(const item of previous){
+    const refreshed=cartItemFromCurrentCatalog(item);
+    if(!refreshed){
+      removed++;
+      changed=true;
+      continue;
+    }
+
+    const before=JSON.stringify({
+      productId:item.productId,
+      flavorProductIds:item.flavorProductIds,
+      name:item.name,
+      size:item.size,
+      extras:item.extras,
+      unitPrice:item.unitPrice,
+      promotion:item.promotion,
+      qty:item.qty
+    });
+    const after=JSON.stringify({
+      productId:refreshed.productId,
+      flavorProductIds:refreshed.flavorProductIds,
+      name:refreshed.name,
+      size:refreshed.size,
+      extras:refreshed.extras,
+      unitPrice:refreshed.unitPrice,
+      promotion:refreshed.promotion,
+      qty:refreshed.qty
+    });
+    if(before!==after) changed=true;
+    next.push(refreshed);
+  }
+
+  if(changed){
+    cart=next;
+    localStorage.setItem('deliveryCart',JSON.stringify(cart));
+  }
+  return {changed,removed};
+}
+
+async function refreshCommerceStateBeforeCheckout(){
+  const [catSnap,prodSnap,promoSnap,setSnap]=await Promise.all([
+    getDocs(collection(db,'categories')),
+    getDocs(collection(db,'products')),
+    getDocs(collection(db,'promotions')),
+    getDoc(doc(db,'settings','store'))
+  ]);
+
+  categories=catSnap.docs.map(d=>({id:d.id,...d.data()}))
+    .filter(x=>x.active!==false)
+    .sort((a,b)=>(a.order||0)-(b.order||0));
+  const activeCategoryIds=new Set(categories.map(x=>x.id));
+  products=prodSnap.docs.map(d=>({id:d.id,...d.data()}))
+    .filter(x=>x.active!==false&&activeCategoryIds.has(x.categoryId))
+    .sort((a,b)=>(a.order||0)-(b.order||0));
+  promotions=promoSnap.docs.map(d=>({id:d.id,...d.data()}));
+  settings=setSnap.exists()?{...defaultSettings,...setSnap.data()}:defaultSettings;
+
+  const result=reconcileCartWithCatalog();
+  renderStore();
+  return result;
 }
 
 function fulfillment(){
@@ -938,14 +1227,20 @@ function deliveryQuote(address=activeAddress()){
     return {supported:true,fee:fallback,mode};
   }
 
+  if(!address) return {supported:false,fee:0,mode,pending:true,reason:'address_required'};
+
   if(mode==='neighborhood'){
+    if(!address._pricingCepVerified){
+      return {supported:false,fee:0,mode,pending:true,reason:'cep_verification_required'};
+    }
+
     const zones=Array.isArray(settings?.deliveryZones)?settings.deliveryZones:[];
-    const neighborhood=normalizeZoneName(address?.neighborhood);
+    const neighborhood=normalizeZoneName(address._verifiedNeighborhood||'');
     const zone=zones.find(z=>normalizeZoneName(z.neighborhood)===neighborhood);
 
     if(zone) return {supported:true,fee:Number(zone.fee||0),mode,zone};
 
-    if(address&&settings?.restrictDeliveryZones===true&&zones.length){
+    if(settings?.restrictDeliveryZones===true&&zones.length){
       return {supported:false,fee:0,mode,reason:'neighborhood_not_served'};
     }
 
@@ -953,8 +1248,10 @@ function deliveryQuote(address=activeAddress()){
   }
 
   if(mode==='km'){
-    if(!address) return {supported:false,fee:0,mode,pending:true,reason:'address_required'};
-    const distance=distanceKmBetween(settings?.storeLocation,address?.location);
+    if(!address._pricingCepVerified){
+      return {supported:false,fee:0,mode,pending:true,reason:'cep_verification_required'};
+    }
+    const distance=distanceKmBetween(settings?.storeLocation,address?._verifiedLocation);
     if(distance==null){
       return {supported:false,fee:0,mode,pending:true,reason:'location_required'};
     }
@@ -969,12 +1266,20 @@ function deliveryQuote(address=activeAddress()){
         fee:Number(band.fee||0),
         mode,
         distanceKm:distance,
-        maxKm:Number(band.maxKm||0)
+        maxKm:Number(band.maxKm||0),
+        distanceMethod:'straight_line_cep'
       };
     }
 
     if(settings?.restrictDeliveryKm===true&&bands.length){
-      return {supported:false,fee:0,mode,distanceKm:distance,reason:'distance_not_served'};
+      return {
+        supported:false,
+        fee:0,
+        mode,
+        distanceKm:distance,
+        reason:'distance_not_served',
+        distanceMethod:'straight_line_cep'
+      };
     }
 
     const last=bands.at(-1);
@@ -983,38 +1288,44 @@ function deliveryQuote(address=activeAddress()){
       fee:last?Number(last.fee||0):fallback,
       mode,
       distanceKm:distance,
-      maxKm:last?Number(last.maxKm||0):null
+      maxKm:last?Number(last.maxKm||0):null,
+      distanceMethod:'straight_line_cep'
     };
   }
 
   return {supported:true,fee:fallback,mode:'fixed'};
 }
 
-async function ensureDeliveryAddressCoordinates(address){
-  if(!address||(settings?.deliveryPricingMode||'fixed')!=='km') return address;
-  if(address.location?.latitude!=null&&address.location?.longitude!=null) return address;
-  if(!address.zip) return address;
+async function ensureDeliveryAddressPricing(address){
+  const mode=settings?.deliveryPricingMode||'fixed';
+  if(!address||mode==='fixed') return address;
+
+  const digits=String(address.zip||'').replace(/\D/g,'');
+  if(digits.length!==8) return {...address,_pricingCepVerified:false};
 
   try{
-    const data=await lookupBrazilianZip(address.zip);
-    if(!data?.location) return address;
-    const updated={...address,location:data.location};
-    if(customer&&address.id){
-      await saveAddress(customer.uid,updated,address.id);
-      addresses=addresses.map(a=>a.id===address.id?updated:a);
-    }
+    const data=await lookupBrazilianZip(digits);
+    if(!data) return {...address,_pricingCepVerified:false};
+
+    const updated={
+      ...address,
+      _pricingCepVerified:true,
+      _verifiedNeighborhood:data.neighborhood||'',
+      _verifiedLocation:data.location||null
+    };
+    addresses=addresses.map(a=>a.id===address.id?updated:a);
     return updated;
   }catch(err){
-    console.warn('Não foi possível localizar o CEP do endereço para cálculo por km.',err);
-    return address;
+    console.warn('Não foi possível validar o CEP para o cálculo de entrega.',err);
+    return {...address,_pricingCepVerified:false};
   }
 }
 
 function deliveryQuoteText(quote){
-  if(quote.pending) return 'Taxa de entrega: calculada após localizar o CEP';
+  if(quote.pending) return 'Taxa de entrega: calculada após validar o CEP';
   if(!quote.supported) return 'Este endereço está fora da área de entrega';
   if(quote.mode==='km'&&Number.isFinite(quote.distanceKm)){
-    return `Distância aproximada: ${quote.distanceKm.toFixed(1).replace('.',',')} km • Taxa: ${money(quote.fee)}`;
+    return `Distância aproximada em linha reta pelo CEP: ${quote.distanceKm.toFixed(1).replace('.',',')} km • Taxa: ${money(quote.fee)}`;
   }
   if(quote.mode==='neighborhood'&&quote.zone){
     return `Taxa para ${quote.zone.neighborhood}: ${money(quote.fee)}`;
@@ -1261,39 +1572,6 @@ function openAddressEditor(address=null){
   $('#addressEditorDialog').showModal();
 }
 
-async function fillAddressFromCep(inputId,prefix){
-  const input=$(inputId);
-  if(!input) return;
-  const cep=String(input.value||'').replace(/\D/g,'');
-  if(cep.length!==8) return;
-
-  try{
-    const response=await fetch('https://viacep.com.br/ws/'+cep+'/json/');
-    if(!response.ok) return;
-    const data=await response.json();
-    if(data.erro) return;
-
-    const map={
-      street:data.logradouro||'',
-      neighborhood:data.bairro||'',
-      city:data.localidade||'',
-      state:data.uf||''
-    };
-
-    if(prefix==='public'){
-      if(map.street) $('#addressStreet').value=map.street;
-      if(map.neighborhood) $('#addressNeighborhood').value=map.neighborhood;
-      if(map.city) $('#addressCity').value=map.city;
-      if(map.state) $('#addressState').value=map.state;
-      $('#addressNumber').focus();
-    }
-  }catch(err){
-    console.warn('CEP não encontrado.',err);
-  }
-}
-
-$('#addressZip').addEventListener('blur',()=>fillAddressFromCep('#addressZip','public'));
-
 $('#addressZip')?.addEventListener('blur',async()=>{
   const input=$('#addressZip');
   const digits=input.value.replace(/\D/g,'');
@@ -1404,6 +1682,31 @@ async function openCheckout(){
   }
   if(!cart.length) return;
 
+  const passwordLogin=customer.providerData?.some(provider=>provider.providerId==='password');
+  if(passwordLogin&&!customer.emailVerified){
+    showToast('Confirme seu e-mail antes de fazer o pedido. Você pode reenviar a verificação em Minha Conta.','warning',{duration:8000});
+    location.href='./account/#profile';
+    return;
+  }
+
+  try{
+    const reconciliation=await refreshCommerceStateBeforeCheckout();
+    if(reconciliation.changed){
+      showToast(
+        reconciliation.removed
+          ?'O cardápio mudou e alguns itens foram removidos do carrinho. Revise antes de continuar.'
+          :'Os preços ou opções do carrinho mudaram. Revise os valores e toque em Continuar novamente.',
+        'warning',
+        {duration:8000}
+      );
+      return;
+    }
+  }catch(err){
+    console.error('Falha ao atualizar o cardápio antes do checkout.',err);
+    showToast('Não foi possível conferir os preços atuais. Verifique sua conexão e tente novamente.','error');
+    return;
+  }
+
   if(!customerProfile?.identityComplete||!validFullName(customerProfile?.name||customer.displayName||'')){
     localStorage.setItem('deliveryReturnToCheckout','1');
     showToast('Antes de fazer o primeiro pedido, complete seu nome, telefone e CPF em Minha Conta.','warning',{duration:7000});
@@ -1415,7 +1718,7 @@ async function openCheckout(){
     if(fulfillment()==='delivery'){
       const address=activeAddress();
       if(address){
-        await ensureDeliveryAddressCoordinates(address);
+        await ensureDeliveryAddressPricing(address);
       }
     }
     renderCheckoutAddress();
@@ -1503,6 +1806,8 @@ function secureOrderErrorMessage(code,data={}){
   const map={
     store_closed:'A pizzaria está fechada para novos pedidos.',
     invalid_items:'Revise os itens do carrinho.',
+    invalid_quantity:'Uma quantidade do carrinho é inválida.',
+    invalid_request_id:'Não foi possível identificar esta tentativa de pedido. Atualize a página e tente novamente.',
     product_unavailable:'Um dos produtos não está mais disponível.',
     invalid_size:'Um dos tamanhos escolhidos não está mais disponível.',
     half_half_not_allowed:'A combinação meio a meio escolhida não está mais disponível.',
@@ -1517,11 +1822,22 @@ function secureOrderErrorMessage(code,data={}){
     address_required:'Selecione um endereço de entrega.',
     address_not_found:'O endereço selecionado não foi encontrado.',
     delivery_not_supported:'Esse endereço está fora da área de entrega.',
+    address_zip_required:'Informe um CEP válido no endereço de entrega.',
+    invalid_address:'Complete rua, número, cidade e UF do endereço.',
+    invalid_pricing_confirmation:'Não foi possível confirmar os valores do carrinho. Atualize e tente novamente.',
+    pricing_changed:'O cardápio ou a taxa de entrega mudou. Revise o carrinho antes de enviar novamente.',
+    idempotency_conflict:'Uma tentativa anterior já gerou um pedido. Confira Meus Pedidos antes de enviar outro.',
+    cep_validation_unavailable:'Não foi possível validar o CEP agora. Tente novamente em instantes.',
+    neighborhood_unavailable:'Não foi possível identificar o bairro pelo CEP informado.',
+    location_unavailable:'Não foi possível obter a localização aproximada desse CEP.',
+    invalid_delivery_config:'A configuração de entrega precisa ser revisada pela pizzaria.',
     invalid_payment:'Escolha uma forma de pagamento válida.',
     invalid_change:'O valor informado para troco é menor que o total.',
     phone_required:'Informe um telefone de contato.',
     invalid_phone:'Informe um telefone válido com DDD.',
     profile_incomplete:'Complete seu cadastro com nome, telefone e CPF antes de pedir.',
+    email_not_verified:'Confirme seu e-mail antes de fazer o pedido.',
+    rate_limited:'Muitos pedidos foram enviados em pouco tempo. Aguarde alguns segundos e tente novamente.',
     full_name_required:'Informe seu nome completo, com nome e sobrenome.'
   };
   return map[code]||data?.message||'Não foi possível validar o pedido no servidor.';
@@ -1529,7 +1845,9 @@ function secureOrderErrorMessage(code,data={}){
 
 async function createOrderSecurely({type,address,profilePhone,changeFor}){
   const token=await customer.getIdToken();
+  const totals=cartTotals();
   const payload={
+    requestId:getPendingOrderRequestId(),
     fulfillment:type,
     addressId:type==='delivery'?address?.id||'':null,
     phone:profilePhone,
@@ -1539,6 +1857,12 @@ async function createOrderSecurely({type,address,profilePhone,changeFor}){
       method:selectedPayment,
       needsChange:selectedPayment.toLowerCase().includes('dinheiro')&&$('#needsChange').checked,
       changeFor
+    },
+    pricing:{
+      subtotal:totals.subtotal,
+      discount:totals.discount,
+      deliveryFee:totals.fee,
+      total:totals.total
     },
     items:cart.map(item=>({
       productId:item.productId,
@@ -1575,10 +1899,13 @@ async function createOrderSecurely({type,address,profilePhone,changeFor}){
 
   const data=await response.json().catch(()=>({}));
   if(!response.ok){
+    clearPendingOrderRequestId();
     const err=new Error(secureOrderErrorMessage(data.error,data));
     err.code=data.error||'secure-order-failed';
+    err.serverData=data;
     throw err;
   }
+  clearPendingOrderRequestId();
   return data;
 }
 
@@ -1594,10 +1921,10 @@ $('#checkoutForm').addEventListener('submit',async e=>{
   if(type==='delivery'&&!address) return showCheckoutError('Selecione um endereço de entrega.');
   let quote=deliveryQuote(address);
   if(type==='delivery'&&quote.pending&&address){
-    address=await ensureDeliveryAddressCoordinates(address);
+    address=await ensureDeliveryAddressPricing(address);
     quote=deliveryQuote(address);
   }
-  if(type==='delivery'&&quote.pending) return showCheckoutError('Não foi possível calcular a distância pelo CEP deste endereço. Confira o CEP ou escolha outro endereço.');
+  if(type==='delivery'&&quote.pending) return showCheckoutError('Não foi possível validar o CEP deste endereço para calcular a entrega. Confira o CEP ou escolha outro endereço.');
   if(type==='delivery'&&!quote.supported) return showCheckoutError('Este endereço está fora da área de entrega da pizzaria.');
   if(!selectedPayment) return showCheckoutError('Escolha a forma de pagamento.');
 
@@ -1641,6 +1968,14 @@ $('#checkoutForm').addEventListener('submit',async e=>{
       serverResult=await createOrderSecurely({type,address,profilePhone,changeFor});
     }catch(serverError){
       console.error('Pedido rejeitado ou serviço seguro indisponível:',serverError);
+      if(serverError?.code==='pricing_changed'){
+        try{
+          await refreshCommerceStateBeforeCheckout();
+          renderCart();
+        }catch(refreshError){
+          console.error('Falha ao atualizar preços após divergência:',refreshError);
+        }
+      }
       return showCheckoutError(serverError.message||'Não foi possível validar o pedido.');
     }
 

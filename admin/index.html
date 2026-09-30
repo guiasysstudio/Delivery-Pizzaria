@@ -221,7 +221,7 @@
             <label class="field"><span>Link do Google Maps (opcional)</span><input id="setGoogleMapsUrl" type="url" placeholder="https://maps.google.com/..." /></label>
             <div id="storeLocationStatus" class="muted small-copy">O CEP será usado para localizar a loja e calcular frete por km.</div>
           </div>
-          <div class="panel settings-card"><h2>Operação</h2><label class="field"><span>Modo de funcionamento</span><select id="setOpenMode"><option value="schedule">Seguir horários</option><option value="open">Forçar aberto</option><option value="closed">Forçar fechado</option></select></label><div class="form-grid"><label class="field"><span>Pedido mínimo (R$)</span><input id="setMinimumOrder" type="number" min="0" step="0.01" inputmode="decimal" /></label><label class="field"><span>Cliente pode cancelar por</span><div class="input-suffix"><input id="setCustomerCancelMinutes" type="number" min="0" max="30" step="1" /><span>min</span></div></label></div><label class="check-row"><input id="setAllowPickup" type="checkbox" /><span>Permitir retirada no local</span></label><label class="check-row"><input id="setAutoAccept" type="checkbox" /><span>Confirmar pedidos automaticamente</span></label><p class="muted">Desmarcado: o pedido entra como “Aguardando confirmação” e precisa ser aceito. Marcado: ele já entra confirmado.</p></div>
+          <div class="panel settings-card"><h2>Operação</h2><label class="field"><span>Modo de funcionamento</span><select id="setOpenMode"><option value="schedule">Seguir horários</option><option value="open">Forçar aberto</option><option value="closed">Forçar fechado</option></select></label><div class="form-grid"><label class="field"><span>Pedido mínimo (R$)</span><input id="setMinimumOrder" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" /></label><label class="field"><span>Cliente pode cancelar por</span><div class="input-suffix"><input id="setCustomerCancelMinutes" type="number" min="0" max="30" step="1" /><span>min</span></div></label></div><label class="check-row"><input id="setAllowPickup" type="checkbox" /><span>Permitir retirada no local</span></label><label class="check-row"><input id="setAutoAccept" type="checkbox" /><span>Confirmar pedidos automaticamente</span></label><p class="muted">Desmarcado: o pedido entra como “Aguardando confirmação” e precisa ser aceito. Marcado: ele já entra confirmado.</p></div>
           <div class="panel settings-card">
             <h2>Sons de notificação</h2>
             <label class="field"><span>Novo pedido</span><select id="setNotificationSound"><option value="bell">Campainha</option><option value="chime">Sino</option><option value="pop">Pop</option><option value="alert">Alerta</option><option value="classic">Clássico</option><option value="none">Sem som</option></select></label>
@@ -234,25 +234,25 @@
             <div class="delivery-mode-grid">
               <label class="delivery-mode-card"><input type="radio" name="deliveryPricingMode" value="fixed"><span><strong>Valor fixo</strong><small>Uma taxa única para qualquer entrega.</small></span></label>
               <label class="delivery-mode-card"><input type="radio" name="deliveryPricingMode" value="neighborhood"><span><strong>Por bairro</strong><small>Cada bairro tem sua própria taxa.</small></span></label>
-              <label class="delivery-mode-card"><input type="radio" name="deliveryPricingMode" value="km"><span><strong>Por km</strong><small>Faixas de distância com valores diferentes.</small></span></label>
+              <label class="delivery-mode-card"><input type="radio" name="deliveryPricingMode" value="km"><span><strong>Por km aproximado</strong><small>Faixas pela distância em linha reta entre os CEPs da pizzaria e do cliente.</small></span></label>
             </div>
 
             <div id="deliveryFixedSettings" class="delivery-mode-settings hidden">
-              <label class="field field-small"><span>Valor fixo da entrega (R$)</span><input id="setDeliveryFee" type="number" min="0" step="0.01" /></label>
+              <label class="field field-small"><span>Valor fixo da entrega (R$)</span><input id="setDeliveryFee" type="number" min="0" max="10000" step="0.01" /></label>
             </div>
 
             <div id="deliveryNeighborhoodSettings" class="delivery-mode-settings hidden">
               <div class="editor-section-head"><div><h3>Taxas por bairro</h3><p class="muted">Adicione cada bairro e o valor cobrado.</p></div><button id="addDeliveryZoneBtn" class="btn btn-secondary" type="button">+ Adicionar bairro</button></div>
               <div id="deliveryZonesEditor" class="repeat-editor"></div>
               <div id="deliveryZonesEmpty" class="repeat-empty">Nenhum bairro cadastrado.</div>
-              <label class="field field-small"><span>Taxa para outros bairros (R$)</span><input id="setNeighborhoodFallbackFee" type="number" min="0" step="0.01" /></label>
+              <label class="field field-small"><span>Taxa para outros bairros (R$)</span><input id="setNeighborhoodFallbackFee" type="number" min="0" max="10000" step="0.01" /></label>
               <p class="muted small-copy">Esse valor só é usado se a restrição abaixo estiver desligada.</p>
               <label class="check-row"><input id="setRestrictDeliveryZones" type="checkbox" /><span>Não aceitar entrega em bairros não cadastrados</span></label>
             </div>
 
             <div id="deliveryKmSettings" class="delivery-mode-settings hidden">
               <div class="alert"><strong>Como funciona:</strong> o sistema usa as coordenadas aproximadas do CEP da loja e do CEP do cliente para calcular a distância em linha reta. Para distância exata por ruas/rotas, depois podemos conectar um provedor de mapas.</div>
-              <div class="editor-section-head"><div><h3>Faixas por km</h3><p class="muted">Ex.: até 3 km = R$ 5,00; até 6 km = R$ 8,00.</p></div><button id="addDeliveryKmBandBtn" class="btn btn-secondary" type="button">+ Adicionar faixa</button></div>
+              <div class="editor-section-head"><div><h3>Faixas por km aproximado</h3><p class="muted">O cálculo usa a distância em linha reta obtida pelos CEPs, não a rota percorrida pelo motoboy. Ex.: até 3 km = R$ 5,00; até 6 km = R$ 8,00.</p></div><button id="addDeliveryKmBandBtn" class="btn btn-secondary" type="button">+ Adicionar faixa</button></div>
               <div id="deliveryKmBandsEditor" class="repeat-editor"></div>
               <div id="deliveryKmBandsEmpty" class="repeat-empty">Nenhuma faixa de km cadastrada.</div>
               <label class="check-row"><input id="setRestrictDeliveryKm" type="checkbox" /><span>Não aceitar entrega acima da última faixa cadastrada</span></label>
@@ -294,7 +294,7 @@
       <label class="field"><span>Descrição</span><textarea id="productDescription" rows="3" placeholder="Ingredientes, volume, detalhes do produto..."></textarea></label>
 
       <div class="form-grid">
-        <label class="field"><span>Preço base (R$)</span><input id="productPrice" type="number" min="0" step="0.01" /></label>
+        <label class="field"><span>Preço base (R$)</span><input id="productPrice" type="number" min="0" max="100000" step="0.01" /></label>
         <label class="field"><span>Ordem de exibição</span><input id="productOrder" type="number" step="1" /></label>
       </div>
       <p class="field-help">A ordem define a posição do produto no cardápio. Números menores aparecem primeiro.</p>
@@ -405,7 +405,7 @@
       <label class="field"><span>Descrição</span><textarea id="promotionDescription" rows="2" maxlength="240"></textarea></label>
       <div class="form-grid">
         <label class="field"><span>Tipo de desconto</span><select id="promotionDiscountType"><option value="percentage">Porcentagem (%)</option><option value="fixed">Valor fixo (R$)</option></select></label>
-        <label class="field"><span>Desconto</span><input id="promotionDiscountValue" type="number" min="0" step="0.01" required></label>
+        <label class="field"><span>Desconto</span><input id="promotionDiscountValue" type="number" min="0.01" max="1000000" step="0.01" required></label>
       </div>
       <div class="form-grid">
         <label class="field"><span>Aplicar em</span><select id="promotionTargetType"><option value="all">Todo o cardápio</option><option value="category">Categoria</option><option value="product">Produto</option></select></label>
@@ -432,7 +432,7 @@
       </div>
       <div class="form-grid">
         <label class="field"><span>Tipo do desconto</span><select id="couponType"><option value="percentage">Porcentagem (%)</option><option value="fixed">Valor fixo (R$)</option></select></label>
-        <label class="field"><span>Valor do desconto</span><input id="couponValue" type="number" min="0" step="0.01" required></label>
+        <label class="field"><span>Valor do desconto</span><input id="couponValue" type="number" min="0.01" max="1000000" step="0.01" required></label>
       </div>
       <div class="form-grid">
         <label class="field"><span>Pedido mínimo (R$)</span><input id="couponMinimumOrder" type="number" min="0" step="0.01" value="0"></label>

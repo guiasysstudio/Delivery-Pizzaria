@@ -313,37 +313,50 @@ export async function lookupBrazilianZip(zip){
   const digits=String(zip||'').replace(/\D/g,'');
   if(digits.length!==8) return null;
 
+  let primary=null;
+
   try{
     const response=await fetch(`https://brasilapi.com.br/api/cep/v2/${digits}`,{cache:'no-store'});
     if(response.ok){
       const data=await response.json();
       const lat=Number(data?.location?.coordinates?.latitude);
       const lng=Number(data?.location?.coordinates?.longitude);
-      return {
+      primary={
         zip:digits.replace(/^(\d{5})(\d{3})$/,'$1-$2'),
         street:data.street||'',
         neighborhood:data.neighborhood||'',
         city:data.city||'',
         state:data.state||'',
-        location:Number.isFinite(lat)&&Number.isFinite(lng)?{latitude:lat,longitude:lng,source:'brasilapi-cep-v2'}:null
+        location:Number.isFinite(lat)&&Number.isFinite(lng)
+          ?{latitude:lat,longitude:lng,source:'brasilapi-cep-v2'}
+          :null
       };
+
+      if(primary.street&&primary.neighborhood&&primary.city&&primary.state){
+        return primary;
+      }
     }
   }catch(err){
     console.warn('BrasilAPI CEP v2 indisponível; tentando fallback.',err);
   }
 
-  const response=await fetch(`https://viacep.com.br/ws/${digits}/json/`,{cache:'no-store'});
-  if(!response.ok) throw new Error('cep-unavailable');
-  const data=await response.json();
-  if(data?.erro) return null;
-  return {
-    zip:digits.replace(/^(\d{5})(\d{3})$/,'$1-$2'),
-    street:data.logradouro||'',
-    neighborhood:data.bairro||'',
-    city:data.localidade||'',
-    state:data.uf||'',
-    location:null
-  };
+  try{
+    const response=await fetch(`https://viacep.com.br/ws/${digits}/json/`,{cache:'no-store'});
+    if(!response.ok) return primary;
+    const data=await response.json();
+    if(data?.erro) return primary;
+    return {
+      zip:digits.replace(/^(\d{5})(\d{3})$/,'$1-$2'),
+      street:primary?.street||data.logradouro||'',
+      neighborhood:primary?.neighborhood||data.bairro||'',
+      city:primary?.city||data.localidade||'',
+      state:primary?.state||data.uf||'',
+      location:primary?.location||null
+    };
+  }catch(err){
+    console.warn('ViaCEP indisponível.',err);
+    return primary;
+  }
 }
 
 export function friendlyAuthError(err){

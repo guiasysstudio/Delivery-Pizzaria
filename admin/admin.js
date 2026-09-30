@@ -45,7 +45,7 @@ function dateTimeWindowActive(startsAt,endsAt,timezone='America/Porto_Velho'){
     const localMatch=raw.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::\d{2})?$/);
     if(localMatch) return isStart?nowKey>=localMatch[1]:nowKey<=localMatch[1];
     const epoch=Date.parse(raw);
-    if(!Number.isFinite(epoch)) return true;
+    if(!Number.isFinite(epoch)) return false;
     return isStart?nowMs>=epoch:nowMs<=epoch;
   };
   return boundary(startsAt,true)&&boundary(endsAt,false);
@@ -818,6 +818,17 @@ $('#previewNotificationSoundBtn')?.addEventListener('click',()=>{
 
 function normalizePriceKey(value){
   return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+}
+
+function finiteAdminNumber(value,{min=-Infinity,max=Infinity,integer=false}={}){
+  const parsed=Number(value);
+  if(!Number.isFinite(parsed)||parsed<min||parsed>max) return null;
+  if(integer&&!Number.isInteger(parsed)) return null;
+  return parsed;
+}
+
+function validMoneyValue(value,max=1_000_000){
+  return finiteAdminNumber(value,{min:0,max});
 }
 
 function distanceKmBetween(a,b){
@@ -1823,11 +1834,21 @@ $('#promotionEditorForm')?.addEventListener('submit',async e=>{
     active:$('#promotionActive').checked,
     updatedAt:serverTimestamp()
   };
-  if(!data.name||data.discountValue<=0){
-    $('#promotionEditorError').textContent='Informe nome e desconto válido.';
+  const discount=finiteAdminNumber(data.discountValue,{min:0.01,max:1_000_000});
+  const targetRequired=data.targetType!=='all'&&!data.targetId;
+  const percentageInvalid=data.discountType==='percentage'&&(discount==null||discount>100);
+  const fixedInvalid=data.discountType==='fixed'&&discount==null;
+  const invalidWindow=!!(data.startsAt&&data.endsAt&&data.startsAt>data.endsAt);
+  if(!data.name||targetRequired||percentageInvalid||fixedInvalid||invalidWindow){
+    $('#promotionEditorError').textContent=targetRequired
+      ?'Escolha a categoria ou produto da promoção.'
+      :invalidWindow
+        ?'A data final da promoção não pode ser anterior à data inicial.'
+        :'Informe um desconto válido. Porcentagens devem ficar entre 0,01% e 100%.';
     $('#promotionEditorError').classList.remove('hidden');
     return;
   }
+  data.discountValue=discount;
   try{
     if(id) await updateDoc(doc(db,'promotions',id),data);
     else await addDoc(collection(db,'promotions'),{...data,createdAt:serverTimestamp()});
@@ -1920,11 +1941,29 @@ $('#couponEditorForm')?.addEventListener('submit',async e=>{
     active:$('#couponActive').checked,
     updatedAt:serverTimestamp()
   };
-  if(!code||data.value<=0){
-    $('#couponEditorError').textContent='Informe um código e um desconto válido.';
+  const couponValue=finiteAdminNumber(data.value,{min:0.01,max:1_000_000});
+  const minimumOrder=validMoneyValue(data.minimumOrder);
+  const maxDiscount=validMoneyValue(data.maxDiscount);
+  const minOrders=finiteAdminNumber(data.minOrders,{min:0,max:100_000,integer:true});
+  const minSpent=validMoneyValue(data.minSpent,10_000_000);
+  const percentageInvalid=data.type==='percentage'&&(couponValue==null||couponValue>100);
+  const fixedInvalid=data.type==='fixed'&&couponValue==null;
+  const invalidWindow=!!(data.startsAt&&data.endsAt&&data.startsAt>data.endsAt);
+  if(
+    !code || percentageInvalid || fixedInvalid || invalidWindow ||
+    minimumOrder==null || maxDiscount==null || minOrders==null || minSpent==null
+  ){
+    $('#couponEditorError').textContent=invalidWindow
+      ?'A data final do cupom não pode ser anterior à data inicial.'
+      :'Revise os valores do cupom. Porcentagens devem ficar entre 0,01% e 100% e os demais valores não podem ser negativos.';
     $('#couponEditorError').classList.remove('hidden');
     return;
   }
+  data.value=couponValue;
+  data.minimumOrder=minimumOrder;
+  data.maxDiscount=maxDiscount;
+  data.minOrders=minOrders;
+  data.minSpent=minSpent;
   try{
     const ref=doc(db,'coupons',existingId||code);
     if(existingId) await updateDoc(ref,data);
@@ -2328,7 +2367,7 @@ function addPriceRow(containerId,emptyId,row={name:'',price:''}){
   el.className='repeat-row';
   el.innerHTML=`
     <label class="field repeat-field"><span>Nome</span><input class="repeat-name" maxlength="80" placeholder="Ex.: Grande" value="${esc(row.name||'')}"></label>
-    <label class="field repeat-price"><span>Preço (R$)</span><input class="repeat-value" type="number" min="0" step="0.01" placeholder="0,00" value="${Number.isFinite(Number(row.price))?Number(row.price):''}"></label>
+    <label class="field repeat-price"><span>Preço (R$)</span><input class="repeat-value" type="number" min="0" max="100000" step="0.01" placeholder="0,00" value="${Number.isFinite(Number(row.price))?Number(row.price):''}"></label>
     <button class="repeat-remove" type="button" title="Remover" aria-label="Remover">${iconHtml('trash')}</button>`;
   el.querySelector('.repeat-remove').onclick=()=>{el.remove();updatePriceRowsEmpty(containerId,emptyId);};
   container.appendChild(el);
@@ -2535,8 +2574,31 @@ $('#productEditorForm').onsubmit=async e=>{
     $('#productEditorError').classList.remove('hidden');
     return;
   }
+  const basePrice=validMoneyValue(data.price,100_000);
+  const orderValue=finiteAdminNumber(data.order,{min:-100_000,max:100_000,integer:true});
+  const sizeRows=[...$('#productSizesEditor').querySelectorAll('.repeat-row')];
+  const extraRows=[...$('#productExtrasEditor').querySelectorAll('.repeat-row')];
+  const invalidSize=sizeRows.some(row=>{
+    const name=row.querySelector('.repeat-name').value.trim();
+    const price=finiteAdminNumber(row.querySelector('.repeat-value').value,{min:0.01,max:100_000});
+    return !name||price==null;
+  });
+  const invalidExtra=extraRows.some(row=>{
+    const name=row.querySelector('.repeat-name').value.trim();
+    const price=finiteAdminNumber(row.querySelector('.repeat-value').value,{min:0,max:100_000});
+    return !name||price==null;
+  });
+
+  if(basePrice==null||orderValue==null||invalidSize||invalidExtra){
+    $('#productEditorError').textContent='Revise preços, tamanhos, adicionais e ordem. Tamanhos precisam ter preço maior que zero; adicionais não podem ter valor negativo.';
+    $('#productEditorError').classList.remove('hidden');
+    return;
+  }
+  data.price=basePrice;
+  data.order=orderValue;
+
   if(!data.sizes.length&&data.price<=0){
-    $('#productEditorError').textContent='Informe um preço base ou cadastre pelo menos um tamanho com preço.';
+    $('#productEditorError').textContent='Informe um preço base maior que zero ou cadastre pelo menos um tamanho válido.';
     $('#productEditorError').classList.remove('hidden');
     return;
   }
@@ -2639,7 +2701,7 @@ function addDeliveryZoneRow(row={neighborhood:'',fee:''}){
   el.className='repeat-row';
   el.innerHTML=`
     <label class="field repeat-field"><span>Bairro</span><input class="zone-name" maxlength="80" placeholder="Ex.: Centro" value="${esc(row.neighborhood||'')}"></label>
-    <label class="field repeat-price"><span>Taxa (R$)</span><input class="zone-fee" type="number" min="0" step="0.01" value="${Number.isFinite(Number(row.fee))?Number(row.fee):''}"></label>
+    <label class="field repeat-price"><span>Taxa (R$)</span><input class="zone-fee" type="number" min="0" max="10000" step="0.01" value="${Number.isFinite(Number(row.fee))?Number(row.fee):''}"></label>
     <button class="repeat-remove" type="button" title="Remover" aria-label="Remover">${iconHtml('trash')}</button>`;
   el.querySelector('.repeat-remove').onclick=()=>{el.remove();updateDeliveryZoneEmpty();};
   host.appendChild(el);
@@ -2672,8 +2734,8 @@ function addDeliveryKmBandRow(row={maxKm:'',fee:''}){
   const el=document.createElement('div');
   el.className='repeat-row delivery-km-row';
   el.innerHTML=`
-    <label class="field repeat-field"><span>Até quantos km</span><input class="km-max" type="number" min="0.1" step="0.1" placeholder="Ex.: 3" value="${Number.isFinite(Number(row.maxKm))?Number(row.maxKm):''}"></label>
-    <label class="field repeat-price"><span>Valor (R$)</span><input class="km-fee" type="number" min="0" step="0.01" placeholder="0,00" value="${Number.isFinite(Number(row.fee))?Number(row.fee):''}"></label>
+    <label class="field repeat-field"><span>Até quantos km</span><input class="km-max" type="number" min="0.1" max="500" step="0.1" placeholder="Ex.: 3" value="${Number.isFinite(Number(row.maxKm))?Number(row.maxKm):''}"></label>
+    <label class="field repeat-price"><span>Valor (R$)</span><input class="km-fee" type="number" min="0" max="10000" step="0.01" placeholder="0,00" value="${Number.isFinite(Number(row.fee))?Number(row.fee):''}"></label>
     <button class="repeat-remove" type="button" title="Remover" aria-label="Remover">${iconHtml('trash')}</button>`;
   el.querySelector('.repeat-remove').onclick=()=>{el.remove();updateDeliveryKmBandsEmpty();};
   host.appendChild(el);
@@ -2709,23 +2771,44 @@ $$('input[name="deliveryPricingMode"]').forEach(r=>r.addEventListener('change',r
 async function lookupZipGeo(zip){
   const digits=String(zip||'').replace(/\D/g,'');
   if(digits.length!==8) return null;
+
+  let primary=null;
   try{
     const response=await fetch(`https://brasilapi.com.br/api/cep/v2/${digits}`,{cache:'no-store'});
-    if(!response.ok) return null;
+    if(response.ok){
+      const data=await response.json();
+      const lat=Number(data?.location?.coordinates?.latitude);
+      const lng=Number(data?.location?.coordinates?.longitude);
+      primary={
+        zip:digits.replace(/^(\d{5})(\d{3})$/,'$1-$2'),
+        street:data.street||'',
+        neighborhood:data.neighborhood||'',
+        city:data.city||'',
+        state:data.state||'',
+        location:Number.isFinite(lat)&&Number.isFinite(lng)?{latitude:lat,longitude:lng,source:'brasilapi-cep-v2'}:null
+      };
+      if(primary.street&&primary.neighborhood&&primary.city&&primary.state) return primary;
+    }
+  }catch(err){
+    console.warn('BrasilAPI indisponível para CEP; tentando ViaCEP.',err);
+  }
+
+  try{
+    const response=await fetch(`https://viacep.com.br/ws/${digits}/json/`,{cache:'no-store'});
+    if(!response.ok) return primary;
     const data=await response.json();
-    const lat=Number(data?.location?.coordinates?.latitude);
-    const lng=Number(data?.location?.coordinates?.longitude);
+    if(data?.erro) return primary;
     return {
       zip:digits.replace(/^(\d{5})(\d{3})$/,'$1-$2'),
-      street:data.street||'',
-      neighborhood:data.neighborhood||'',
-      city:data.city||'',
-      state:data.state||'',
-      location:Number.isFinite(lat)&&Number.isFinite(lng)?{latitude:lat,longitude:lng,source:'brasilapi-cep-v2'}:null
+      street:primary?.street||data.logradouro||'',
+      neighborhood:primary?.neighborhood||data.bairro||'',
+      city:primary?.city||data.localidade||'',
+      state:primary?.state||data.uf||'',
+      location:primary?.location||null
     };
   }catch(err){
-    console.warn('Não foi possível localizar o CEP da loja.',err);
-    return null;
+    console.warn('ViaCEP indisponível.',err);
+    return primary;
   }
 }
 
@@ -2805,19 +2888,19 @@ async function calculateDeliveryDraftForCep(zip){
     return {
       supported:true,
       fee:Number(band.fee||0),
-      detail:`${km.toFixed(1).replace('.',',')} km • faixa até ${Number(band.maxKm).toFixed(1).replace('.',',')} km`
+      detail:`Linha reta pelo CEP: ${km.toFixed(1).replace('.',',')} km • faixa até ${Number(band.maxKm).toFixed(1).replace('.',',')} km`
     };
   }
 
   if($('#setRestrictDeliveryKm').checked&&bands.length){
-    return {supported:false,message:`Distância aproximada de ${km.toFixed(1).replace('.',',')} km, acima da última faixa cadastrada.`};
+    return {supported:false,message:`Distância aproximada em linha reta pelo CEP de ${km.toFixed(1).replace('.',',')} km, acima da última faixa cadastrada.`};
   }
 
   const last=bands.at(-1);
   return {
     supported:true,
     fee:last?Number(last.fee||0):Number($('#setDeliveryFee').value||0),
-    detail:`${km.toFixed(1).replace('.',',')} km • usando a última faixa disponível`
+    detail:`Linha reta pelo CEP: ${km.toFixed(1).replace('.',',')} km • usando a última faixa disponível`
   };
 }
 
@@ -2956,6 +3039,28 @@ $('#settingsForm').onsubmit=async e=>{
   let storeLocation=settings.storeLocation||null;
   const storeZip=$('#setStoreZip').value.trim();
 
+  const fixedFee=validMoneyValue($('#setDeliveryFee').value,10_000);
+  const fallbackFee=validMoneyValue($('#setNeighborhoodFallbackFee').value,10_000);
+  const minimumOrder=validMoneyValue($('#setMinimumOrder').value,1_000_000);
+  const invalidZoneRows=[...$('#deliveryZonesEditor').querySelectorAll('.repeat-row')].some(row=>{
+    const name=row.querySelector('.zone-name').value.trim();
+    const fee=finiteAdminNumber(row.querySelector('.zone-fee').value,{min:0,max:10_000});
+    return !name||fee==null;
+  });
+  const normalizedZones=deliveryZones.map(z=>normalizePriceKey(z.neighborhood));
+  const duplicateZones=new Set(normalizedZones).size!==normalizedZones.length;
+  const invalidKmRows=[...$('#deliveryKmBandsEditor').querySelectorAll('.repeat-row')].some(row=>{
+    const maxKm=finiteAdminNumber(row.querySelector('.km-max').value,{min:0.1,max:500});
+    const fee=finiteAdminNumber(row.querySelector('.km-fee').value,{min:0,max:10_000});
+    return maxKm==null||fee==null;
+  });
+  const duplicateKmBands=new Set(deliveryKmBands.map(b=>String(b.maxKm))).size!==deliveryKmBands.length;
+
+  if(fixedFee==null||fallbackFee==null||minimumOrder==null||invalidZoneRows||duplicateZones||invalidKmRows||duplicateKmBands){
+    showToast('Revise os valores de entrega e pedido mínimo. Não use números negativos, bairros duplicados ou faixas de km repetidas.','warning');
+    return;
+  }
+
   if(deliveryPricingMode==='neighborhood'&&$('#setRestrictDeliveryZones').checked&&!deliveryZones.length){
     showToast('Cadastre pelo menos um bairro antes de restringir a entrega por bairro.','warning');
     return;
@@ -3010,13 +3115,13 @@ $('#settingsForm').onsubmit=async e=>{
     notificationVolume:Math.max(0,Math.min(100,Number($('#setNotificationVolume').value||70))),
     openMode:$('#setOpenMode').value,
     deliveryPricingMode,
-    deliveryFee:Number($('#setDeliveryFee').value||0),
+    deliveryFee:fixedFee,
     deliveryZones,
-    deliveryNeighborhoodFallbackFee:Number($('#setNeighborhoodFallbackFee').value||0),
+    deliveryNeighborhoodFallbackFee:fallbackFee,
     restrictDeliveryZones:$('#setRestrictDeliveryZones').checked,
     deliveryKmBands,
     restrictDeliveryKm:$('#setRestrictDeliveryKm').checked,
-    minimumOrder:Number($('#setMinimumOrder').value||0),
+    minimumOrder,
     allowPickup:$('#setAllowPickup').checked,
     autoAcceptOrders:$('#setAutoAccept').checked,
     payments:collectPaymentMethods(),
