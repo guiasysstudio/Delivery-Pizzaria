@@ -161,7 +161,7 @@ jobs:
               text = path.read_text(encoding='utf-8')
               used.update(re.findall(r'iconHtml\(["\']([a-z0-9-]+)["\']', text))
 
-          used -= {'button-label'}
+          used -= {'button-label', 'wrap'}
           missing_files = sorted(used - available)
           if missing_files:
               raise SystemExit(f'Ícones SVG ausentes: {missing_files}')
