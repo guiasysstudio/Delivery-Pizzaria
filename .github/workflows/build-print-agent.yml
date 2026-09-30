@@ -35,6 +35,57 @@ jobs:
           Copy-Item print-agent/Instalar.cmd print-agent/publish/Instalar.cmd
           Copy-Item print-agent/Desinstalar.cmd print-agent/publish/Desinstalar.cmd
 
+      - name: Validate install, unblock, startup and uninstall lifecycle
+        shell: pwsh
+        run: |
+          $publish = Resolve-Path "print-agent/publish"
+          $exe = Join-Path $publish "DeliveryPizzaria.PrintAgent.exe"
+
+          # Simula exatamente um EXE herdando Mark-of-the-Web de um ZIP baixado.
+          Set-Content -LiteralPath $exe -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3" -NoNewline
+          if (-not (Get-Item -LiteralPath $exe -Stream Zone.Identifier -ErrorAction SilentlyContinue)) {
+            throw "Nao foi possivel preparar o teste de Mark-of-the-Web."
+          }
+
+          Push-Location $publish
+          try {
+            & cmd.exe /d /c "Instalar.cmd /SILENT"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Instalar.cmd falhou com codigo $LASTEXITCODE"
+            }
+          }
+          finally {
+            Pop-Location
+          }
+
+          $target = Join-Path $env:LOCALAPPDATA "DeliveryPizzaria\PrintAgent"
+          $installedExe = Join-Path $target "DeliveryPizzaria.PrintAgent.exe"
+          $installedUninstaller = Join-Path $target "Desinstalar.cmd"
+
+          if (-not (Test-Path -LiteralPath $installedExe)) { throw "EXE instalado nao encontrado." }
+          if (-not (Test-Path -LiteralPath $installedUninstaller)) { throw "Desinstalador instalado nao encontrado." }
+
+          $zone = Get-Item -LiteralPath $installedExe -Stream Zone.Identifier -ErrorAction SilentlyContinue
+          if ($zone) { throw "EXE instalado ainda possui Zone.Identifier." }
+
+          $run = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+          if (-not $run.DeliveryPizzariaPrintAgent) { throw "Startup do Agent nao foi registrado." }
+
+          $uninstall = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\DeliveryPizzariaPrintAgent"
+          if ($uninstall.DisplayVersion -ne "1.6.0") { throw "Versao do desinstalador registrada incorretamente." }
+
+          & cmd.exe /d /c "`"$installedUninstaller`" /SILENT"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Desinstalador falhou com codigo $LASTEXITCODE"
+          }
+
+          Start-Sleep -Seconds 4
+
+          if (Test-Path -LiteralPath $target) { throw "Pasta instalada permaneceu apos desinstalacao." }
+          if (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\DeliveryPizzariaPrintAgent" -ErrorAction SilentlyContinue) {
+            throw "Registro de desinstalacao permaneceu."
+          }
+
       - name: Package Print Agent
         shell: pwsh
         run: Compress-Archive -Path print-agent/publish/* -DestinationPath print-agent/DeliveryPizzaria-PrintAgent-win-x64.zip -Force
