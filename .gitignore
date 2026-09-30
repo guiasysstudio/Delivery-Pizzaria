@@ -4,3 +4,8 @@ node_modules/
 functions/node_modules/
 firebase-debug.log
 firebase-debug.*.log
+functions/.secret.local
+functions/.env
+functions/.env.*
+*firebase-adminsdk*.json
+service-account*.json
