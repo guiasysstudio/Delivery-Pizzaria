@@ -684,3 +684,11 @@ dialog[open]{animation:dialog-in .16s ease-out}
 .favorite-card-button,.favorite-button,.add-round{width:44px;height:44px}
 .toast-close{width:44px;height:44px}
 .repeat-remove{display:grid;place-items:center}
+
+.demo-mode-banner{background:#fff7ed;border-bottom:1px solid #fdba74;color:#9a3412;padding:10px 0}
+.demo-mode-banner>div,.demo-mode-banner .shell{display:flex;gap:10px;align-items:flex-start}
+.demo-mode-banner strong{white-space:nowrap}
+.demo-mode-banner span{font-size:.86rem;line-height:1.45}
+.admin-main>.demo-mode-banner{border:1px solid #fdba74;border-radius:14px;padding:12px 14px;margin-bottom:16px}
+.demo-blaze-note{background:#fff7ed;border:1px solid #fdba74;color:#9a3412;border-radius:12px;padding:10px 12px;margin:0 0 14px;font-size:.86rem;line-height:1.45}
+@media(max-width:720px){.demo-mode-banner>div,.demo-mode-banner .shell{display:grid}.demo-mode-banner strong{white-space:normal}}
