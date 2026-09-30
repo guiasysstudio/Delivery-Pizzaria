@@ -2,6 +2,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/fireba
 import { getFirestore, doc, getDoc } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import { firebaseConfig } from '../firebase-config.js';
+import { getDemoOrder, isDemoOrderId } from '../assets/demo-mode.js';
 
 const app=initializeApp(firebaseConfig);
 const auth=getAuth(app);
@@ -35,6 +36,42 @@ function addressText(o){
   return (o.customer?.address||'')+', '+(o.customer?.number||'')+' - '+(o.customer?.neighborhood||'');
 }
 
+function renderPrintableOrder(o,s={}){
+  const change=o.payment?.needsChange
+    ?'<p><strong>TROCO PARA:</strong> '+money(o.payment.changeFor)+'</p><p><strong>LEVAR DE TROCO:</strong> '+money(o.payment.changeAmount)+'</p>'
+    :'';
+
+  root.innerHTML=
+    '<div class="center">'+
+    '<h1>'+esc(s.storeName||'Pizzaria')+'</h1>'+
+    '<p>'+esc(s.phone||'')+'</p>'+
+    '<p class="big">PEDIDO #'+String(o.orderNumber||0).padStart(4,'0')+'</p>'+
+    '<p>'+esc(statusLabels[o.status]||o.status)+'</p>'+
+    '<p>'+(o.createdAt?.toDate?.().toLocaleString('pt-BR')||'')+'</p>'+
+    '</div><hr>'+
+    '<p><strong>CLIENTE:</strong> '+esc(o.customer?.name||'')+'</p>'+
+    '<p><strong>FONE:</strong> '+esc(o.customer?.phone||'')+'</p>'+
+    '<p><strong>'+(o.fulfillment==='pickup'?'TIPO':'ENDEREÇO')+':</strong> '+esc(addressText(o))+'</p>'+
+    '<hr><h2>ITENS</h2>'+
+    (o.items||[]).map(i=>
+      '<div><div class="row"><strong>'+i.qty+'x '+esc(i.name)+'</strong><strong>'+money(Number(i.unitPrice)*Number(i.qty))+'</strong></div>'+
+      (i.size?.name?'<p>Tamanho: '+esc(i.size.name)+'</p>':'')+
+      ((i.extras||[]).length?'<p>Adicionais: '+(i.extras||[]).map(x=>esc(x.name)).join(', ')+'</p>':'')+
+      (i.note?'<p>OBS ITEM: '+esc(i.note)+'</p>':'')+
+      '</div><hr>'
+    ).join('')+
+    '<div class="row"><span>Subtotal</span><strong>'+money(o.subtotal)+'</strong></div>'+
+    (Number(o.discount||0)>0
+      ?'<div class="row"><span>Desconto'+(o.coupon?.code?' • '+esc(o.coupon.code):'')+'</span><strong>- '+money(o.discount)+'</strong></div>'
+      :'')+
+    '<div class="row"><span>Entrega</span><strong>'+money(o.deliveryFee)+'</strong></div>'+
+    '<div class="row big"><span>TOTAL</span><strong>'+money(o.total)+'</strong></div>'+
+    '<hr><p><strong>PAGAMENTO:</strong> '+esc(o.payment?.method||'')+'</p>'+
+    change+
+    (o.note?'<hr><p><strong>OBSERVAÇÕES:</strong> '+esc(o.note)+'</p>':'')+
+    '<hr><p class="center">*** FIM DA COMANDA ***</p>';
+}
+
 onAuthStateChanged(auth,async user=>{
   if(!user){
     root.innerHTML='<p>Faça login no painel administrativo para imprimir.</p>';
@@ -46,11 +83,20 @@ onAuthStateChanged(auth,async user=>{
   }
 
   try{
-    const results=await Promise.all([
-      getDoc(doc(db,'orders',id)),
-      getDoc(doc(db,'settings','store'))
-    ]);
-    const oSnap=results[0],sSnap=results[1];
+    const sSnap=await getDoc(doc(db,'settings','store'));
+
+    if(isDemoOrderId(id)){
+      const demoOrder=getDemoOrder(id);
+      if(!demoOrder){
+        root.innerHTML='<p>Pedido de demonstração não encontrado neste navegador.</p>';
+        return;
+      }
+      renderPrintableOrder(demoOrder,sSnap.exists()?sSnap.data():{});
+      if(auto) setTimeout(()=>window.print(),250);
+      return;
+    }
+
+    const oSnap=await getDoc(doc(db,'orders',id));
 
     if(!oSnap.exists()){
       root.innerHTML='<p>Pedido não encontrado.</p>';
@@ -85,40 +131,7 @@ onAuthStateChanged(auth,async user=>{
       address:privateData.address||operational.address||null
     };
     const s=sSnap.exists()?sSnap.data():{};
-    const change=o.payment?.needsChange
-      ?'<p><strong>TROCO PARA:</strong> '+money(o.payment.changeFor)+'</p><p><strong>LEVAR DE TROCO:</strong> '+money(o.payment.changeAmount)+'</p>'
-      :'';
-
-    root.innerHTML=
-      '<div class="center">'+
-      '<h1>'+esc(s.storeName||'Pizzaria')+'</h1>'+
-      '<p>'+esc(s.phone||'')+'</p>'+
-      '<p class="big">PEDIDO #'+String(o.orderNumber||0).padStart(4,'0')+'</p>'+
-      '<p>'+esc(statusLabels[o.status]||o.status)+'</p>'+
-      '<p>'+(o.createdAt?.toDate?.().toLocaleString('pt-BR')||'')+'</p>'+
-      '</div><hr>'+
-      '<p><strong>CLIENTE:</strong> '+esc(o.customer?.name||'')+'</p>'+
-      '<p><strong>FONE:</strong> '+esc(o.customer?.phone||'')+'</p>'+
-      '<p><strong>'+(o.fulfillment==='pickup'?'TIPO':'ENDEREÇO')+':</strong> '+esc(addressText(o))+'</p>'+
-      '<hr><h2>ITENS</h2>'+
-      (o.items||[]).map(i=>
-        '<div><div class="row"><strong>'+i.qty+'x '+esc(i.name)+'</strong><strong>'+money(Number(i.unitPrice)*Number(i.qty))+'</strong></div>'+
-        (i.size?.name?'<p>Tamanho: '+esc(i.size.name)+'</p>':'')+
-        ((i.extras||[]).length?'<p>Adicionais: '+(i.extras||[]).map(x=>esc(x.name)).join(', ')+'</p>':'')+
-        (i.note?'<p>OBS ITEM: '+esc(i.note)+'</p>':'')+
-        '</div><hr>'
-      ).join('')+
-      '<div class="row"><span>Subtotal</span><strong>'+money(o.subtotal)+'</strong></div>'+
-      (Number(o.discount||0)>0
-        ?'<div class="row"><span>Desconto'+(o.coupon?.code?' • '+esc(o.coupon.code):'')+'</span><strong>- '+money(o.discount)+'</strong></div>'
-        :'')+
-      '<div class="row"><span>Entrega</span><strong>'+money(o.deliveryFee)+'</strong></div>'+
-      '<div class="row big"><span>TOTAL</span><strong>'+money(o.total)+'</strong></div>'+
-      '<hr><p><strong>PAGAMENTO:</strong> '+esc(o.payment?.method||'')+'</p>'+
-      change+
-      (o.note?'<hr><p><strong>OBSERVAÇÕES:</strong> '+esc(o.note)+'</p>':'')+
-      '<hr><p class="center">*** FIM DA COMANDA ***</p>';
-
+    renderPrintableOrder(o,s);
     if(auto) setTimeout(()=>window.print(),700);
   }catch(err){
     console.error(err);
