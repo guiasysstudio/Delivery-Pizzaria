@@ -45,6 +45,7 @@ jobs:
       - name: Verify Functions dependency graph
         run: |
           npm install --prefix functions --ignore-scripts --no-audit --no-fund
+          npm audit --prefix functions --omit=dev --audit-level=high
           cd functions
           node -e "Promise.all([import('firebase-functions/v2'), import('firebase-functions/v2/https'), import('firebase-admin/app')]).then(([v2])=>{ if(typeof v2.setGlobalOptions!=='function') throw new Error('setGlobalOptions indisponível'); console.log('Functions dependencies OK') })"
 
