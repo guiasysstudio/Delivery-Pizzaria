@@ -32,7 +32,7 @@ if /I "%~2"=="/SILENT" set "SILENT=1"
 
 if "%SILENT%"=="0" (
   echo.
-  echo Delivery Pizzaria Print Agent 1.6.0
+  echo Delivery Pizzaria Print Agent 1.7.0
   echo ==================================
   echo.
   echo Esta operacao vai:
