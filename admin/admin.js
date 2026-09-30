@@ -438,8 +438,8 @@ function rolePermissions(role=currentProfile?.role){
   if(role==='master'){
     return Object.fromEntries(permissionDefinitions.map(([key])=>[key,true]));
   }
-  const raw=roles.find(r=>r.id===role)?.permissions||defaultRoleTemplates[role]?.permissions||{};
-  return withPermissionDependencies(raw);
+  const resolved=roles.find(r=>r.id===role&&r.active!==false);
+  return withPermissionDependencies(resolved?.permissions||{});
 }
 function hasPermission(key){
   return isMaster()||rolePermissions()[key]===true;
@@ -590,7 +590,7 @@ async function initializeAdmin(){
   if(hasPermission('customersView')) tasks.push(loadCustomers());
   if(isMaster()) tasks.push(loadUsers());
   if(hasPermission('ordersView')||hasPermission('promotionsManage')) tasks.push(loadPromotions());
-  if(hasPermission('ordersView')||hasPermission('couponsManage')) tasks.push(loadCoupons());
+  if(hasPermission('couponsManage')) tasks.push(loadCoupons());
   if(hasPermission('cashView')) tasks.push(loadCashSessions());
 
   await Promise.all(tasks);
@@ -653,9 +653,8 @@ async function loadRoles(){
       }
     }
   }catch(err){
-    console.warn('Perfil de acesso não disponível; usando configuração local mínima.',err);
-    const fallback=defaultRoleTemplates[currentProfile?.role];
-    roles=fallback?[{id:currentProfile.role,name:fallback.name,permissions:fallback.permissions,system:true,active:true}]:[];
+    console.warn('Perfil de acesso não disponível; permissões operacionais bloqueadas por segurança.',err);
+    roles=[];
   }
   refreshUserRoleSelect();
   renderRoles();
@@ -1329,7 +1328,7 @@ function deliveryPricingText(order){
     return `Frete por km • ${Number(snap.distanceKm).toFixed(1).replace('.',',')} km • ${money(order.deliveryFee)}`;
   }
   if(snap.mode==='neighborhood'){
-    return `Frete por bairro${snap.zone?` • ${snap.zone}`:''} • ${money(order.deliveryFee)}`;
+    return `Frete por bairro • ${money(order.deliveryFee)}`;
   }
   return `Frete fixo • ${money(order.deliveryFee)}`;
 }
@@ -1376,7 +1375,6 @@ async function openOrder(id){
         ${o.customer
           ?`<p><strong>${esc(o.customer?.name||'Cliente')}</strong></p>
              <p>${esc(o.customer?.phone||'')}</p>
-             <p>${esc(o.customer?.email||'')}</p>
              <p>${esc(address)}</p>`
           :`<p class="muted">Dados pessoais ocultos para este perfil. Itens, valores e andamento continuam disponíveis.</p>`}
       </div>
