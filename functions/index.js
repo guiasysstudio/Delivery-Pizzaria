@@ -2521,6 +2521,7 @@ export const createOrder = onRequest(
       const counterRef=db.doc("counters/orders");
       const rateRef=db.doc(`orderRateLimits/${decoded.uid}`);
       const orderRef=db.collection("orders").doc();
+      const orderPrivateRef=db.doc(`orderPrivate/${orderRef.id}`);
       let orderNumber=0;
       let duplicateResult=null;
       const now=new Date();
@@ -2577,34 +2578,13 @@ export const createOrder = onRequest(
           requestId,
           createdAt:now,
           acceptedAt:autoAccepted?now:null,
-          customer:{
-            name,
-            email:decoded.email||"",
-            phone
-          },
           fulfillment,
-          address:fulfillment==="delivery"?{
-            id:address.id,
-            label:address.label||"",
-            recipient:address.recipient||name,
-            phone:address.phone||phone,
-            zip:address.zip||"",
-            street:address.street||"",
-            number:address.number||"",
-            complement:address.complement||"",
-            neighborhood:address.neighborhood||"",
-            city:address.city||"",
-            state:address.state||"",
-            reference:address.reference||"",
-            location:delivery.addressLocation||null
-          }:null,
           deliveryPricing:fulfillment==="delivery"?{
             mode:delivery.mode||settings.deliveryPricingMode||"fixed",
             fee:deliveryFee,
             distanceKm:Number.isFinite(delivery.distanceKm)?Number(delivery.distanceKm.toFixed(3)):null,
             distanceMethod:delivery.distanceMethod||null,
             zone:delivery.zone||null,
-            verifiedNeighborhood:delivery.verifiedNeighborhood||null,
             maxKm:delivery.maxKm??null
           }:{mode:"pickup",fee:0},
           payment:{
@@ -2621,6 +2601,37 @@ export const createOrder = onRequest(
           deliveryFee,
           total,
           createdBy:"secure-function"
+        });
+
+        tx.set(orderPrivateRef,{
+          orderId:orderRef.id,
+          customerId:decoded.uid,
+          customer:{
+            name,
+            email:decoded.email||"",
+            phone
+          },
+          address:fulfillment==="delivery"?{
+            id:address.id,
+            label:address.label||"",
+            recipient:address.recipient||name,
+            phone:address.phone||phone,
+            zip:address.zip||"",
+            street:address.street||"",
+            number:address.number||"",
+            complement:address.complement||"",
+            neighborhood:address.neighborhood||"",
+            city:address.city||"",
+            state:address.state||"",
+            reference:address.reference||"",
+            location:delivery.addressLocation||null
+          }:null,
+          deliveryPrivate:fulfillment==="delivery"?{
+            verifiedNeighborhood:delivery.verifiedNeighborhood||null,
+            addressLocation:delivery.addressLocation||null
+          }:null,
+          createdAt:now,
+          updatedAt:now
         });
 
         const resultData={
