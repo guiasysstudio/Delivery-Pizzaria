@@ -125,13 +125,14 @@
             <div id="printerAgentInfo" class="agent-info-grid">
               <div><small>Endereço local</small><strong>127.0.0.1</strong></div>
               <div><small>Porta</small><strong>17329</strong></div>
-              <div><small>Versão</small><strong id="printerAgentVersion">—</strong></div>
+              <div><small>Versão instalada</small><strong id="printerAgentVersion">—</strong></div>
+              <div><small>Versão disponível</small><strong id="printerAgentLatestVersion">—</strong></div>
               <div><small>Estado</small><strong id="printerAgentInfoState">Aguardando conexão</strong></div>
             </div>
             <div class="section-actions">
               <button id="connectPrintAgentBtn" class="btn btn-secondary" type="button">Conectar ao agente</button>
               <button id="testPrintBtn" class="btn btn-secondary" type="button">Imprimir teste</button>
-              <a class="btn btn-secondary" href="https://github.com/guiasysstudio/Delivery-Pizzaria/releases/download/print-agent-latest/DeliveryPizzaria-PrintAgent-win-x64.zip" target="_blank" rel="noopener">Baixar Print Agent</a>
+              <a id="downloadPrintAgentBtn" class="btn btn-secondary icon-button-label" href="https://github.com/guiasysstudio/Delivery-Pizzaria/releases/download/print-agent-latest/DeliveryPizzaria-PrintAgent-win-x64.zip" target="_blank" rel="noopener"><span class="ui-icon icon-download" aria-hidden="true"></span><span>Baixar Print Agent</span></a>
             </div>
           </div>
 
@@ -489,6 +490,25 @@
   </dialog>
 
   <dialog id="orderDialog" class="modal modal-wide"><div class="modal-card"><button id="closeOrderDialog" class="modal-close dialog-close" type="button" aria-label="Fechar"><span class="ui-icon icon-circle-x" aria-hidden="true"></span></button><div id="orderDetail"></div></div></dialog>
+
+  <dialog id="printAgentUpdateDialog" class="modal">
+    <div class="modal-card">
+      <button id="printAgentUpdateClose" class="modal-close dialog-close" type="button" aria-label="Fechar"><span class="ui-icon icon-circle-x" aria-hidden="true"></span></button>
+      <span class="eyebrow">ATUALIZAÇÃO DO PRINT AGENT</span>
+      <div class="confirm-icon-wrap"><span class="ui-icon icon-download confirm-icon" aria-hidden="true"></span></div>
+      <h2>Print Agent desatualizado</h2>
+      <p id="printAgentUpdateMessage" class="muted">Existe uma versão mais recente do Print Agent disponível.</p>
+      <div class="agent-info-grid">
+        <div><small>Instalada</small><strong id="printAgentUpdateCurrentVersion">—</strong></div>
+        <div><small>Disponível</small><strong id="printAgentUpdateLatestVersion">—</strong></div>
+      </div>
+      <div id="printAgentUpdateRequiredNote" class="alert alert-error hidden">Esta atualização é necessária para manter a impressão compatível com a versão atual da Central Delivery.</div>
+      <div class="confirm-actions">
+        <button id="printAgentUpdateLater" class="btn btn-secondary" type="button">Agora não</button>
+        <button id="printAgentUpdateGo" class="btn btn-primary icon-button-label" type="button"><span class="ui-icon icon-download" aria-hidden="true"></span><span>Atualizar Print Agent</span></button>
+      </div>
+    </div>
+  </dialog>
 
   <script type="module" src="./admin.js"></script>
 </body>
