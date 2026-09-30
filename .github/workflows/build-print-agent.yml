@@ -7,6 +7,11 @@ on:
     paths:
       - "print-agent/**"
       - ".github/workflows/build-print-agent.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "print-agent/**"
+      - ".github/workflows/build-print-agent.yml"
 
 permissions:
   contents: write
@@ -42,6 +47,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish stable download release
+        if: github.event_name != 'pull_request'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
