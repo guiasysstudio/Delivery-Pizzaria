@@ -68,13 +68,11 @@ function readDemoIdentity(uid){
   }
 }
 
-function saveDemoIdentity(uid,{name,phone,cpf}){
+function saveDemoIdentity(uid,{cpf}){
   const data={
     ok:true,
     identityComplete:true,
     cpfMasked:maskCpfForFallback(cpf),
-    name:String(name||'').trim(),
-    phone:normalizePhone(phone),
     demoFallback:true,
     savedAt:new Date().toISOString()
   };
@@ -211,11 +209,7 @@ export async function saveCustomerIdentity({name,phone,cpf}){
       throw Object.assign(new Error('invalid_cpf'),{code:'invalid_cpf'});
     }
 
-    const local=saveDemoIdentity(auth.currentUser.uid,{
-      name:cleanName,
-      phone:cleanPhone,
-      cpf:cleanCpf
-    });
+    const local=saveDemoIdentity(auth.currentUser.uid,{cpf:cleanCpf});
 
     console.warn(
       'Firebase Function customerIdentity indisponível; usando fallback local de demonstração. '+
