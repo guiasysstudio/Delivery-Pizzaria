@@ -3477,7 +3477,7 @@ $('#customerSearch')?.addEventListener('input',renderCustomers);
 
 
 async function loadUsers(){
-  if(!(hasPermission('usersManage')||hasPermission('rolesManage'))) return;
+  if(!isMaster()) return;
   try{
     const s=await getDocs(collection(db,'users'));
     users=s.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(a.username||'').localeCompare(b.username||''));
@@ -3488,12 +3488,12 @@ async function loadUsers(){
   if(!users.some(u=>u.uid===auth.currentUser?.uid) && currentProfile?.bootstrap){
     users.unshift({...currentProfile});
   }
-  if(hasPermission('usersManage')) renderUsers();
-  if(hasPermission('rolesManage')) renderRoles();
+  renderUsers();
+  renderRoles();
 }
 
 function renderUsers(){
-  if(!hasPermission('usersManage')) return;
+  if(!isMaster()) return;
   $('#usersTable').innerHTML=users.length?users.map(u=>`
     <div class="data-row">
       <div class="data-main">
@@ -3516,14 +3516,13 @@ function renderUsers(){
 }
 
 $('#newUserBtn').onclick=()=>{
-  if(!hasPermission('usersManage')) return;
+  if(!isMaster()) return;
   editUser(null);
 };
 
 function editUser(uid){
-  if(!hasPermission('usersManage')) return;
+  if(!isMaster()) return;
   const u=users.find(x=>x.uid===uid);
-  if(u?.role==='master'&&!isMaster()) return;
   const isExisting=!!u&&!u.bootstrap;
   $('#userEditorTitle').textContent=u?(u.bootstrap?'Registrar Master':'Editar usuário'):'Novo usuário';
   $('#userUid').value=u?.uid||'';
@@ -3546,75 +3545,51 @@ function editUser(uid){
 
 $('#userEditorForm').onsubmit=async e=>{
   e.preventDefault();
-  if(!hasPermission('usersManage')) return;
+  if(!isMaster()) return;
+
   const existingUid=$('#userUid').value;
   const username=normalizeUsername($('#userUsername').value);
   const displayName=$('#userDisplayName').value.trim()||username;
   const requestedRole=$('#userRole').value;
-  const role=existingUid===auth.currentUser?.uid&&isMaster()
-    ?'master'
-    :(requestedRole==='master'&&!isMaster()?currentProfile.role:requestedRole);
   const existingUser=users.find(x=>x.uid===existingUid);
-  const isBootstrap=existingUser?.bootstrap===true;
   $('#userEditorError').classList.add('hidden');
 
   if(!username||username.length<3){
     return userEditorError('O usuário precisa ter pelo menos 3 caracteres.');
   }
 
+  if(existingUser?.role==='master'&&existingUid!==auth.currentUser?.uid){
+    return userEditorError('Outra conta Master não pode ser rebaixada por esta tela.');
+  }
+
   try{
     if(existingUid){
-      const patch={
-        username,
-        displayName,
-        role,
-        updatedAt:serverTimestamp()
-      };
-      if(isBootstrap) patch.active=true;
-      await setDoc(doc(db,'users',existingUid),patch,{merge:true});
+      const role=existingUser?.role==='master'?'master':requestedRole;
+      await staffUserAdminAction('update',existingUid,{displayName,role});
       if(existingUid===auth.currentUser?.uid){
-        currentProfile={...currentProfile,username,displayName,role,active:true,bootstrap:false};
+        currentProfile={...currentProfile,displayName};
       }
     }else{
       const password=$('#userPassword').value;
-      if(password.length<6) return userEditorError('A senha precisa ter pelo menos 6 caracteres.');
-      let credential=null;
-      try{
-        const internalEmail=randomStaffEmail(username);
-        credential=await createUserWithEmailAndPassword(userCreatorAuth,internalEmail,password);
-        const batch=writeBatch(db);
-        batch.set(doc(db,'users',credential.user.uid),{
-          username,
-          displayName,
-          role,
-          active:true,
-          createdBy:auth.currentUser.uid,
-          createdAt:serverTimestamp(),
-          updatedAt:serverTimestamp()
-        });
-        batch.set(doc(db,'staffLogins',username),{
-          uid:credential.user.uid,
-          email:internalEmail,
-          createdAt:serverTimestamp(),
-          updatedAt:serverTimestamp()
-        });
-        await batch.commit();
-      }catch(err){
-        if(credential?.user){
-          try{await deleteUser(credential.user);}catch{}
-        }
-        throw err;
-      }finally{
-        try{await signOut(userCreatorAuth);}catch{}
+      if(password.length<10||!/[A-Za-z]/.test(password)||!/\d/.test(password)){
+        return userEditorError('A senha precisa ter pelo menos 10 caracteres, com letra e número.');
       }
+      if(requestedRole==='master'){
+        return userEditorError('Novos usuários operacionais não podem receber o perfil Master.');
+      }
+      await staffUserAdminAction('create','',{username,displayName,role:requestedRole,password});
     }
+
     $('#userEditor').close();
     await loadUsers();
-    $('#currentUserDisplay').textContent=`${currentProfile.displayName||currentProfile.username} • ${roleLabel(currentProfile.role)}`;
+    $('#currentUserDisplay').textContent=(currentProfile.displayName||currentProfile.username)+' • '+roleLabel(currentProfile.role);
   }catch(err){
     console.error(err);
-    if(err?.code==='auth/email-already-in-use') return userEditorError('Esse nome de usuário já existe.');
-    if(err?.code==='auth/operation-not-allowed') return userEditorError('Ative E-mail/Senha no Firebase Authentication antes de criar usuários.');
+    const code=String(err?.code||err?.message||'');
+    if(code.includes('username_in_use')) return userEditorError('Esse nome de usuário já existe.');
+    if(code.includes('invalid_role')) return userEditorError('Escolha um perfil operacional ativo.');
+    if(code.includes('invalid_password')) return userEditorError('A senha precisa ter pelo menos 10 caracteres, com letra e número.');
+    if(code.includes('master_protected')) return userEditorError('A conta Master é protegida.');
     userEditorError('Não foi possível salvar o usuário.');
   }
 };
@@ -3658,7 +3633,7 @@ function staffUserActionMessage(err){
 }
 
 async function toggleUser(uid){
-  if(!hasPermission('usersManage')||uid===auth.currentUser?.uid) return;
+  if(!isMaster()||uid===auth.currentUser?.uid) return;
   const u=users.find(x=>x.uid===uid);
   if(!u) return;
 
@@ -3675,7 +3650,7 @@ async function toggleUser(uid){
 }
 
 function openUserPasswordDialog(uid){
-  if(!hasPermission('usersManage')) return;
+  if(!isMaster()) return;
   const u=users.find(x=>x.uid===uid);
   if(!u||u.bootstrap) return;
 
@@ -3695,8 +3670,8 @@ $('#userPasswordForm')?.addEventListener('submit',async e=>{
   const confirmPassword=$('#userConfirmPassword').value;
   $('#userPasswordError').classList.add('hidden');
 
-  if(password.length<6){
-    $('#userPasswordError').textContent='A senha precisa ter pelo menos 6 caracteres.';
+  if(password.length<10||!/[A-Za-z]/.test(password)||!/d/.test(password)){
+    $('#userPasswordError').textContent='A senha precisa ter pelo menos 10 caracteres, com letra e número.';
     $('#userPasswordError').classList.remove('hidden');
     return;
   }
@@ -3724,7 +3699,7 @@ $('#userPasswordForm')?.addEventListener('submit',async e=>{
 });
 
 async function removeUser(uid){
-  if(!hasPermission('usersManage')||uid===auth.currentUser?.uid) return;
+  if(!isMaster()||uid===auth.currentUser?.uid) return;
   const u=users.find(x=>x.uid===uid);
   if(!u||u.bootstrap) return;
 
