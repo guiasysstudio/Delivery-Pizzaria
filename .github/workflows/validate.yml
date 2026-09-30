@@ -117,14 +117,12 @@ jobs:
               Path('404.html'),
           ]
 
-          # Browser-native alert/confirm must not return to the product UI.
           for path in ui_js:
               text = path.read_text(encoding='utf-8')
               hits = re.findall(r'\b(?:alert|confirm)\s*\(', text)
               if hits:
                   raise SystemExit(f'{path}: alert()/confirm() nativo encontrado: {hits[:5]}')
 
-          # Keep UI icons deterministic across Windows/Android/iOS.
           emoji_re = re.compile(r'[\U0001F300-\U0001FAFF]')
           for path in ui_js + ui_html:
               text = path.read_text(encoding='utf-8')
@@ -163,8 +161,7 @@ jobs:
               text = path.read_text(encoding='utf-8')
               used.update(re.findall(r'iconHtml\(["\']([a-z0-9-]+)["\']', text))
 
-          ignored = {'button-label'}
-          used -= ignored
+          used -= {'button-label'}
           missing_files = sorted(used - available)
           if missing_files:
               raise SystemExit(f'Ícones SVG ausentes: {missing_files}')
@@ -193,23 +190,7 @@ jobs:
           latest = str(manifest.get('latestVersion', '')).strip()
           minimum = str(manifest.get('minimumVersion', '')).strip()
 
-          semver = re.compile(r'^\d+\.\d+\.\d+
-          test -f index.html
-          test -f admin/index.html
-          test -f account/index.html
-          test -f account/receipt.html
-          test -f account/receipt.js
-          test -f firebase-config.js
-          test -f assets/ui.js
-          test -f assets/print-agent-version.json
-          test -f assets/icons/LICENSE-LUCIDE.txt
-          test -f firestore.rules
-          test -f manifest.webmanifest
-          test -f service-worker.js
-          test -f print-agent/DeliveryPizzaria.PrintAgent.csproj
-          test -f functions/package.json
-          test -f functions/index.js
-)
+          semver = re.compile(r'^\d+\.\d+\.\d+$')
           if not semver.fullmatch(agent_version):
               raise SystemExit(f'Versão inválida no csproj: {agent_version}')
           if not semver.fullmatch(latest):
@@ -231,6 +212,7 @@ jobs:
           test -f account/receipt.js
           test -f firebase-config.js
           test -f assets/ui.js
+          test -f assets/print-agent-version.json
           test -f assets/icons/LICENSE-LUCIDE.txt
           test -f firestore.rules
           test -f manifest.webmanifest
