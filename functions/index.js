@@ -2268,7 +2268,8 @@ export const migrateCustomerPrivacy = onRequest(
         for(const item of resolved){
           const {docSnap,data,rawCpf,hash,indexRef,indexSnap}=item;
           const validLegacy=validCpf(rawCpf);
-          if(!hash || (!data.cpfVerified&&data.cpf&&!validLegacy)){
+          const validHash=/^[a-f0-9]{64}$/i.test(String(hash||""));
+          if(!validHash || (!data.cpfVerified&&data.cpf&&!validLegacy)){
             conflicts.push({uid:docSnap.id,reason:"invalid_cpf"});
             continue;
           }
