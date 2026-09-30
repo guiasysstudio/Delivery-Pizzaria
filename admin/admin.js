@@ -820,6 +820,17 @@ function normalizePriceKey(value){
   return String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
 }
 
+function finiteAdminNumber(value,{min=-Infinity,max=Infinity,integer=false}={}){
+  const parsed=Number(value);
+  if(!Number.isFinite(parsed)||parsed<min||parsed>max) return null;
+  if(integer&&!Number.isInteger(parsed)) return null;
+  return parsed;
+}
+
+function validMoneyValue(value,max=1_000_000){
+  return finiteAdminNumber(value,{min:0,max});
+}
+
 function distanceKmBetween(a,b){
   const lat1=Number(a?.latitude),lng1=Number(a?.longitude);
   const lat2=Number(b?.latitude),lng2=Number(b?.longitude);
@@ -1823,11 +1834,18 @@ $('#promotionEditorForm')?.addEventListener('submit',async e=>{
     active:$('#promotionActive').checked,
     updatedAt:serverTimestamp()
   };
-  if(!data.name||data.discountValue<=0){
-    $('#promotionEditorError').textContent='Informe nome e desconto válido.';
+  const discount=finiteAdminNumber(data.discountValue,{min:0.01,max:1_000_000});
+  const targetRequired=data.targetType!=='all'&&!data.targetId;
+  const percentageInvalid=data.discountType==='percentage'&&(discount==null||discount>100);
+  const fixedInvalid=data.discountType==='fixed'&&discount==null;
+  if(!data.name||targetRequired||percentageInvalid||fixedInvalid){
+    $('#promotionEditorError').textContent=targetRequired
+      ?'Escolha a categoria ou produto da promoção.'
+      :'Informe um desconto válido. Porcentagens devem ficar entre 0,01% e 100%.';
     $('#promotionEditorError').classList.remove('hidden');
     return;
   }
+  data.discountValue=discount;
   try{
     if(id) await updateDoc(doc(db,'promotions',id),data);
     else await addDoc(collection(db,'promotions'),{...data,createdAt:serverTimestamp()});
@@ -1920,11 +1938,26 @@ $('#couponEditorForm')?.addEventListener('submit',async e=>{
     active:$('#couponActive').checked,
     updatedAt:serverTimestamp()
   };
-  if(!code||data.value<=0){
-    $('#couponEditorError').textContent='Informe um código e um desconto válido.';
+  const couponValue=finiteAdminNumber(data.value,{min:0.01,max:1_000_000});
+  const minimumOrder=validMoneyValue(data.minimumOrder);
+  const maxDiscount=validMoneyValue(data.maxDiscount);
+  const minOrders=finiteAdminNumber(data.minOrders,{min:0,max:100_000,integer:true});
+  const minSpent=validMoneyValue(data.minSpent,10_000_000);
+  const percentageInvalid=data.type==='percentage'&&(couponValue==null||couponValue>100);
+  const fixedInvalid=data.type==='fixed'&&couponValue==null;
+  if(
+    !code || percentageInvalid || fixedInvalid ||
+    minimumOrder==null || maxDiscount==null || minOrders==null || minSpent==null
+  ){
+    $('#couponEditorError').textContent='Revise os valores do cupom. Porcentagens devem ficar entre 0,01% e 100% e os demais valores não podem ser negativos.';
     $('#couponEditorError').classList.remove('hidden');
     return;
   }
+  data.value=couponValue;
+  data.minimumOrder=minimumOrder;
+  data.maxDiscount=maxDiscount;
+  data.minOrders=minOrders;
+  data.minSpent=minSpent;
   try{
     const ref=doc(db,'coupons',existingId||code);
     if(existingId) await updateDoc(ref,data);
@@ -2535,8 +2568,31 @@ $('#productEditorForm').onsubmit=async e=>{
     $('#productEditorError').classList.remove('hidden');
     return;
   }
+  const basePrice=validMoneyValue(data.price,100_000);
+  const orderValue=finiteAdminNumber(data.order,{min:-100_000,max:100_000,integer:true});
+  const sizeRows=[...$('#productSizesEditor').querySelectorAll('.repeat-row')];
+  const extraRows=[...$('#productExtrasEditor').querySelectorAll('.repeat-row')];
+  const invalidSize=sizeRows.some(row=>{
+    const name=row.querySelector('.repeat-name').value.trim();
+    const price=finiteAdminNumber(row.querySelector('.repeat-value').value,{min:0.01,max:100_000});
+    return !name||price==null;
+  });
+  const invalidExtra=extraRows.some(row=>{
+    const name=row.querySelector('.repeat-name').value.trim();
+    const price=finiteAdminNumber(row.querySelector('.repeat-value').value,{min:0,max:100_000});
+    return !name||price==null;
+  });
+
+  if(basePrice==null||orderValue==null||invalidSize||invalidExtra){
+    $('#productEditorError').textContent='Revise preços, tamanhos, adicionais e ordem. Tamanhos precisam ter preço maior que zero; adicionais não podem ter valor negativo.';
+    $('#productEditorError').classList.remove('hidden');
+    return;
+  }
+  data.price=basePrice;
+  data.order=orderValue;
+
   if(!data.sizes.length&&data.price<=0){
-    $('#productEditorError').textContent='Informe um preço base ou cadastre pelo menos um tamanho com preço.';
+    $('#productEditorError').textContent='Informe um preço base maior que zero ou cadastre pelo menos um tamanho válido.';
     $('#productEditorError').classList.remove('hidden');
     return;
   }
@@ -2805,19 +2861,19 @@ async function calculateDeliveryDraftForCep(zip){
     return {
       supported:true,
       fee:Number(band.fee||0),
-      detail:`${km.toFixed(1).replace('.',',')} km • faixa até ${Number(band.maxKm).toFixed(1).replace('.',',')} km`
+      detail:`Linha reta pelo CEP: ${km.toFixed(1).replace('.',',')} km • faixa até ${Number(band.maxKm).toFixed(1).replace('.',',')} km`
     };
   }
 
   if($('#setRestrictDeliveryKm').checked&&bands.length){
-    return {supported:false,message:`Distância aproximada de ${km.toFixed(1).replace('.',',')} km, acima da última faixa cadastrada.`};
+    return {supported:false,message:`Distância aproximada em linha reta pelo CEP de ${km.toFixed(1).replace('.',',')} km, acima da última faixa cadastrada.`};
   }
 
   const last=bands.at(-1);
   return {
     supported:true,
     fee:last?Number(last.fee||0):Number($('#setDeliveryFee').value||0),
-    detail:`${km.toFixed(1).replace('.',',')} km • usando a última faixa disponível`
+    detail:`Linha reta pelo CEP: ${km.toFixed(1).replace('.',',')} km • usando a última faixa disponível`
   };
 }
 
@@ -2956,6 +3012,28 @@ $('#settingsForm').onsubmit=async e=>{
   let storeLocation=settings.storeLocation||null;
   const storeZip=$('#setStoreZip').value.trim();
 
+  const fixedFee=validMoneyValue($('#setDeliveryFee').value,10_000);
+  const fallbackFee=validMoneyValue($('#setNeighborhoodFallbackFee').value,10_000);
+  const minimumOrder=validMoneyValue($('#setMinimumOrder').value,1_000_000);
+  const invalidZoneRows=[...$('#deliveryZonesEditor').querySelectorAll('.repeat-row')].some(row=>{
+    const name=row.querySelector('.zone-name').value.trim();
+    const fee=finiteAdminNumber(row.querySelector('.zone-fee').value,{min:0,max:10_000});
+    return !name||fee==null;
+  });
+  const normalizedZones=deliveryZones.map(z=>normalizePriceKey(z.neighborhood));
+  const duplicateZones=new Set(normalizedZones).size!==normalizedZones.length;
+  const invalidKmRows=[...$('#deliveryKmBandsEditor').querySelectorAll('.repeat-row')].some(row=>{
+    const maxKm=finiteAdminNumber(row.querySelector('.km-max').value,{min:0.1,max:500});
+    const fee=finiteAdminNumber(row.querySelector('.km-fee').value,{min:0,max:10_000});
+    return maxKm==null||fee==null;
+  });
+  const duplicateKmBands=new Set(deliveryKmBands.map(b=>String(b.maxKm))).size!==deliveryKmBands.length;
+
+  if(fixedFee==null||fallbackFee==null||minimumOrder==null||invalidZoneRows||duplicateZones||invalidKmRows||duplicateKmBands){
+    showToast('Revise os valores de entrega e pedido mínimo. Não use números negativos, bairros duplicados ou faixas de km repetidas.','warning');
+    return;
+  }
+
   if(deliveryPricingMode==='neighborhood'&&$('#setRestrictDeliveryZones').checked&&!deliveryZones.length){
     showToast('Cadastre pelo menos um bairro antes de restringir a entrega por bairro.','warning');
     return;
@@ -3010,13 +3088,13 @@ $('#settingsForm').onsubmit=async e=>{
     notificationVolume:Math.max(0,Math.min(100,Number($('#setNotificationVolume').value||70))),
     openMode:$('#setOpenMode').value,
     deliveryPricingMode,
-    deliveryFee:Number($('#setDeliveryFee').value||0),
+    deliveryFee:fixedFee,
     deliveryZones,
-    deliveryNeighborhoodFallbackFee:Number($('#setNeighborhoodFallbackFee').value||0),
+    deliveryNeighborhoodFallbackFee:fallbackFee,
     restrictDeliveryZones:$('#setRestrictDeliveryZones').checked,
     deliveryKmBands,
     restrictDeliveryKm:$('#setRestrictDeliveryKm').checked,
-    minimumOrder:Number($('#setMinimumOrder').value||0),
+    minimumOrder,
     allowPickup:$('#setAllowPickup').checked,
     autoAcceptOrders:$('#setAutoAccept').checked,
     payments:collectPaymentMethods(),
