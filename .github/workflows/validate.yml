@@ -48,6 +48,12 @@ jobs:
           cd functions
           node -e "Promise.all([import('firebase-functions/v2'), import('firebase-functions/v2/https'), import('firebase-admin/app')]).then(([v2])=>{ if(typeof v2.setGlobalOptions!=='function') throw new Error('setGlobalOptions indisponível'); console.log('Functions dependencies OK') })"
 
+      - name: Smoke Firebase Hosting and Functions locally
+        run: |
+          printf 'DELIVERY_GITHUB_TOKEN=dummy-ci-token\n' > functions/.secret.local
+          npx --yes firebase-tools@15.28.2 emulators:exec --only functions,hosting --project demo-delivery-pizzaria "node scripts/smoke-production.mjs http://127.0.0.1:5000"
+          rm -f functions/.secret.local
+
       - name: Detect common selector mistakes
         run: |
           python - <<'PY'
