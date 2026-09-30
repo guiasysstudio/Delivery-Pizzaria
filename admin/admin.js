@@ -194,7 +194,7 @@ async function cashOperation(action,payload={}){
 
 function staffCanViewOrderPrivate(){
   return isMaster() || [
-    'ordersAccept','ordersDispatch','ordersComplete','ordersCancel','printingManage','cashOperate'
+    'ordersAccept','ordersDispatch','ordersComplete','ordersCancel','printingManage'
   ].some(key=>hasPermission(key));
 }
 
@@ -573,7 +573,7 @@ async function initializeAdmin(){
 
   await Promise.all(tasks);
 
-  if(hasPermission('ordersView')||hasPermission('cashView')) listenOrders();
+  if(hasPermission('ordersView')) listenOrders();
   if(hasPermission('cashView')) listenCashLedger();
 
   if(hasPermission('settingsManage')){
