@@ -10,6 +10,7 @@ const params=new URLSearchParams(location.search);
 const id=params.get('id');
 const auto=params.get('autoprint')==='1';
 const root=document.querySelector('#printRoot');
+const STAFF_ORDER_PRIVATE_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/staffOrderPrivate';
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const statusLabels={
@@ -56,7 +57,19 @@ onAuthStateChanged(auth,async user=>{
       return;
     }
 
-    const o=oSnap.data();
+    const token=await user.getIdToken();
+    const privateResponse=await fetch(STAFF_ORDER_PRIVATE_ENDPOINT,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({orderId:id})
+    });
+    const privateData=await privateResponse.json().catch(()=>({}));
+    if(!privateResponse.ok){
+      root.innerHTML='<p>Seu perfil não possui acesso aos dados pessoais necessários para imprimir esta comanda.</p>';
+      return;
+    }
+
+    const o={...oSnap.data(),customer:privateData.customer||null,address:privateData.address||null};
     const s=sSnap.exists()?sSnap.data():{};
     const change=o.payment?.needsChange
       ?'<p><strong>TROCO PARA:</strong> '+money(o.payment.changeFor)+'</p><p><strong>LEVAR DE TROCO:</strong> '+money(o.payment.changeAmount)+'</p>'
