@@ -853,21 +853,83 @@ function renderFlavorOptions(){
     const half=document.querySelector('input[name=flavorMode]:checked')?.value==='half';
     $('#secondFlavorField').classList.toggle('hidden',!half);
     if(!half){currentSecondFlavorId='';$('#secondFlavorSelect').value='';}
+    refreshSizePriceLabels();
     updateModalPrice();
   });
-  $('#secondFlavorSelect').onchange=()=>{currentSecondFlavorId=$('#secondFlavorSelect').value;updateModalPrice();};
+  $('#secondFlavorSelect').onchange=()=>{
+    currentSecondFlavorId=$('#secondFlavorSelect').value;
+    refreshSizePriceLabels();
+    updateModalPrice();
+  };
+}
+
+function selectionPriceForSize(size){
+  if(!currentProduct) return {available:false,raw:0,price:0,best:null};
+
+  let raw=size?Number(size.price||0):Number(currentProduct.price||0);
+  if(!Number.isFinite(raw)||raw<0) return {available:false,raw:0,price:0,best:null};
+
+  const half=document.querySelector('input[name=flavorMode]:checked')?.value==='half';
+  const second=half&&currentSecondFlavorId
+    ?products.find(p=>p.id===currentSecondFlavorId)
+    :null;
+
+  if(half){
+    if(!second||second.allowHalfHalf===false) return {available:false,raw,price:raw,best:null};
+    if(size){
+      const matching=second.sizes?.find(s=>normalizeZoneName(s.name)===normalizeZoneName(size.name));
+      if(!matching||!Number.isFinite(Number(matching.price))||Number(matching.price)<=0){
+        return {available:false,raw,price:raw,best:null};
+      }
+      raw=Math.max(raw,Number(matching.price));
+    }
+  }
+
+  const selection=second?[currentProduct,second]:[currentProduct];
+  const best=bestPromotionForSelection(selection,raw);
+  return {
+    available:true,
+    raw,
+    price:best?best.price:raw,
+    best
+  };
+}
+
+function sizePriceHtml(pricing){
+  if(!pricing.available) return '<span class="muted">Indisponível no 2º sabor</span>';
+  return (pricing.price<pricing.raw
+    ?`<del class="old-price">${money(pricing.raw)}</del> `
+    :'')+money(pricing.price);
+}
+
+function refreshSizePriceLabels(){
+  const sizes=currentProduct?.sizes||[];
+  let firstEnabled=null;
+  let selectedDisabled=false;
+
+  $$('input[name=size]').forEach(input=>{
+    const index=Number(input.value||0);
+    const pricing=selectionPriceForSize(sizes[index]);
+    input.disabled=!pricing.available;
+    if(pricing.available&&!firstEnabled) firstEnabled=input;
+    if(input.checked&&!pricing.available) selectedDisabled=true;
+    const priceHost=document.querySelector(`[data-size-price="${index}"]`);
+    if(priceHost) priceHost.innerHTML=sizePriceHtml(pricing);
+  });
+
+  if(selectedDisabled&&firstEnabled) firstEnabled.checked=true;
 }
 
 function renderOptionGroups(){
   const sizes=currentProduct.sizes||[];
   $('#sizeOptions').innerHTML=sizes.length?`<div class="option-group"><h3>Escolha o tamanho</h3><div class="option-list">${sizes.map((s,i)=>{
-    const raw=Number(s.price||0);
-    const promo=productDisplayPrice(currentProduct,raw);
-    return `<label class="option-choice"><span><input type="radio" name="size" value="${i}" ${i===0?'checked':''}> ${esc(s.name)}</span><strong>${promo<raw?`<del class="old-price">${money(raw)}</del> `:''}${money(promo)}</strong></label>`;
+    const pricing=selectionPriceForSize(s);
+    return `<label class="option-choice"><span><input type="radio" name="size" value="${i}" ${i===0?'checked':''} ${pricing.available?'':'disabled'}> ${esc(s.name)}</span><strong data-size-price="${i}">${sizePriceHtml(pricing)}</strong></label>`;
   }).join('')}</div></div>`:'';
   const extras=currentProduct.extras||[];
   $('#extraOptions').innerHTML=extras.length?`<div class="option-group"><h3>Adicionais</h3><div class="option-list">${extras.map((x,i)=>`<label class="option-choice"><span><input type="checkbox" name="extra" value="${i}"> ${esc(x.name)}</span><strong>+ ${money(x.price)}</strong></label>`).join('')}</div></div>`:'';
   $$('input[name=size],input[name=extra]').forEach(i=>i.onchange=updateModalPrice);
+  refreshSizePriceLabels();
 }
 
 function selectedSize(){
@@ -879,28 +941,19 @@ function selectedSize(){
 
 function currentSelectionPricing(){
   if(!currentProduct) return {valid:false,raw:0,price:0,best:null,second:null};
-
-  let raw=Number(currentProduct.price||0);
   const size=selectedSize();
-  if(size) raw=Number(size.price||0);
-
+  const pricing=selectionPriceForSize(size);
   const half=document.querySelector('input[name=flavorMode]:checked')?.value==='half';
   const second=half&&currentSecondFlavorId
     ?products.find(p=>p.id===currentSecondFlavorId)
     :null;
-
-  if(half){
-    if(!second||second.allowHalfHalf===false) return {valid:false,raw,price:raw,best:null,second};
-    if(size){
-      const matching=second.sizes?.find(s=>normalizeZoneName(s.name)===normalizeZoneName(size.name));
-      if(!matching) return {valid:false,raw,price:raw,best:null,second};
-      raw=Math.max(raw,Number(matching.price||0));
-    }
-  }
-
-  const selection=second?[currentProduct,second]:[currentProduct];
-  const best=bestPromotionForSelection(selection,raw);
-  return {valid:Number.isFinite(raw)&&raw>=0,raw,price:best?best.price:raw,best,second};
+  return {
+    valid:pricing.available,
+    raw:pricing.raw,
+    price:pricing.price,
+    best:pricing.best,
+    second
+  };
 }
 
 function flavorBasePrice(){
