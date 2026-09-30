@@ -563,6 +563,93 @@ function cashSummarySnapshot(sales,movements) {
   };
 }
 
+async function buildLegacyCashLedger(db,sessionId,session) {
+  const openedMs=session.openedAt?.toMillis?.() ||
+    new Date(session.openedAt||0).getTime();
+  const closedMs=session.closedAt?.toMillis?.() ||
+    new Date(session.closedAt||0).getTime() ||
+    Date.now();
+  if(!Number.isFinite(openedMs)||openedMs<=0){
+    throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+  }
+
+  const [ordersSnap,movementsSnap]=await Promise.all([
+    db.collection("orders").where("status","==","completed").get(),
+    db.collection("cashSessions").doc(sessionId).collection("movements").get()
+  ]);
+
+  const sales=emptyCashSalesSummary();
+  for(const orderDoc of ordersSnap.docs){
+    const order=orderDoc.data()||{};
+    const completedMs=order.completedAt?.toMillis?.() ||
+      new Date(order.completedAt||0).getTime();
+    if(!Number.isFinite(completedMs)||completedMs<openedMs||completedMs>closedMs) continue;
+
+    const total=cleanCashMoney(order.total,{min:0,max:5_000_000});
+    if(total==null){
+      throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+    }
+    const bucket=cashPaymentBucket(order.payment?.method);
+    sales.count+=1;
+    sales.gross=roundCashMoney(sales.gross+total);
+    sales[bucket]=roundCashMoney(sales[bucket]+total);
+  }
+
+  const movements=emptyCashMovementSummary();
+  for(const movementDoc of movementsSnap.docs){
+    const movement=movementDoc.data()||{};
+    const amount=cleanCashMoney(movement.amount,{min:0.01,max:1_000_000});
+    if(amount==null||!["supply","withdrawal"].includes(movement.type)){
+      throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+    }
+    if(movement.type==="supply"){
+      movements.supplies=roundCashMoney(movements.supplies+amount);
+    }else{
+      movements.withdrawals=roundCashMoney(movements.withdrawals+amount);
+    }
+  }
+
+  if(!safeCashSalesSummary(sales)||!safeCashMovementSummary(movements)){
+    throw Object.assign(new Error("invalid_cash_ledger"),{code:"invalid_cash_ledger"});
+  }
+  return {sales,movements};
+}
+
+async function ensureCashLedgerV2(db,sessionId) {
+  if(!sessionId) return;
+  const sessionRef=db.doc(`cashSessions/${sessionId}`);
+  const initialSnap=await sessionRef.get();
+  if(!initialSnap.exists) {
+    throw Object.assign(new Error("cash_session_not_found"),{code:"cash_session_not_found"});
+  }
+
+  const initial=initialSnap.data()||{};
+  if(Number(initial.summaryVersion||0)>=2&&initial.salesSummary&&initial.movementSummary) return;
+
+  const legacy=await buildLegacyCashLedger(db,sessionId,initial);
+  await db.runTransaction(async tx=>{
+    const currentSnap=await tx.get(sessionRef);
+    if(!currentSnap.exists){
+      throw Object.assign(new Error("cash_session_not_found"),{code:"cash_session_not_found"});
+    }
+    const current=currentSnap.data()||{};
+    if(Number(current.summaryVersion||0)>=2&&current.salesSummary&&current.movementSummary) return;
+    if(current.status!=="open"){
+      throw Object.assign(new Error("cash_not_open"),{code:"cash_not_open"});
+    }
+
+    tx.update(sessionRef,{
+      summaryVersion:2,
+      locked:false,
+      salesSummary:legacy.sales,
+      movementSummary:legacy.movements,
+      financialRevision:0,
+      migratedAt:new Date(),
+      updatedAt:new Date()
+    });
+  });
+}
+
 export const manageCash = onRequest(
   {
     region:"southamerica-east1",
@@ -689,6 +776,8 @@ export const manageCash = onRequest(
         const sessionRef=db.doc(`cashSessions/${sessionId}`);
         const movementRef=sessionRef.collection("movements").doc();
 
+        await ensureCashLedgerV2(db,sessionId);
+
         await db.runTransaction(async tx=>{
           const [stateSnap,sessionSnap]=await Promise.all([
             tx.get(stateRef),
@@ -765,6 +854,11 @@ export const manageCash = onRequest(
         const orderRef=db.doc(`orders/${orderId}`);
         const stateRef=db.doc("cashState/current");
         let responseData=null;
+
+        const preState=await stateRef.get();
+        if(preState.exists&&preState.data()?.sessionId){
+          await ensureCashLedgerV2(db,preState.data().sessionId);
+        }
 
         await db.runTransaction(async tx=>{
           const [orderSnap,stateSnap]=await Promise.all([
@@ -873,6 +967,8 @@ export const manageCash = onRequest(
       const stateRef=db.doc("cashState/current");
       const sessionRef=db.doc(`cashSessions/${sessionId}`);
       let closeResult=null;
+
+      await ensureCashLedgerV2(db,sessionId);
 
       await db.runTransaction(async tx=>{
         const [stateSnap,sessionSnap]=await Promise.all([
