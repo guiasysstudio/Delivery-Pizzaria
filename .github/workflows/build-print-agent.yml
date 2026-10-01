@@ -61,7 +61,7 @@ jobs:
           }
           if ($program -notmatch "Version = `"$([regex]::Escape($version))`"") { throw "AgentInfo fora de sincronia." }
           if ($installer -notmatch "#define MyAppVersion `"$([regex]::Escape($version))`"") { throw "Inno Setup fora de sincronia." }
-          if ($readme -notmatch "`$([regex]::Escape($version))`") { throw "README fora de sincronia." }
+          if ($readme -notmatch [regex]::Escape($version)) { throw "README fora de sincronia." }
           if ($admin -notmatch "FALLBACK_PRINT_AGENT_VERSION='$([regex]::Escape($version))'") { throw "Fallback do ADM fora de sincronia." }
           if ($admin -notmatch "/print-agent-v$([regex]::Escape($version))/DeliveryPizzaria-PrintAgent-Setup-x64\.exe") { throw "Download fallback do ADM fora de sincronia." }
           if ($adminHtml -notmatch "/print-agent-v$([regex]::Escape($version))/DeliveryPizzaria-PrintAgent-Setup-x64\.exe") { throw "Download inicial do ADM fora de sincronia." }
