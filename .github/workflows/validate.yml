@@ -20,6 +20,7 @@ jobs:
           node --check assets/app.js
           node --check assets/customer-auth.js
           node --check assets/cep.js
+          node --check assets/demo-mode.js
           node --check assets/ui.js
           node --check account/account.js
           node --check account/receipt.js
@@ -48,6 +49,9 @@ jobs:
 
       - name: Test public profile save fallback
         run: node tests/profile-save-fallback.mjs
+
+      - name: Test Spark/Blaze demonstration compatibility
+        run: node tests/spark-blaze-demo.mjs
 
       - name: Run Firebase production preflight
         run: node scripts/production-preflight.mjs

@@ -8,17 +8,27 @@ import {
   collection, doc, getDoc, getDocs, query, where, orderBy, limit, startAfter, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { showToast, confirmAction, emptyStateHtml, iconHtml, applyBrandTheme } from '../assets/ui.js';
+import {
+  demoEnvironmentAllowed, backendUnavailable, listenDemoOrders, updateDemoOrder, isDemoOrderId, blazeRequiredMessage
+} from '../assets/demo-mode.js';
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
+
+function renderDemoModeBanner(){
+  const banner=$('#accountDemoBanner');
+  if(banner) banner.classList.toggle('hidden',!demoEnvironmentAllowed());
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',renderDemoModeBanner,{once:true});
+else renderDemoModeBanner();
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const placeholder='../assets/products/placeholder.svg';
 
 let user=null,profile=null,identity=null,addresses=[],orders=[],favorites=new Set(),products=[],couponRewards=[],settings={},pendingCustomPhotoURL=undefined;
 const CUSTOMER_ORDER_PAGE_SIZE=25;
-let recentOrders=[],olderOrders=[],customerOrderCursor=null,customerOrderDone=false,customerOrderLoading=false;
-let unsubscribeOrders=null;
+let recentOrders=[],olderOrders=[],demoOrders=[],customerOrderCursor=null,customerOrderDone=false,customerOrderLoading=false;
+let unsubscribeOrders=null,unsubscribeDemoOrders=null;
 
 const statusLabels={
   pending:'Aguardando confirmação',
@@ -35,6 +45,7 @@ watchCustomer(async current=>{
   $('#accountLoading').classList.add('hidden');
   if(!current){
     if(unsubscribeOrders){unsubscribeOrders();unsubscribeOrders=null;}
+    if(unsubscribeDemoOrders){unsubscribeDemoOrders();unsubscribeDemoOrders=null;}
     $('#accountGuest').classList.remove('hidden');
     $$('.account-section').forEach(s=>s.classList.add('hidden'));
     return;
@@ -435,6 +446,8 @@ $('#deleteMyAccountBtn')?.addEventListener('click',async()=>{
       showToast('Existe pedido em andamento. Aguarde a conclusão ou o cancelamento antes de excluir a conta.','warning',{duration:8000});
     }else if(code.includes('recent_login_required')){
       showToast('Por segurança, saia da conta, entre novamente e repita a exclusão em até 15 minutos.','warning',{duration:9000});
+    }else if(demoEnvironmentAllowed()&&backendUnavailable(err)){
+      showToast(blazeRequiredMessage('customerDelete'),'info',{duration:9000});
     }else{
       showToast('Não foi possível excluir sua conta agora. Tente novamente ou entre em contato com a pizzaria.','error',{duration:7000});
     }
@@ -586,6 +599,7 @@ function refreshCustomerOrderWindow(){
   const merged=new Map();
   for(const order of olderOrders) merged.set(order.id,order);
   for(const order of recentOrders) merged.set(order.id,order);
+  for(const order of demoOrders.filter(order=>order.customerId===user?.uid)) merged.set(order.id,order);
   orders=[...merged.values()].sort((a,b)=>customerOrderMillis(b)-customerOrderMillis(a));
   renderOrders();
 }
@@ -642,8 +656,15 @@ function listenCustomerOrders(){
 
   recentOrders=[];
   olderOrders=[];
+  demoOrders=[];
   customerOrderCursor=null;
   customerOrderDone=false;
+
+  if(unsubscribeDemoOrders) unsubscribeDemoOrders();
+  unsubscribeDemoOrders=listenDemoOrders(list=>{
+    demoOrders=list;
+    refreshCustomerOrderWindow();
+  });
 
   const q=query(
     collection(db,'orders'),
@@ -755,16 +776,25 @@ function renderOrders(){
     b.disabled=true;
     b.textContent='Cancelando...';
     try{
-      await cancelCustomerOrder(order.id);
+      if(isDemoOrderId(order.id)){
+        updateDemoOrder(order.id,{status:'cancelled'});
+        showToast('Pedido de demonstração cancelado localmente. '+blazeRequiredMessage('customerCancel'),'info',{duration:8000});
+      }else{
+        await cancelCustomerOrder(order.id);
+      }
     }catch(err){
       console.error(err);
       const code=String(err?.code||'');
-      showToast(code.includes('cancel_window_expired')
-        ?'O prazo para cancelamento deste pedido terminou.'
-        :code.includes('cancel_not_allowed')
-          ?'Este pedido já avançou e não pode mais ser cancelado pelo site.'
-          :'Não foi possível cancelar o pedido.',
-        code.includes('cancel_window_expired')||code.includes('cancel_not_allowed')?'warning':'error');
+      if(demoEnvironmentAllowed()&&backendUnavailable(err)){
+        showToast(blazeRequiredMessage('customerCancel'),'info',{duration:9000});
+      }else{
+        showToast(code.includes('cancel_window_expired')
+          ?'O prazo para cancelamento deste pedido terminou.'
+          :code.includes('cancel_not_allowed')
+            ?'Este pedido já avançou e não pode mais ser cancelado pelo site.'
+            :'Não foi possível cancelar o pedido.',
+          code.includes('cancel_window_expired')||code.includes('cancel_not_allowed')?'warning':'error');
+      }
       b.disabled=false;
       b.textContent='Cancelar pedido';
     }

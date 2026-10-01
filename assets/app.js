@@ -8,11 +8,20 @@ import {
   collection, doc, getDoc, getDocs, query, where
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
 import { showToast, emptyStateHtml, iconHtml, skeletonListHtml, applyBrandTheme } from './ui.js';
+import { demoEnvironmentAllowed, createDemoOrder, blazeRequiredMessage } from './demo-mode.js';
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const money=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v||0));
 const placeholder='./assets/products/placeholder.svg';
+
+function renderDemoModeBanner(){
+  const banner=$('#publicDemoBanner');
+  if(banner) banner.classList.toggle('hidden',!demoEnvironmentAllowed());
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',renderDemoModeBanner,{once:true});
+else renderDemoModeBanner();
+
 const SECURE_ORDER_ENDPOINT='https://southamerica-east1-delivery-pizzaria-f5b08.cloudfunctions.net/createOrder';
 
 function readStoredJson(storage,key,fallback){
@@ -1889,6 +1898,76 @@ function secureOrderErrorMessage(code,data={}){
   return map[code]||data?.message||'Não foi possível validar o pedido no servidor.';
 }
 
+function createLocalDemoOrder({type,address,profilePhone,changeFor}){
+  const totals=cartTotals();
+  const needsChange=selectedPayment.toLowerCase().includes('dinheiro')&&$('#needsChange').checked;
+  const profileName=customerProfile?.name||customer?.displayName||'Cliente';
+  const order=createDemoOrder({
+    customerId:customer?.uid||'',
+    customer:{
+      name:profileName,
+      phone:profilePhone||customerProfile?.phone||''
+    },
+    fulfillment:type,
+    address:type==='delivery'&&address?{
+      id:address.id||'',
+      label:address.label||'',
+      recipient:address.recipient||profileName,
+      phone:address.phone||profilePhone||'',
+      zip:address.zip||'',
+      street:address.street||'',
+      number:address.number||'',
+      complement:address.complement||'',
+      neighborhood:address.neighborhood||'',
+      city:address.city||'',
+      state:address.state||'',
+      reference:address.reference||''
+    }:null,
+    items:cart.map(item=>({
+      productId:item.productId||'',
+      flavorProductIds:Array.isArray(item.flavorProductIds)?[...item.flavorProductIds]:[item.productId||''],
+      name:item.name||'Item',
+      qty:Number(item.qty||1),
+      unitPrice:Number(item.unitPrice||0),
+      size:item.size?{...item.size}:null,
+      extras:(item.extras||[]).map(extra=>({...extra})),
+      promotion:item.promotion?{...item.promotion}:null,
+      note:item.note||''
+    })),
+    subtotal:totals.subtotal,
+    discount:totals.discount,
+    deliveryFee:totals.fee,
+    deliveryPricing:{
+      mode:settings.deliveryPricingMode||'fixed',
+      fee:totals.fee,
+      demoSnapshot:true
+    },
+    total:totals.total,
+    coupon:activeCoupon?{
+      id:activeCoupon.id||'',
+      code:activeCoupon.code||activeCoupon.id||'',
+      type:activeCoupon.type||'',
+      value:Number(activeCoupon.value||0),
+      amount:totals.discount
+    }:null,
+    payment:{
+      method:selectedPayment,
+      needsChange,
+      changeFor:needsChange?Number(changeFor||0):0,
+      changeAmount:needsChange?Math.max(0,Number(changeFor||0)-totals.total):0
+    },
+    note:$('#orderNote').value.trim(),
+    status:settings.autoAcceptOrders===true?'accepted':'pending',
+    demoNotice:'Pedido local de demonstração. Em produção, o envio seguro usa Firebase Cloud Functions/Blaze.'
+  });
+  return {
+    orderId:order.id,
+    orderNumber:order.orderNumber,
+    status:order.status,
+    demoMode:true
+  };
+}
+
 async function createOrderSecurely({type,address,profilePhone,changeFor}){
   const token=await customer.getIdToken();
   const totals=cartTotals();
@@ -2022,7 +2101,18 @@ $('#checkoutForm').addEventListener('submit',async e=>{
           console.error('Falha ao atualizar preços após divergência:',refreshError);
         }
       }
-      return showCheckoutError(serverError.message||'Não foi possível validar o pedido.');
+
+      const backendMissing=['secure-order-unavailable','secure-order-not-deployed'].includes(String(serverError?.code||''));
+      if(backendMissing&&demoEnvironmentAllowed()){
+        serverResult=createLocalDemoOrder({type,address,profilePhone,changeFor});
+        showToast(
+          'Pedido criado em modo demonstração neste navegador. '+blazeRequiredMessage('checkout'),
+          'info',
+          {duration:9000}
+        );
+      }else{
+        return showCheckoutError(serverError.message||'Não foi possível validar o pedido.');
+      }
     }
 
     orderNumber=Number(serverResult?.orderNumber||0);
@@ -2035,7 +2125,9 @@ $('#checkoutForm').addEventListener('submit',async e=>{
     cart=[];saveCart();
     $('#checkoutDialog').close();
     $('#successOrderNumber').textContent='#'+String(orderNumber).padStart(4,'0');
-    $('#successStatusText').textContent=autoAccepted?'Pedido confirmado automaticamente e enviado para a pizzaria.':'Pedido recebido. Aguarde a confirmação da pizzaria.';
+    $('#successStatusText').textContent=serverResult?.demoMode
+      ?'Pedido criado para demonstração neste navegador. O envio real para produção exige Firebase Functions/Blaze.'
+      :(autoAccepted?'Pedido confirmado automaticamente e enviado para a pizzaria.':'Pedido recebido. Aguarde a confirmação da pizzaria.');
     $('#successDialog').showModal();
     selectedPayment='';
     activeCoupon=null;

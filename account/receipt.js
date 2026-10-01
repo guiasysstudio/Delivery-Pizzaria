@@ -1,5 +1,6 @@
 import { db, watchCustomer } from '../assets/customer-auth.js';
 import { doc, getDoc } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+import { getDemoOrder, isDemoOrderId } from '../assets/demo-mode.js';
 
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -77,10 +78,21 @@ watchCustomer(async user=>{
     return;
   }
   try{
-    const [orderSnap,privateSnap,settingsSnap]=await Promise.all([
+    const settingsSnap=await getDoc(doc(db,'settings','store'));
+
+    if(isDemoOrderId(id)){
+      const demoOrder=getDemoOrder(id);
+      if(!demoOrder||demoOrder.customerId!==user.uid){
+        $('#customerReceipt').innerHTML='<div class="alert alert-error">Pedido de demonstração não encontrado neste navegador.</div>';
+        return;
+      }
+      render(demoOrder,settingsSnap.exists()?settingsSnap.data():{});
+      return;
+    }
+
+    const [orderSnap,privateSnap]=await Promise.all([
       getDoc(doc(db,'orders',id)),
-      getDoc(doc(db,'orderPrivate',id)),
-      getDoc(doc(db,'settings','store'))
+      getDoc(doc(db,'orderPrivate',id))
     ]);
     if(!orderSnap.exists()){
       $('#customerReceipt').innerHTML='<div class="alert alert-error">Pedido não encontrado.</div>';

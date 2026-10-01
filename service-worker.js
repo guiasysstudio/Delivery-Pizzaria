@@ -1,4 +1,4 @@
-const CACHE_NAME='delivery-pizzaria-v18';
+const CACHE_NAME='delivery-pizzaria-v19';
 const OFFLINE_URL='./offline.html';
 const SHELL=[
   './',
@@ -11,6 +11,7 @@ const SHELL=[
   './assets/app.js',
   './assets/customer-auth.js',
   './assets/cep.js',
+  './assets/demo-mode.js',
   './assets/ui.js',
   './assets/print-agent-version.json',
   './assets/app-icon.svg',
