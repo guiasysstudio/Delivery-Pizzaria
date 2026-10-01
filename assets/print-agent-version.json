@@ -1,7 +1,7 @@
 {
-  "latestVersion": "1.7.0",
-  "minimumVersion": "1.7.0",
-  "downloadUrl": "https://github.com/guiasysstudio/Delivery-Pizzaria/releases/download/print-agent-v1.7.0/DeliveryPizzaria-PrintAgent-win-x64.zip",
+  "latestVersion": "1.8.0",
+  "minimumVersion": "1.8.0",
+  "downloadUrl": "https://github.com/guiasysstudio/Delivery-Pizzaria/releases/download/print-agent-v1.8.0/DeliveryPizzaria-PrintAgent-Setup-x64.exe",
   "publishedAt": "2026-09-30",
-  "message": "Atualização obrigatória do Print Agent: reforça a segurança das origens e do payload e detecta falha ao abrir a porta local 17329."
+  "message": "Atualização obrigatória do Print Agent: novo instalador EXE, atalhos no Desktop/Menu Iniciar e reabertura do Agent mesmo quando ele já está na bandeja."
 }
