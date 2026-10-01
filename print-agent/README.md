@@ -4,52 +4,99 @@ Aplicativo local para Windows que permite à Central Delivery imprimir comandas 
 
 ## Versão atual
 
-`1.7.0`
+`1.8.0`
 
 ## Como funciona
 
 - Executa na bandeja do Windows.
-- Mantém apenas uma instância por usuário do Windows.
-- Escuta somente no computador local em `http://127.0.0.1:17329`.
-- Lista as impressoras conhecidas pelo Windows.
-- A impressora física é escolhida e persistida no próprio Agent.
-- Se a impressora salva deixar de existir, tenta usar a impressora padrão do Windows e depois a primeira disponível.
-- Recebe da Central Delivery o conteúdo da comanda, o modelo de papel e a logo.
+- Mantém apenas uma instância por usuário.
+- Escuta somente em `http://127.0.0.1:17329`.
+- Lista as impressoras instaladas no Windows.
+- Salva a impressora selecionada no próprio Agent.
 - Imprime silenciosamente pela fila de impressão do Windows.
 - Não armazena credenciais do Firebase.
-- Não abre portas para outros computadores da rede.
+- Não abre a porta de impressão para outros computadores da rede.
 
-## Inicialização com o Windows
+## Instalação 1.8
 
-A instalação é feita em:
+A distribuição normal não usa mais `.bat` ou `.cmd`.
 
-`%LOCALAPPDATA%\DeliveryPizzaria\PrintAgent`
+O usuário baixa apenas:
 
-O Print Agent usa o registro do usuário atual (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`) e não precisa executar como administrador para iniciar com o Windows.
+`DeliveryPizzaria-PrintAgent-Setup-x64.exe`
 
-O instalador 1.7.0 remove o **Mark-of-the-Web / Zone.Identifier** primeiro do pacote extraído e depois do executável instalado. Antes de concluir, ele verifica se o stream realmente desapareceu. Se o Windows ainda mantiver o bloqueio, a instalação para e informa o erro em vez de cadastrar um Agent que pediria confirmação a cada login.
+O instalador:
 
-> O executável continua sem assinatura Authenticode. O Windows pode exibir SmartScreen ou aviso de fornecedor desconhecido na primeira execução. A remoção do Mark-of-the-Web reduz repetições nas inicializações seguintes, mas não substitui uma assinatura digital de código.
+- instala o Agent como um programa do Windows;
+- cria atalho na Área de Trabalho;
+- cria atalho no Menu Iniciar;
+- registra o desinstalador em **Aplicativos instalados**;
+- configura a inicialização automática com o Windows;
+- remove a instalação legada 1.7 em `%LOCALAPPDATA%\DeliveryPizzaria\PrintAgent`;
+- preserva a impressora já escolhida durante a atualização;
+- inicia o Agent ao terminar.
+
+O instalador não exige arquivos DLL ou PDB separados: o Agent é publicado como EXE self-contained/single-file.
+
+### Pasta de instalação
+
+Na primeira instalação, se existir `D:\Programas`, o instalador sugere:
+
+`D:\Programas\GuiaSys\Delivery Pizzaria Print Agent`
+
+Caso contrário, usa:
+
+`%LOCALAPPDATA%\Programs\GuiaSys\Delivery Pizzaria Print Agent`
+
+A tela do instalador permite alterar a pasta. Atualizações posteriores preservam o local escolhido.
+
+## Reabrir o Agent
+
+O atalho da Área de Trabalho e o atalho do Menu Iniciar executam o Agent em modo de abertura da janela.
+
+Comportamento esperado:
+
+- se o Agent estiver totalmente fechado, o atalho inicia o serviço e abre as configurações;
+- se o Agent já estiver ativo apenas na bandeja, o atalho reutiliza a mesma instância e traz a janela de configurações para frente;
+- a inicialização automática do Windows usa `--background`, portanto não abre a janela a cada login.
 
 ## Controles do Agent
 
 Pelo ícone ao lado do relógio ou pela janela de configurações é possível:
 
-- escolher a impressora física;
+- escolher a impressora;
 - atualizar a lista de impressoras;
 - abrir **Impressoras do Windows**;
 - imprimir uma página de teste;
 - ativar/desativar **Iniciar com o Windows**;
 - abrir a Central Delivery;
-- fechar apenas a janela mantendo o Agent ativo;
-- **Sair do Print Agent**, encerrando realmente o serviço local;
-- **Desinstalar Print Agent**, removendo startup, preferências, registro em Aplicativos instalados e arquivos instalados.
+- fechar apenas a janela e manter o Agent na bandeja;
+- **Sair do Print Agent**, encerrando o processo;
+- **Desinstalar Print Agent**, chamando o desinstalador EXE do próprio instalador.
 
-A ação **Sair do Print Agent** é diferente de fechar a janela: fechar a janela apenas a oculta na bandeja.
+## Desinstalação
+
+Pode ser feita de três maneiras:
+
+1. no próprio Agent: **Desinstalar Print Agent**;
+2. Menu Iniciar → **Desinstalar Delivery Pizzaria Print Agent**;
+3. Windows → **Configurações → Aplicativos instalados**.
+
+A desinstalação remove Agent, atalhos, inicialização automática e preferências locais.
+
+## Atualização a partir da 1.7
+
+A versão 1.8 encerra a versão antiga durante a instalação e remove a antiga pasta em AppData. Os antigos arquivos `Instalar.cmd` e `Desinstalar.cmd` não fazem parte do novo pacote.
+
+O código do Agent mantém somente uma compatibilidade de desinstalação para instalações legadas que ainda estejam executando a 1.7.
+
+## Segurança
+
+O Agent aceita requisições de impressão apenas das origens autorizadas e limita corpo HTTP, texto, cópias e modelos aceitos. Se a porta `17329` não puder ser aberta, informa a falha e encerra.
+
+O executável ainda pode exibir SmartScreen/fornecedor desconhecido enquanto não houver assinatura Authenticode. O instalador tenta remover Mark-of-the-Web do EXE instalado, mas isso não substitui uma assinatura digital de código.
 
 ## Modelos de impressão
-
-O Agent aplica configurações próprias de papel, margem e fonte para:
 
 - térmica 80 mm;
 - térmica 58 mm;
@@ -57,36 +104,4 @@ O Agent aplica configurações próprias de papel, margem e fonte para:
 - compacto;
 - etiqueta 80 × 100 mm.
 
-A logo da pizzaria é impressa nos modelos compatíveis. Alguns drivers térmicos podem impor o tamanho configurado nas Preferências da Impressora; nesse caso o Agent preserva o driver em vez de cancelar a impressão.
-
-## Instalação
-
-1. Baixe o pacote Windows da release estável.
-2. Extraia o ZIP.
-3. Execute `Instalar.cmd`.
-4. Se o Windows pedir confirmação para o arquivo recém-baixado, confirme a primeira execução.
-5. O instalador copia o EXE e o desinstalador para AppData, remove o Mark-of-the-Web, verifica o desbloqueio e só então registra a inicialização automática.
-6. Abra as configurações pelo ícone ao lado do relógio.
-7. Escolha a impressora física.
-8. Use **Imprimir teste**.
-9. Na Central Delivery, escolha o modelo de impressão e ative a impressão automática se desejar.
-
-## Desinstalação
-
-Há duas formas:
-
-- no próprio Print Agent, escolha **Desinstalar Print Agent**;
-- ou execute `Desinstalar.cmd` do pacote baixado.
-
-O Agent também aparece em **Configurações do Windows → Aplicativos instalados**, com desinstalação pelo usuário atual. Nenhuma opção exige remoção manual de chaves do Registro.
-
-## Compatibilidade
-
-A impressão usa a fila e o driver instalados no Windows. Impressoras térmicas, impressoras A4 e modelos de etiqueta que aparecem normalmente em **Configurações → Impressoras e scanners** podem ser utilizados.
-
-Para impressoras térmicas com driver que não aceite papel customizado pelo aplicativo, configure também a largura correspondente nas preferências do driver do Windows.
-
-
-## Segurança local
-
-A versão 1.7.0 aceita requisições de impressão apenas do domínio de produção, dos domínios oficiais do Firebase Hosting e de portas locais de desenvolvimento conhecidas. O endpoint de impressão exige `Origin`, limita o corpo HTTP, o tamanho do texto, o número de cópias e os modelos aceitos. Se a porta `17329` não puder ser aberta, o Agent informa a falha e encerra em vez de aparentar estar ativo.
+Alguns drivers térmicos podem impor o tamanho configurado nas Preferências da Impressora. Nesse caso, ajuste também a largura no driver do Windows.
