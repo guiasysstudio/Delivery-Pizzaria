@@ -14,25 +14,50 @@ namespace DeliveryPizzaria.PrintAgent;
 internal static class Program
 {
     private const string InstanceMutexName = @"Local\DeliveryPizzaria.PrintAgent";
+    private const string OpenEventName = @"Local\DeliveryPizzaria.PrintAgent.Open";
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
-        // Se o executável veio de um ZIP baixado da Internet, remove a marca
-        // Zone.Identifier depois da primeira autorização do usuário. Assim as
-        // próximas inicializações automáticas não voltam a exibir o aviso
-        // "O fornecedor não pôde ser verificado".
+        // Se o executável veio da Internet, remove a marca Zone.Identifier
+        // após a primeira autorização do usuário. O instalador também executa
+        // esta proteção antes de iniciar o Agent.
         AttachmentSecurity.TryUnblockCurrentExecutable();
+
+        var background = args.Any(arg =>
+            string.Equals(arg, "--background", StringComparison.OrdinalIgnoreCase));
 
         using var mutex = new Mutex(true, InstanceMutexName, out var createdNew);
         if (!createdNew)
+        {
+            // O atalho da Área de Trabalho/Start Menu deve abrir a janela mesmo
+            // quando o Agent já estiver ativo na bandeja.
+            if (!background)
+            {
+                try
+                {
+                    using var existingEvent = EventWaitHandle.OpenExisting(OpenEventName);
+                    existingEvent.Set();
+                }
+                catch
+                {
+                    // A instância existente pode estar encerrando. O atalho não
+                    // deve exibir uma segunda janela de erro neste caso.
+                }
+            }
             return;
+        }
+
+        using var openEvent = new EventWaitHandle(
+            false,
+            EventResetMode.AutoReset,
+            OpenEventName);
 
         ApplicationConfiguration.Initialize();
 
         try
         {
-            Application.Run(new TrayContext());
+            Application.Run(new TrayContext(openEvent, showSettingsOnStart: !background));
         }
         catch (Exception ex)
         {
@@ -45,13 +70,14 @@ internal static class Program
                 MessageBoxIcon.Error);
         }
 
+        GC.KeepAlive(openEvent);
         GC.KeepAlive(mutex);
     }
 }
 
 internal static class AgentInfo
 {
-    public const string Version = "1.7.0";
+    public const string Version = "1.8.0";
 }
 
 internal static class AttachmentSecurity
@@ -125,11 +151,13 @@ internal sealed class TrayContext : ApplicationContext
     private readonly NotifyIcon _tray;
     private readonly LocalPrintServer _server;
     private readonly ToolStripMenuItem _startupItem;
+    private readonly Control _dispatcher;
+    private readonly RegisteredWaitHandle _openRequestWait;
     private AgentSettingsForm? _settingsForm;
     private System.Threading.Timer? _forcedExitTimer;
     private bool _exiting;
 
-    public TrayContext()
+    public TrayContext(EventWaitHandle openEvent, bool showSettingsOnStart)
     {
         EnsureFirstRunStartup();
         EnsureInstallationRegistration();
@@ -185,11 +213,36 @@ internal sealed class TrayContext : ApplicationContext
         };
         _tray.DoubleClick += (_, _) => ShowSettings();
 
+        _dispatcher = new Control();
+        _dispatcher.CreateControl();
+        _openRequestWait = ThreadPool.RegisterWaitForSingleObject(
+            openEvent,
+            (_, _) =>
+            {
+                if (_exiting || _dispatcher.IsDisposed)
+                    return;
+
+                try
+                {
+                    _dispatcher.BeginInvoke(ShowSettings);
+                }
+                catch
+                {
+                    // O Agent pode estar fechando enquanto o atalho é acionado.
+                }
+            },
+            null,
+            Timeout.Infinite,
+            executeOnlyOnce: false);
+
         _tray.ShowBalloonTip(
             2500,
             "Print Agent ativo",
-            "Clique no ícone para configurar impressoras e inicialização com o Windows.",
+            "Clique no ícone ou use o atalho da Área de Trabalho para abrir as configurações.",
             ToolTipIcon.Info);
+
+        if (showSettingsOnStart)
+            ShowSettings();
     }
 
     private void ShowSettings()
@@ -280,8 +333,8 @@ internal sealed class TrayContext : ApplicationContext
 
         var result = MessageBox.Show(
             "Deseja desinstalar o Delivery Pizzaria Print Agent deste computador?\n\n" +
-            "Isso removerá a inicialização com o Windows, as preferências do Agent, " +
-            "o registro em Aplicativos instalados e os arquivos em AppData.",
+            "Isso removerá o Agent, o atalho da Área de Trabalho, o atalho do menu Iniciar " +
+            "e a inicialização automática com o Windows.",
             "Desinstalar Print Agent",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning,
@@ -294,13 +347,36 @@ internal sealed class TrayContext : ApplicationContext
         {
             SetStartup(false);
 
-            var installedUninstaller = Path.Combine(AppContext.BaseDirectory, "Desinstalar.cmd");
-            if (File.Exists(installedUninstaller))
+            // Instalações 1.8+ usam Inno Setup. O desinstalador fica ao lado do
+            // executável e não depende mais de .bat/.cmd.
+            var innoUninstaller = Directory
+                .EnumerateFiles(AppContext.BaseDirectory, "unins*.exe")
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+
+            if (!string.IsNullOrWhiteSpace(innoUninstaller) && File.Exists(innoUninstaller))
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = innoUninstaller,
+                    Arguments = "/SILENT /SUPPRESSMSGBOXES /NORESTART",
+                    WorkingDirectory = AppContext.BaseDirectory,
+                    UseShellExecute = true
+                });
+
+                BeginExit();
+                return;
+            }
+
+            // Compatibilidade apenas para quem atualizou a partir da 1.7:
+            // pacotes antigos possuíam Desinstalar.cmd.
+            var legacyUninstaller = Path.Combine(AppContext.BaseDirectory, "Desinstalar.cmd");
+            if (File.Exists(legacyUninstaller))
             {
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "cmd.exe",
-                    Arguments = $"/d /c \"\"{installedUninstaller}\" /SILENT\"",
+                    Arguments = $"/d /c \"\"{legacyUninstaller}\" /SILENT\"",
                     WorkingDirectory = AppContext.BaseDirectory,
                     UseShellExecute = false,
                     CreateNoWindow = true,
@@ -311,42 +387,12 @@ internal sealed class TrayContext : ApplicationContext
                 return;
             }
 
-            // Fallback para instalações antigas que ainda não possuam o
-            // Desinstalar.cmd dentro da pasta instalada.
-            var installDirectory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "DeliveryPizzaria",
-                "PrintAgent");
-
-            var scriptPath = Path.Combine(
-                Path.GetTempPath(),
-                $"DeliveryPizzaria-PrintAgent-Uninstall-{Guid.NewGuid():N}.cmd");
-
-            var pid = Environment.ProcessId;
-            var script = $"""
-                @echo off
-                setlocal
-                timeout /t 2 /nobreak >nul
-                taskkill /PID {pid} /F >nul 2>nul
-                reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "DeliveryPizzariaPrintAgent" /f >nul 2>nul
-                reg delete "HKCU\Software\DeliveryPizzaria\PrintAgent" /f >nul 2>nul
-                reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\DeliveryPizzariaPrintAgent" /f >nul 2>nul
-                rmdir /S /Q "{installDirectory}" >nul 2>nul
-                del "%~f0" >nul 2>nul
-                """;
-
-            File.WriteAllText(scriptPath, script);
-
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                Arguments = $"/d /c \"\"{scriptPath}\"\"",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden
-            });
-
-            BeginExit();
+            MessageBox.Show(
+                "O desinstalador não foi encontrado. Abra Configurações do Windows → Aplicativos instalados " +
+                "e remova “Delivery Pizzaria Print Agent”.",
+                "Print Agent",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
@@ -437,6 +483,8 @@ internal sealed class TrayContext : ApplicationContext
         }
         finally
         {
+            _openRequestWait.Unregister(null);
+            _dispatcher.Dispose();
             _forcedExitTimer?.Dispose();
             _forcedExitTimer = null;
             base.ExitThreadCore();
@@ -556,7 +604,7 @@ internal sealed class TrayContext : ApplicationContext
 
         if (enabled)
         {
-            key.SetValue(StartupValueName, $"\"{Application.ExecutablePath}\"");
+            key.SetValue(StartupValueName, $"\"{Application.ExecutablePath}\" --background");
         }
         else
         {

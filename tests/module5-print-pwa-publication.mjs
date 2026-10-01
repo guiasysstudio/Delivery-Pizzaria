@@ -8,7 +8,6 @@ const [
   project,
   program,
   installer,
-  uninstaller,
   agentReadme,
   versionText,
   adminJs,
@@ -28,8 +27,7 @@ const [
 ]=await Promise.all([
   read('print-agent/DeliveryPizzaria.PrintAgent.csproj'),
   read('print-agent/Program.cs'),
-  read('print-agent/Instalar.cmd'),
-  read('print-agent/Desinstalar.cmd'),
+  read('print-agent/installer/DeliveryPizzaria.PrintAgent.iss'),
   read('print-agent/README.md'),
   read('assets/print-agent-version.json'),
   read('admin/admin.js'),
@@ -54,9 +52,15 @@ const versionInfo=JSON.parse(versionText);
 must(versionInfo.latestVersion===version,'latestVersion diferente do csproj');
 must(versionInfo.minimumVersion===version,'minimumVersion deve exigir a versão endurecida atual');
 must(versionInfo.downloadUrl.includes('/print-agent-v'+version+'/'),'downloadUrl não usa tag versionada');
+must(versionInfo.downloadUrl.endsWith('/DeliveryPizzaria-PrintAgent-Setup-x64.exe'),'downloadUrl não aponta para instalador EXE');
 must(program.includes('Version = "'+version+'"'),'AgentInfo fora de sincronia');
-must(installer.includes('Print Agent '+version),'instalador fora de sincronia');
-must(uninstaller.includes('Print Agent '+version),'desinstalador fora de sincronia');
+must(installer.includes('#define MyAppVersion "'+version+'"'),'Inno Setup fora de sincronia');
+must(installer.includes('DeliveryPizzaria-PrintAgent-Setup-x64'),'instalador EXE não possui nome esperado');
+must(installer.includes('{userdesktop}\\Delivery Pizzaria Print Agent'),'instalador não cria atalho na Área de Trabalho');
+must(installer.includes('{group}\\Delivery Pizzaria Print Agent'),'instalador não cria atalho no Menu Iniciar');
+must(installer.includes('--background'),'instalador não configura startup silencioso');
+must(installer.includes('--open'),'atalhos não abrem a janela do Agent');
+must(installer.includes('UninstallDisplayName'),'instalador não registra desinstalação');
 must(agentReadme.includes('`'+version+'`'),'README do Agent fora de sincronia');
 must(adminJs.includes("FALLBACK_PRINT_AGENT_VERSION='"+version+"'"),'fallback do ADM fora de sincronia');
 must(adminJs.includes('/print-agent-v'+version+'/'),'download fallback do ADM não é versionado');
@@ -75,8 +79,12 @@ for(const token of [
 ]) must(program.includes(token),'hardening do Agent ausente: '+token);
 must(!program.includes('host.EndsWith(".guiasys.online"'),'Agent ainda aceita wildcard de subdomínio');
 must(!program.includes('guiasysstudio.github.io'),'Agent ainda aceita GitHub Pages como origem');
-must(installer.includes('Invoke-RestMethod')&&installer.includes('/health'),'instalador não valida a porta/health do Agent');
-must(installer.includes('Authenticode'),'instalador não documenta limitação de assinatura');
+must(program.includes('OpenEventName'),'Agent não possui sinal para reabrir a instância existente');
+must(program.includes('EventWaitHandle.OpenExisting'),'atalho não sinaliza a instância existente');
+must(program.includes('showSettingsOnStart: !background'),'execução manual não abre configurações');
+must(program.includes('EnumerateFiles(AppContext.BaseDirectory, "unins*.exe")'),'Agent não usa o desinstalador EXE do instalador');
+must(project.includes('<DebugType>None</DebugType>'),'build ainda pode distribuir PDB');
+must(project.includes('<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>'),'single-file não inclui bibliotecas nativas');
 
 const manifest=JSON.parse(manifestText);
 must(manifest.id==='/'&&manifest.start_url==='/'&&manifest.scope==='/','manifesto PWA não está ancorado no domínio raiz');

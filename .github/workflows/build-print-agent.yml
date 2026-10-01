@@ -7,12 +7,16 @@ on:
     paths:
       - "print-agent/**"
       - "assets/print-agent-version.json"
+      - "admin/admin.js"
+      - "admin/index.html"
       - ".github/workflows/build-print-agent.yml"
   pull_request:
     branches: [main]
     paths:
       - "print-agent/**"
       - "assets/print-agent-version.json"
+      - "admin/admin.js"
+      - "admin/index.html"
       - ".github/workflows/build-print-agent.yml"
 
 permissions:
@@ -45,84 +49,159 @@ jobs:
           $version = "${{ steps.agent_version.outputs.version }}"
           $manifest = Get-Content "assets/print-agent-version.json" -Raw | ConvertFrom-Json
           $program = Get-Content "print-agent/Program.cs" -Raw
-          $installer = Get-Content "print-agent/Instalar.cmd" -Raw
-          $uninstaller = Get-Content "print-agent/Desinstalar.cmd" -Raw
+          $installer = Get-Content "print-agent/installer/DeliveryPizzaria.PrintAgent.iss" -Raw
+          $readme = Get-Content "print-agent/README.md" -Raw
+          $admin = Get-Content "admin/admin.js" -Raw
+          $adminHtml = Get-Content "admin/index.html" -Raw
+
           if ($manifest.latestVersion -ne $version) { throw "Manifest latestVersion fora de sincronia." }
           if ($manifest.minimumVersion -ne $version) { throw "Manifest minimumVersion fora de sincronia." }
-          if ($manifest.downloadUrl -notmatch "/print-agent-v$([regex]::Escape($version))/") { throw "Manifest downloadUrl nao usa tag versionada." }
+          if ($manifest.downloadUrl -notmatch "/print-agent-v$([regex]::Escape($version))/DeliveryPizzaria-PrintAgent-Setup-x64\.exe$") {
+            throw "Manifest downloadUrl nao aponta para o instalador EXE versionado."
+          }
           if ($program -notmatch "Version = `"$([regex]::Escape($version))`"") { throw "AgentInfo fora de sincronia." }
-          if ($installer -notmatch "Print Agent $([regex]::Escape($version))") { throw "Instalador fora de sincronia." }
-          if ($uninstaller -notmatch "Print Agent $([regex]::Escape($version))") { throw "Desinstalador fora de sincronia." }
+          if ($installer -notmatch "#define MyAppVersion `"$([regex]::Escape($version))`"") { throw "Inno Setup fora de sincronia." }
+          if ($readme -notmatch [regex]::Escape($version)) { throw "README fora de sincronia." }
+          if ($admin -notmatch "FALLBACK_PRINT_AGENT_VERSION='$([regex]::Escape($version))'") { throw "Fallback do ADM fora de sincronia." }
+          if ($admin -notmatch "/print-agent-v$([regex]::Escape($version))/DeliveryPizzaria-PrintAgent-Setup-x64\.exe") { throw "Download fallback do ADM fora de sincronia." }
+          if ($adminHtml -notmatch "/print-agent-v$([regex]::Escape($version))/DeliveryPizzaria-PrintAgent-Setup-x64\.exe") { throw "Download inicial do ADM fora de sincronia." }
 
-      - name: Publish Windows x64
-        run: dotnet publish print-agent/DeliveryPizzaria.PrintAgent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o print-agent/publish
-
-      - name: Add installer scripts
+      - name: Publish self-contained Windows x64 EXE
         shell: pwsh
         run: |
-          Copy-Item print-agent/Instalar.cmd print-agent/publish/Instalar.cmd
-          Copy-Item print-agent/Desinstalar.cmd print-agent/publish/Desinstalar.cmd
+          dotnet publish print-agent/DeliveryPizzaria.PrintAgent.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugSymbols=false `
+            -p:DebugType=None `
+            -o print-agent/publish
 
-      - name: Validate install, unblock, startup and uninstall lifecycle
+          $exe = "print-agent/publish/DeliveryPizzaria.PrintAgent.exe"
+          if (-not (Test-Path -LiteralPath $exe)) { throw "EXE publicado nao encontrado." }
+
+          $loose = Get-ChildItem "print-agent/publish" -File |
+            Where-Object { $_.Extension -in @('.dll','.pdb') }
+          if ($loose) {
+            throw "O pacote deixou DLL/PDB soltos: $($loose.Name -join ', ')"
+          }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer EXE
         shell: pwsh
         run: |
-          $publish = Resolve-Path "print-agent/publish"
-          $exe = Join-Path $publish "DeliveryPizzaria.PrintAgent.exe"
-
-          # Simula exatamente um EXE herdando Mark-of-the-Web de um ZIP baixado.
-          Set-Content -LiteralPath $exe -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3" -NoNewline
-          if (-not (Get-Item -LiteralPath $exe -Stream Zone.Identifier -ErrorAction SilentlyContinue)) {
-            throw "Nao foi possivel preparar o teste de Mark-of-the-Web."
+          $version = "${{ steps.agent_version.outputs.version }}"
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc)) {
+            throw "ISCC.exe nao encontrado apos instalar Inno Setup."
           }
 
-          Push-Location $publish
-          try {
-            & cmd.exe /d /c "Instalar.cmd /SILENT"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Instalar.cmd falhou com codigo $LASTEXITCODE"
-            }
-          }
-          finally {
-            Pop-Location
-          }
-
-          $target = Join-Path $env:LOCALAPPDATA "DeliveryPizzaria\PrintAgent"
-          $installedExe = Join-Path $target "DeliveryPizzaria.PrintAgent.exe"
-          $installedUninstaller = Join-Path $target "Desinstalar.cmd"
-
-          if (-not (Test-Path -LiteralPath $installedExe)) { throw "EXE instalado nao encontrado." }
-          if (-not (Test-Path -LiteralPath $installedUninstaller)) { throw "Desinstalador instalado nao encontrado." }
-
-          $zone = Get-Item -LiteralPath $installedExe -Stream Zone.Identifier -ErrorAction SilentlyContinue
-          if ($zone) { throw "EXE instalado ainda possui Zone.Identifier." }
-
-          $run = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-          if (-not $run.DeliveryPizzariaPrintAgent) { throw "Startup do Agent nao foi registrado." }
-
-          $uninstall = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\DeliveryPizzariaPrintAgent"
-          if ($uninstall.DisplayVersion -ne "${{ steps.agent_version.outputs.version }}") { throw "Versao do desinstalador registrada incorretamente." }
-
-          & cmd.exe /d /c "`"$installedUninstaller`" /SILENT"
+          & $iscc "/DMyAppVersion=$version" "print-agent/installer/DeliveryPizzaria.PrintAgent.iss"
           if ($LASTEXITCODE -ne 0) {
-            throw "Desinstalador falhou com codigo $LASTEXITCODE"
+            throw "Compilacao do instalador falhou com codigo $LASTEXITCODE."
           }
 
-          Start-Sleep -Seconds 4
+          $setup = "print-agent/dist/DeliveryPizzaria-PrintAgent-Setup-x64.exe"
+          if (-not (Test-Path -LiteralPath $setup)) {
+            throw "Instalador EXE nao foi gerado."
+          }
+
+      - name: Validate install, shortcut, reopen, startup and uninstall lifecycle
+        shell: pwsh
+        run: |
+          $version = "${{ steps.agent_version.outputs.version }}"
+          $setup = (Resolve-Path "print-agent/dist/DeliveryPizzaria-PrintAgent-Setup-x64.exe").Path
+          $target = Join-Path $env:LOCALAPPDATA "Programs\GuiaSys\Delivery Pizzaria Print Agent CI"
+          $desktop = [Environment]::GetFolderPath('Desktop')
+          $desktopShortcut = Join-Path $desktop "Delivery Pizzaria Print Agent.lnk"
+
+          Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $desktopShortcut -Force -ErrorAction SilentlyContinue
+          Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "DeliveryPizzariaPrintAgent" -ErrorAction SilentlyContinue
+
+          $installArgs = @(
+            '/VERYSILENT',
+            '/SUPPRESSMSGBOXES',
+            '/NORESTART',
+            ('/DIR="' + $target + '"')
+          )
+          $installProcess = Start-Process -FilePath $setup -ArgumentList $installArgs -PassThru -Wait
+          if ($installProcess.ExitCode -ne 0) {
+            throw "Instalador EXE falhou com codigo $($installProcess.ExitCode)."
+          }
+
+          $installedExe = Join-Path $target "DeliveryPizzaria.PrintAgent.exe"
+          if (-not (Test-Path -LiteralPath $installedExe)) { throw "EXE instalado nao encontrado." }
+          if (-not (Test-Path -LiteralPath $desktopShortcut)) { throw "Atalho da Area de Trabalho nao foi criado." }
+
+          $loose = Get-ChildItem $target -File |
+            Where-Object { $_.Extension -in @('.dll','.pdb') }
+          if ($loose) { throw "Instalacao contem DLL/PDB soltos: $($loose.Name -join ', ')" }
+
+          $startup = Get-ItemPropertyValue "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "DeliveryPizzariaPrintAgent"
+          if ($startup -notmatch [regex]::Escape($installedExe) -or $startup -notmatch "--background") {
+            throw "Startup nao aponta para o EXE instalado em modo background."
+          }
+
+          $uninstallEntry = Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" |
+            ForEach-Object { Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue } |
+            Where-Object { $_.DisplayName -eq "Delivery Pizzaria Print Agent" } |
+            Select-Object -First 1
+          if (-not $uninstallEntry) { throw "Agent nao foi registrado em Aplicativos instalados." }
+          if ($uninstallEntry.DisplayVersion -ne $version) { throw "Versao do desinstalador incorreta." }
+
+          $agent = Start-Process -FilePath $installedExe -ArgumentList "--background" -PassThru
+          $healthy = $false
+          for ($i=0; $i -lt 30; $i++) {
+            try {
+              $health = Invoke-RestMethod -Uri "http://127.0.0.1:17329/health" -TimeoutSec 1
+              if ($health.ok -eq $true -and $health.version -eq $version) {
+                $healthy = $true
+                break
+              }
+            } catch {}
+            Start-Sleep -Milliseconds 250
+          }
+          if (-not $healthy) { throw "Agent instalado nao respondeu ao /health." }
+
+          # Executar o atalho/--open com a instancia ativa precisa reutilizar
+          # o processo existente, nao abrir um segundo servidor na porta 17329.
+          $second = Start-Process -FilePath $installedExe -ArgumentList "--open" -PassThru -Wait
+          Start-Sleep -Milliseconds 500
+          if ($agent.HasExited) { throw "Instancia principal encerrou ao reabrir pelo atalho." }
+          $health = Invoke-RestMethod -Uri "http://127.0.0.1:17329/health" -TimeoutSec 2
+          if ($health.version -ne $version) { throw "Agent deixou de responder apos reabrir pelo atalho." }
+
+          $uninstaller = Get-ChildItem $target -Filter "unins*.exe" -File | Select-Object -First 1
+          if (-not $uninstaller) { throw "Desinstalador EXE do Inno Setup nao encontrado." }
+
+          $uninstallProcess = Start-Process -FilePath $uninstaller.FullName -ArgumentList @(
+            '/VERYSILENT',
+            '/SUPPRESSMSGBOXES',
+            '/NORESTART'
+          ) -PassThru -Wait
+          if ($uninstallProcess.ExitCode -ne 0) {
+            throw "Desinstalador EXE falhou com codigo $($uninstallProcess.ExitCode)."
+          }
+
+          Start-Sleep -Seconds 3
 
           if (Test-Path -LiteralPath $target) { throw "Pasta instalada permaneceu apos desinstalacao." }
-          if (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\DeliveryPizzariaPrintAgent" -ErrorAction SilentlyContinue) {
-            throw "Registro de desinstalacao permaneceu."
-          }
+          if (Test-Path -LiteralPath $desktopShortcut) { throw "Atalho do Desktop permaneceu apos desinstalacao." }
+          $runAfter = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -ErrorAction SilentlyContinue
+          $startupAfter = $runAfter.DeliveryPizzariaPrintAgent
+          if ($startupAfter) { throw "Startup permaneceu apos desinstalacao." }
 
-      - name: Package Print Agent
-        shell: pwsh
-        run: Compress-Archive -Path print-agent/publish/* -DestinationPath print-agent/DeliveryPizzaria-PrintAgent-win-x64.zip -Force
-
-      - name: Upload workflow artifact
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DeliveryPizzaria-PrintAgent-win-x64
-          path: print-agent/publish/
+          name: DeliveryPizzaria-PrintAgent-Setup-x64
+          path: print-agent/dist/DeliveryPizzaria-PrintAgent-Setup-x64.exe
           if-no-files-found: error
 
       - name: Publish versioned release
@@ -133,8 +212,14 @@ jobs:
         run: |
           $version = "${{ steps.agent_version.outputs.version }}"
           $tag = "print-agent-v$version"
+          $setup = "print-agent/dist/DeliveryPizzaria-PrintAgent-Setup-x64.exe"
+
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title "Delivery Pizzaria Print Agent v$version" --notes "Build automático do agente local de impressão para Windows x64." --target "${{ github.sha }}"
+            gh release create $tag `
+              --title "Delivery Pizzaria Print Agent v$version" `
+              --notes "Instalador EXE do agente local de impressao para Windows x64. Cria atalhos, inicia com o Windows e possui desinstalador integrado." `
+              --target "${{ github.sha }}"
           }
-          gh release upload $tag print-agent/DeliveryPizzaria-PrintAgent-win-x64.zip --clobber
+
+          gh release upload $tag $setup --clobber
