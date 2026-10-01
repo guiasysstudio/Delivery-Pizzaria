@@ -48,6 +48,7 @@ Name: "{group}\Desinstalar Delivery Pizzaria Print Agent"; Filename: "{uninstall
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "DeliveryPizzariaPrintAgent"; ValueData: """{app}\{#MyAppExeName}"" --background"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\DeliveryPizzaria\PrintAgent"; ValueType: dword; ValueName: "StartupConfigured"; ValueData: "1"
 Root: HKCU; Subkey: "Software\DeliveryPizzaria\PrintAgent"; ValueType: string; ValueName: "InstalledVersion"; ValueData: "{#MyAppVersion}"
+Root: HKCU; Subkey: "Software\DeliveryPizzaria\PrintAgent"; ValueType: none; Flags: uninsdeletekey
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--open"; Description: "Abrir o Print Agent agora"; Flags: postinstall nowait skipifsilent
