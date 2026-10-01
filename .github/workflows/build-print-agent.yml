@@ -124,9 +124,15 @@ jobs:
           Remove-Item -LiteralPath $desktopShortcut -Force -ErrorAction SilentlyContinue
           Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "DeliveryPizzariaPrintAgent" -ErrorAction SilentlyContinue
 
-          & $setup /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$target"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Instalador EXE falhou com codigo $LASTEXITCODE."
+          $installArgs = @(
+            '/VERYSILENT',
+            '/SUPPRESSMSGBOXES',
+            '/NORESTART',
+            ('/DIR="' + $target + '"')
+          )
+          $installProcess = Start-Process -FilePath $setup -ArgumentList $installArgs -PassThru -Wait
+          if ($installProcess.ExitCode -ne 0) {
+            throw "Instalador EXE falhou com codigo $($installProcess.ExitCode)."
           }
 
           $installedExe = Join-Path $target "DeliveryPizzaria.PrintAgent.exe"
@@ -174,9 +180,13 @@ jobs:
           $uninstaller = Get-ChildItem $target -Filter "unins*.exe" -File | Select-Object -First 1
           if (-not $uninstaller) { throw "Desinstalador EXE do Inno Setup nao encontrado." }
 
-          & $uninstaller.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
-          if ($LASTEXITCODE -ne 0) {
-            throw "Desinstalador EXE falhou com codigo $LASTEXITCODE."
+          $uninstallProcess = Start-Process -FilePath $uninstaller.FullName -ArgumentList @(
+            '/VERYSILENT',
+            '/SUPPRESSMSGBOXES',
+            '/NORESTART'
+          ) -PassThru -Wait
+          if ($uninstallProcess.ExitCode -ne 0) {
+            throw "Desinstalador EXE falhou com codigo $($uninstallProcess.ExitCode)."
           }
 
           Start-Sleep -Seconds 3
