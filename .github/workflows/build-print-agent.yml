@@ -193,7 +193,8 @@ jobs:
 
           if (Test-Path -LiteralPath $target) { throw "Pasta instalada permaneceu apos desinstalacao." }
           if (Test-Path -LiteralPath $desktopShortcut) { throw "Atalho do Desktop permaneceu apos desinstalacao." }
-          $startupAfter = Get-ItemPropertyValue "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "DeliveryPizzariaPrintAgent" -ErrorAction SilentlyContinue
+          $runAfter = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -ErrorAction SilentlyContinue
+          $startupAfter = $runAfter.DeliveryPizzariaPrintAgent
           if ($startupAfter) { throw "Startup permaneceu apos desinstalacao." }
 
       - name: Upload installer artifact
